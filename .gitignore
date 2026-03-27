@@ -1,0 +1,7 @@
+config/cookies.json
+output/
+logs/
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
