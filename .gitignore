@@ -1,4 +1,6 @@
+.env
 config/cookies.json
+config/browser_profile/
 output/
 logs/
 __pycache__/

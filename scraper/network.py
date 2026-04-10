@@ -81,11 +81,16 @@ def parse_sku_from_api(raw: Any) -> list[SKUOption]:
             attrs = _parse_sku_attrs(info)
             price = _extract_price(info)
             stock = int(info.get("canBookCount") or info.get("amountOnSale") or 0)
+            image_url = (info.get("imageUrl") or info.get("image")
+                         or info.get("imgUrl") or info.get("skuImage") or "")
+            if image_url and image_url.startswith("//"):
+                image_url = "https:" + image_url
             skus.append(SKUOption(
                 sku_id=sku_id,
                 attributes=attrs,
                 price=price,
                 stock=stock,
+                image_url=image_url,
             ))
         except Exception as e:
             logger.debug(f"Failed to parse SKU entry: {e}")

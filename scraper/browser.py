@@ -1,44 +1,41 @@
 import asyncio
-import json
 import random
-from pathlib import Path
 from typing import Optional
 
 from loguru import logger
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+from playwright.async_api import BrowserContext, Page, async_playwright
 
 from config.settings import (
+    BROWSER_PROFILE_DIR,
     BROWSER_TIMEOUT,
-    COOKIE_PATH,
     DELAY_MAX,
     DELAY_MIN,
-    HEADLESS,
     MAX_RETRIES,
     USER_AGENT,
 )
 
 _playwright = None
-_browser: Optional[Browser] = None
+_context: Optional[BrowserContext] = None
 
 
-async def get_browser() -> Browser:
-    global _playwright, _browser
-    if _browser is None or not _browser.is_connected():
-        _playwright = await async_playwright().start()
-        _browser = await _playwright.chromium.launch(
-            headless=HEADLESS,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-            ],
-        )
-    return _browser
+async def get_context() -> BrowserContext:
+    """取得 persistent browser context（共用登入狀態）。"""
+    global _playwright, _context
+    if _context is not None:
+        return _context
 
+    BROWSER_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 
-async def create_context() -> BrowserContext:
-    browser = await get_browser()
-    context = await browser.new_context(
+    _playwright = await async_playwright().start()
+    _context = await _playwright.chromium.launch_persistent_context(
+        user_data_dir=str(BROWSER_PROFILE_DIR),
+        channel="chrome",  # 用系統安裝的 Chrome，不用 Playwright 的 Chromium
+        headless=False,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+        ],
         user_agent=USER_AGENT,
         viewport={"width": 1440, "height": 900},
         locale="zh-CN",
@@ -48,8 +45,8 @@ async def create_context() -> BrowserContext:
         },
     )
 
-    # Remove navigator.webdriver fingerprint
-    await context.add_init_script("""
+    # 移除 webdriver 指紋
+    await _context.add_init_script("""
         Object.defineProperty(navigator, 'webdriver', {
             get: () => undefined,
         });
@@ -59,9 +56,7 @@ async def create_context() -> BrowserContext:
         Object.defineProperty(navigator, 'languages', {
             get: () => ['zh-CN', 'zh', 'en'],
         });
-        window.chrome = {
-            runtime: {},
-        };
+        window.chrome = { runtime: {} };
         const originalQuery = window.navigator.permissions.query;
         window.navigator.permissions.query = (parameters) =>
             parameters.name === 'notifications'
@@ -69,28 +64,19 @@ async def create_context() -> BrowserContext:
                 : originalQuery(parameters);
     """)
 
-    await _inject_cookies(context)
-    return context
+    logger.info(f"Browser profile: {BROWSER_PROFILE_DIR}")
+    return _context
 
 
-async def _inject_cookies(context: BrowserContext) -> None:
-    cookie_path = Path(COOKIE_PATH)
-    if not cookie_path.exists():
-        logger.debug("Cookie file not found, skipping injection")
-        return
-
-    try:
-        with open(cookie_path, "r", encoding="utf-8") as f:
-            cookies = json.load(f)
-
-        if not cookies:
-            logger.debug("Cookie file is empty, skipping injection")
-            return
-
-        await context.add_cookies(cookies)
-        logger.info(f"Injected {len(cookies)} cookies")
-    except Exception as e:
-        logger.warning(f"Failed to inject cookies: {e}")
+async def close_context() -> None:
+    """關閉 browser context。"""
+    global _playwright, _context
+    if _context:
+        await _context.close()
+        _context = None
+    if _playwright:
+        await _playwright.stop()
+        _playwright = None
 
 
 async def safe_goto(page: Page, url: str) -> bool:
