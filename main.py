@@ -94,6 +94,50 @@ def generate(ctx: click.Context, product_json: str, template: str, price: int,
     click.echo("")
 
 
+@cli.command()
+@click.option("--sheet", "-s", type=click.Path(exists=True), help="採購表 .xlsx 路徑")
+@click.option("--download-sheet", is_flag=True, help="從 Google Sheets 下載採購表")
+@click.option("--json-dir", "-j", type=click.Path(exists=True), required=True, help="Pre-scraped JSON 目錄")
+@click.option("--template", "-t", type=click.Path(exists=True), required=True, help="蝦皮批次上架 Excel 模板")
+@click.option("--output", "-o", type=click.Path(), default=None, help="輸出目錄")
+@click.option("--force", is_flag=True, help="重新處理已完成的商品")
+@click.pass_context
+def batch(ctx: click.Context, sheet: str | None, download_sheet: bool,
+          json_dir: str, template: str, output: str | None, force: bool) -> None:
+    """從採購表批次處理所有商品（Gemini 文案 + 生圖 → 蝦皮 Excel）。"""
+    from scraper.batch_pipeline import run_batch_pipeline
+
+    # 取得採購表
+    if download_sheet:
+        from config.settings import GOOGLE_SHEET_ID, GOOGLE_SHEET_GID, OUTPUT_DIR
+        from scraper.sheet_reader import download_sheet as dl_sheet
+        sheet_path = Path(OUTPUT_DIR) / "procurement_sheet.xlsx"
+        dl_sheet(GOOGLE_SHEET_ID, GOOGLE_SHEET_GID, sheet_path)
+    elif sheet:
+        sheet_path = Path(sheet)
+    else:
+        click.echo("錯誤：請提供 --sheet 或使用 --download-sheet")
+        sys.exit(1)
+
+    result = asyncio.run(run_batch_pipeline(
+        sheet_path=sheet_path,
+        shopee_template_path=Path(template),
+        json_dir=Path(json_dir),
+        output_dir=Path(output) if output else None,
+        force=force,
+    ))
+
+    click.echo("")
+    click.echo(f"  批次處理完成")
+    click.echo(f"  總計: {result['total']} | 成功: {result['success']} | "
+               f"跳過: {result['skipped']} | 失敗: {result['failed']}")
+    if result.get("excel_path"):
+        click.echo(f"  蝦皮 Excel: {result['excel_path']}")
+    if result.get("output_dir"):
+        click.echo(f"  輸出目錄:   {result['output_dir']}")
+    click.echo("")
+
+
 async def _run(url: str, download_images: bool, save_json: bool) -> None:
     logger.info(f"Starting scrape: {url}")
     product = await scrape_item(url)

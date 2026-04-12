@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-04-12
+
+### 新增
+- `scraper/gemini_generator.py` — Google Gemini 多模態生成蝦皮文案（標題+描述）+ 電商產品圖片，取代 Claude API
+- `scraper/sheet_reader.py` — Google Sheet 採購表讀取器，自動提取超連結中的 1688 URL
+- `scraper/batch_pipeline.py` — 批次處理 Pipeline，逐一處理每個商品（下載圖→文案→生圖），支援 resume
+- `scraper/shopee_excel.py` 新增 `generate_batch_shopee_excel()` 多商品合併為單一蝦皮上傳 Excel
+- CLI 新增 `batch` 子命令（從採購表批次處理所有商品）
+- `config/settings.py` 新增 Gemini API、Google Sheet 設定
+
+### 變更
+- `shopee_excel.py` 改為直接修改模板 zip 結構（保留隱藏 sheet 和 metadata），解決蝦皮上傳驗證失敗問題
+- 每個 SKU 行都填入商品名稱（蝦皮要求每行都有）
+- `requirements.txt` 新增 `google-genai`
+
 ## 2026-04-10
 
 ### 新增
