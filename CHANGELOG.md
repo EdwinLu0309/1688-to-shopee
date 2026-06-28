@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-06-29
+
+### 新增
+- `scraper/extract_1688.js` — 現行 1688 抓取邏輯（Chrome MCP 注入）：抽主圖/SKU 色卡/細節圖 → Blob 下載 `{item_id}.json`。取代已失效的 `__INIT_DATA__` 提取
+- CLI 新增 `images` 子命令 — 批次下載 1688 圖片（讀抓出的 JSON，不經 AI），支援 `--ingest-downloads` 自動從 `~/Downloads` 搬入
+
+### 變更
+- `CLAUDE.md` 更新抓取流程說明：標注 `data_extractor.py`（`__INIT_DATA__`）已失效、記錄現行 DOM 選擇器、說明為何只能用 Blob 下載落地（CSP/剪貼簿/MCP 截斷皆不可行）
+- `.gitignore` 新增 `AI-Memory/`、`.pytest_cache/`
+
+### 修復
+- 環境驗證：1688 反爬下抓取改走 Chrome MCP + DOM 選擇器（`.od-gallery-list` / `.sku-filter-button` / `offer_details.content`），單商品 683456636600 實測抓到 15 主圖 / 22 細節 / 10 SKU 並完整下載
+
 ## 2026-04-12
 
 ### 新增

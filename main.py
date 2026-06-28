@@ -138,6 +138,57 @@ def batch(ctx: click.Context, sheet: str | None, download_sheet: bool,
     click.echo("")
 
 
+@cli.command()
+@click.option("--json-dir", "-j", type=click.Path(), default="output", help="JSON 目錄（{item_id}.json）")
+@click.option("--ingest-downloads", is_flag=True, help="先把 ~/Downloads/*.json 搬進 json-dir")
+@click.pass_context
+def images(ctx: click.Context, json_dir: str, ingest_downloads: bool) -> None:
+    """批次下載 1688 圖片（讀 extract_1688.js 抽出的 JSON，不經 AI）。
+
+    流程：Chrome MCP 注入 scraper/extract_1688.js → JSON 落在 ~/Downloads →
+    本指令 --ingest-downloads 搬進 output/ → 逐一下載主圖/細節圖/SKU 圖。
+    """
+    from scraper.downloader import download_product_images_from_json
+
+    json_path = Path(json_dir)
+    json_path.mkdir(parents=True, exist_ok=True)
+
+    # 1. 從 ~/Downloads 搬入抽取器產出的 JSON
+    if ingest_downloads:
+        downloads = Path.home() / "Downloads"
+        moved = 0
+        for jf in downloads.glob("*.json"):
+            if jf.stem.isdigit():  # 1688 item_id 是純數字
+                dest = json_path / jf.name
+                jf.replace(dest)
+                moved += 1
+                click.echo(f"  搬入: {jf.name}")
+        click.echo(f"  共搬入 {moved} 個 JSON\n")
+
+    # 2. 逐一商品下載圖片
+    json_files = sorted(p for p in json_path.glob("*.json") if p.stem.isdigit())
+    if not json_files:
+        click.echo(f"  {json_path} 中找不到 {{item_id}}.json，先用 Chrome MCP 抓取")
+        sys.exit(1)
+
+    total = {"main": 0, "detail": 0, "sku": 0}
+    for jf in json_files:
+        data = json.loads(jf.read_text(encoding="utf-8"))
+        item_id = data.get("item_id", jf.stem)
+        dest = json_path / item_id / "images"
+        logger.info(f"[{item_id}] {data.get('title', '')[:30]} 下載圖片...")
+        res = asyncio.run(download_product_images_from_json(data, dest))
+        n = {"main": len(res["main"]), "detail": len(res["detail"]), "sku": len(res["sku"])}
+        for k in total:
+            total[k] += n[k]
+        click.echo(f"  ✓ {item_id}: 主圖 {n['main']} / 細節 {n['detail']} / SKU {n['sku']}")
+
+    click.echo("")
+    click.echo(f"  完成 {len(json_files)} 個商品 | 主圖 {total['main']} / "
+               f"細節 {total['detail']} / SKU {total['sku']}")
+    click.echo("")
+
+
 async def _run(url: str, download_images: bool, save_json: bool) -> None:
     logger.info(f"Starting scrape: {url}")
     product = await scrape_item(url)

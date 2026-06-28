@@ -24,8 +24,9 @@
 │   └── browser_profile/       # Playwright 登入 profile（gitignored）
 ├── scraper/
 │   ├── models.py              # Product1688, SKUOption, PriceRange
-│   ├── data_extractor.py      # __INIT_DATA__ 結構化資料提取
-│   ├── item_page.py           # Playwright 爬取 + DOM fallback
+│   ├── extract_1688.js        # ★現行抓取：Chrome MCP 注入此 JS 抽 DOM → 下載 JSON
+│   ├── data_extractor.py      # （已失效）__INIT_DATA__ 提取，現代 1688 已無此全域變數
+│   ├── item_page.py           # Playwright 爬取 + DOM fallback（反爬擋下，未使用）
 │   ├── network.py             # XHR 攔截 + SKU 解析
 │   ├── browser.py             # Playwright persistent context
 │   ├── login.py               # 手動登入模組
@@ -61,7 +62,29 @@ python main.py generate product.json -t config/shopee_template.xlsx -p 85 -s 5
 
 # 從採購表批次處理（Gemini 文案+生圖 → 蝦皮 Excel）
 python main.py batch --sheet procurement.xlsx --json-dir output/ --template config/shopee_template.xlsx
+
+# 批次下載 1688 圖片（讀 Chrome MCP 抓出的 JSON，不經 AI）
+python main.py images --ingest-downloads
 ```
+
+## 抓取流程（現行，2026-06 實測可用）
+舊的 `data_extractor.py`（Playwright + `window.__INIT_DATA__`）已失效：現代 1688
+detail 頁已無 `__INIT_DATA__`，且 Playwright 會被反爬擋下。現行作法：
+1.（一次性）Chrome 設定把 `detail.1688.com` 的「自動下載」設為允許
+   （`chrome://settings/content/automaticDownloads`），否則 Blob 下載會被擋。
+2. 在已登入的 Chrome 開商品頁，透過 Chrome MCP 注入 `scraper/extract_1688.js`
+   → 抽 DOM（主圖/SKU 色卡/細節圖）→ 下載 `{item_id}.json` 到 ~/Downloads。
+3. `python main.py images --ingest-downloads` → 搬進 `output/` 並下載所有圖片。
+
+抓取選擇器（寫在 `extract_1688.js`，1688 改版時改這裡）：
+- 主圖：`.od-gallery-list img`
+- SKU 色卡：`.sku-filter-button`（圖在 `img`、名稱在 `.label-name`）
+- 細節圖：`window.offer_details.content`（描述 HTML 內的 `<img>`）
+- 原圖還原：砍掉圖片 URL 第一個副檔名之後的 CDN 後綴（`_.webp`/`_sum.jpg`/`_800x800`）
+
+為什麼不用本機 server / 剪貼簿回傳：1688 的 CSP 擋掉對 localhost 的 fetch；
+注入的 JS 無 user activation 寫不了剪貼簿；MCP 回傳字串 ~1000 字會截斷。
+Blob 下載是唯一穩定把 JSON 落地的方式。
 
 ## 環境變數
 - `ANTHROPIC_API_KEY` — Claude API key（保留備用）
@@ -83,3 +106,33 @@ python main.py batch --sheet procurement.xlsx --json-dir output/ --template conf
 
 ## 圖片後製介面
 `downloader.py` 中的 `download_product_images_from_json()` 預留了 TODO 註解，之後接入圖片後製 pipeline。
+
+## 🧠 知識庫整合（ai-memory CLI）
+
+本機已安裝 Edwin 的顧問知識庫 CLI（`/Users/weilu/projects/ai-memory-tools`），可在任何專案目錄使用。
+
+### Session 開始時（建議）
+```bash
+ai-memory sync
+```
+產出 `./AI-Memory/recent-knowledge.md`，內含近 14 天的「核心 + 置頂」知識，Claude Code 可作為背景參考。
+
+### 開發中按需查詢
+```bash
+ai-memory query --tags "庫存,inventory"
+ai-memory query --category "經營原則"
+```
+
+### Session 結束時（可選，重要結論才存）
+```bash
+echo "今天決定 XXX，原因是 YYY..." > /tmp/session.md
+ai-memory save -f /tmp/session.md -i core -t "決策,X"
+```
+
+### 列出與統計
+```bash
+ai-memory list           # 最近 10 筆
+ai-memory stats          # 知識庫統計
+```
+
+完整文件：`/Users/weilu/projects/ai-memory-tools/README.md`
