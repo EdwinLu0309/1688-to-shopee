@@ -11,38 +11,36 @@ from scraper.browser import get_context, close_context
 
 
 async def interactive_login() -> bool:
-    """開啟瀏覽器讓使用者登入 1688。完成後按 Enter 關閉。"""
+    """開啟瀏覽器讓使用者登入 1688，自動偵測登入成功後存檔關閉（不需按 Enter）。"""
     context = await get_context()
     page = await context.new_page()
 
-    logger.info("請在瀏覽器中登入 1688 帳號")
+    logger.info("瀏覽器已開啟，請登入 1688 帳號（掃碼或帳號密碼皆可）")
+    logger.info("登入成功後會自動偵測並儲存，無需手動操作終端機")
 
-    await page.goto("https://www.1688.com", wait_until="domcontentloaded")
+    await page.goto("https://login.1688.com", wait_until="domcontentloaded")
 
-    # 在背景線程等待使用者按 Enter
-    done = asyncio.Event()
+    # 自動輪詢：只認登入後才會出現的 cookie（unb=會員ID、_nk_=暱稱）
+    # 注意：_csrf_token 未登入也有，不能當指標
+    login_cookies = {"unb", "_nk_"}
+    max_wait_seconds = 600  # 最多等 10 分鐘
+    interval = 4
+    for _ in range(max_wait_seconds // interval):
+        await asyncio.sleep(interval)
+        try:
+            cookies = await context.cookies()
+        except Exception:
+            break
+        names = {c["name"] for c in cookies}
+        if names & login_cookies:
+            logger.info("偵測到登入成功！正在儲存登入狀態...")
+            await asyncio.sleep(2)  # 等 cookie 寫入 profile
+            await page.close()
+            await close_context()
+            logger.info("登入狀態已保存到 browser profile，現在可以用 scrape 抓完整 SKU")
+            return True
 
-    def wait_input():
-        input("\n  >>> 登入完成後，按 Enter 鍵結束 <<<\n")
-        done.set()
-
-    t = threading.Thread(target=wait_input, daemon=True)
-    t.start()
-
-    # 等待使用者按 Enter 或超時 10 分鐘
-    try:
-        await asyncio.wait_for(done.wait(), timeout=600)
-    except asyncio.TimeoutError:
-        logger.error("超時 10 分鐘，請重試")
-        await page.close()
-        await close_context()
-        return False
-
-    # 檢查是否真的登入了（看 URL 不在登入頁）
-    current_url = page.url
-    logger.info(f"當前頁面：{current_url}")
-
+    logger.error("超時 10 分鐘未偵測到登入，請重試")
     await page.close()
     await close_context()
-    logger.info("登入狀態已保存到 browser profile")
-    return True
+    return False

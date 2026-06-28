@@ -13,6 +13,20 @@ from loguru import logger
 
 TEMPLATE_PATH = Path(__file__).parent.parent / "config" / "shopee_template.xlsx"
 
+
+def _to_jpg_url(img) -> str:
+    """把 1688/alicdn 圖片網址的影像處理後綴去掉，取回原始 JPG/PNG。
+
+    例：
+      ...cib.jpg_.webp      -> ...cib.jpg
+      ...cib.jpg_400x400.jpg -> ...cib.jpg
+    本地路徑或非 http 字串則原樣回傳。
+    """
+    s = str(img)
+    if s.startswith("http"):
+        s = re.sub(r"(\.(?:jpe?g|png|gif|bmp))_[^/]*$", r"\1", s, flags=re.IGNORECASE)
+    return s
+
 # 蝦皮上傳模板的欄位對應（0-indexed，Row 2 是 header）
 # Row 0: internal keys, Row 1: internal data, Row 2: 中文 header, Row 3: 必填/選填, Row 4: 說明
 # 資料從 Row 5 開始填
@@ -124,9 +138,10 @@ def generate_shopee_excel(
     weight = user_config.get("weight", 0.1)
     category = user_config.get("category", "")
 
-    # 取圖片路徑
-    main_imgs = image_paths.get("main", [])
-    sku_imgs = image_paths.get("sku", {})
+    # 取圖片：蝦皮大量上傳需要 https 網址，不能用本地路徑。
+    # 優先用 1688 原圖的 https URL，並去掉 webp 後綴轉回 JPG。
+    main_imgs = [_to_jpg_url(u) for u in (product_data.get("main_images", []) or image_paths.get("main", []))]
+    sku_imgs = product_data.get("sku_images", {}) or image_paths.get("sku", {})
 
     # 判斷有沒有規格
     has_variations = len(selected_skus) > 1
@@ -176,7 +191,7 @@ def generate_shopee_excel(
 
             # 規格圖片
             sku_img = sku_imgs.get(attr_values[0], "") if attr_values else ""
-            row[COL["var_image"]] = str(sku_img) if sku_img else ""
+            row[COL["var_image"]] = _to_jpg_url(sku_img) if sku_img else ""
 
         row[COL["price"]] = selling_price
         row[COL["stock"]] = stock
@@ -407,8 +422,9 @@ def _build_product_rows(
     weight = user_config.get("weight", 0.1)
     category = user_config.get("category", "")
 
-    main_imgs = image_paths.get("main", [])
-    sku_imgs = image_paths.get("sku", {})
+    # 蝦皮需要 https 圖片網址，優先用 1688 原圖 URL（去 webp 後綴轉 JPG）
+    main_imgs = [_to_jpg_url(u) for u in (product_data.get("main_images", []) or image_paths.get("main", []))]
+    sku_imgs = product_data.get("sku_images", {}) or image_paths.get("sku", {})
 
     # 合併圖片：Gemini 生成圖優先，然後 1688 原圖
     all_images = []
@@ -457,7 +473,7 @@ def _build_product_rows(
             row[COL["var_option_1"]] = option_name
 
             sku_img = sku_imgs.get(attr_values[0], "") if attr_values else ""
-            row[COL["var_image"]] = str(sku_img) if sku_img else ""
+            row[COL["var_image"]] = _to_jpg_url(sku_img) if sku_img else ""
 
         row[COL["price"]] = selling_price
         row[COL["stock"]] = stock
