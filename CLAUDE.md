@@ -35,6 +35,7 @@
 │   ├── gemini_generator.py    # Gemini API 多模態生成文案+電商圖片
 │   ├── sheet_reader.py        # Google Sheet 採購表讀取（hyperlink 提取）
 │   ├── shopee_excel.py        # 蝦皮 Excel 模板填入（zip 直改保留隱藏 sheet）
+│   ├── video_maker.py         # 蝦皮短影片合成（本機圖→1:1 mp4，ffmpeg）
 │   ├── pipeline.py            # 單商品全流程串接
 │   └── batch_pipeline.py      # 批次處理（採購表→逐一處理→合併 Excel）
 ├── output/                    # 產出目錄（gitignored）
@@ -78,9 +79,15 @@ detail 頁已無 `__INIT_DATA__`，且 Playwright 會被反爬擋下。現行作
 
 抓取選擇器（寫在 `extract_1688.js`，1688 改版時改這裡）：
 - 主圖：`.od-gallery-list img`
-- SKU 色卡：`.sku-filter-button`（圖在 `img`、名稱在 `.label-name`）
+- 第一軸（顏色/款式）：`.sku-filter-button`（圖在 `img`、名稱在 `.label-name`）
+- 第二軸（尺碼）：商品屬性表 `尺码` 列（Ant Design `.ant-table-tbody`）
+- 商品屬性：`.ant-table-tbody` 整張表 → `attributes` dict（餵文案規格欄：版型/材質/厚薄/彈力）
+- 單價/各尺碼庫存：買區「尺碼 ¥價 库存N件」列 → `price_cny` + `size_stock`
 - 細節圖：`window.offer_details.content`（描述 HTML 內的 `<img>`）
 - 原圖還原：砍掉圖片 URL 第一個副檔名之後的 CDN 後綴（`_.webp`/`_sum.jpg`/`_800x800`）
+
+⚠️ 1688 商品常是兩軸（顏色 × 尺碼）。第一軸是色卡按鈕、第二軸尺碼在屬性表/買區，
+兩者來源不同，抓取要分別處理（曾只抓到顏色、漏掉尺碼）。
 
 為什麼不用本機 server / 剪貼簿回傳：1688 的 CSP 擋掉對 localhost 的 fetch；
 注入的 JS 無 user activation 寫不了剪貼簿；MCP 回傳字串 ~1000 字會截斷。

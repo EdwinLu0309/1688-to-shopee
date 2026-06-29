@@ -79,6 +79,37 @@
     if (u && /alicdn/.test(u)) detail.push(u);
   }
 
+  // ── 商品屬性表（Ant Design 表格）→ attributes dict ──
+  // 同時供 SOP 規格欄（材質/版型/厚薄/彈力）+ 第二軸尺碼來源
+  const attributes = {};
+  document.querySelectorAll(".ant-table-tbody tr").forEach((tr) => {
+    const td = [...tr.querySelectorAll("td")].map((x) => x.textContent.trim());
+    if (td.length >= 2 && td[0]) attributes[td[0]] = td[1];
+  });
+
+  // ── 第二軸：尺碼（色卡 .sku-filter-button 是第一軸；尺碼在屬性表或互動列）──
+  const sizes = (attributes["尺码"] || attributes["尺碼"] || "")
+    .split(/[、,，]/).map((s) => s.trim()).filter(Boolean);
+
+  // ── 互動買區的「尺碼 ¥價 庫存」列（目前選定色的價格/庫存）──
+  const size_stock = {};
+  let price_cny = 0;
+  [...document.querySelectorAll("*")]
+    .filter((e) => e.children.length === 0 && /库存\d+件/.test(e.textContent))
+    .forEach((n) => {
+      let row = n;
+      for (let i = 0; i < 5 && row.parentElement; i++) {
+        row = row.parentElement;
+        if (/[¥￥]/.test(row.textContent) && /库存/.test(row.textContent)) break;
+      }
+      const txt = row.textContent.replace(/\s+/g, "");
+      const mm = txt.match(/^(.+?)[¥￥]([\d.]+)库存(\d+)件/);
+      if (mm) {
+        size_stock[mm[1]] = { price: parseFloat(mm[2]), stock: parseInt(mm[3], 10) };
+        if (!price_cny) price_cny = parseFloat(mm[2]);
+      }
+    });
+
   const data = {
     item_id: itemId,
     title: (document.title || "").replace(/ - 阿里巴巴$/, "").trim(),
@@ -89,14 +120,17 @@
     shop_location: "",
     shop_ratings: {},
     min_order: 0,
-    origin_price: 0,
+    origin_price: price_cny,
     price_ranges: [],
-    attributes: {},
+    attributes,
     main_images: main,
     detail_images: uniq(detail),
     video_url: "",
-    sku_images,
-    skus,
+    sku_images,        // 第一軸（顏色/款式）name -> 圖
+    skus,              // 第一軸清單
+    sizes,             // 第二軸（尺碼）
+    size_stock,        // 尺碼 -> {price, stock}（目前選定色）
+    price_cny,         // 1688 單價（人民幣）
   };
 
   // Blob 下載完整 JSON 到 ~/Downloads（唯一穩定的回傳硬碟方式）

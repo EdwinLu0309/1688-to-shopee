@@ -7,7 +7,7 @@ from loguru import logger
 from config.settings import IMAGE_DIR
 from scraper.models import Product1688
 
-SEMAPHORE = asyncio.Semaphore(5)
+MAX_CONCURRENT = 5
 HEADERS = {
     "Referer": "https://detail.1688.com/",
     "User-Agent": (
@@ -25,13 +25,14 @@ async def download_product_images(product: Product1688) -> dict[str, list[Path]]
     main_dir.mkdir(parents=True, exist_ok=True)
     detail_dir.mkdir(parents=True, exist_ok=True)
 
+    sem = asyncio.Semaphore(MAX_CONCURRENT)
     async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client:
         main_tasks = [
-            _download_one(client, url, main_dir, f"main_{i:03d}")
+            _download_one(client, url, main_dir, f"main_{i:03d}", sem)
             for i, url in enumerate(product.main_images)
         ]
         detail_tasks = [
-            _download_one(client, url, detail_dir, f"detail_{i:03d}")
+            _download_one(client, url, detail_dir, f"detail_{i:03d}", sem)
             for i, url in enumerate(product.detail_images)
         ]
 
@@ -48,22 +49,32 @@ async def download_product_images(product: Product1688) -> dict[str, list[Path]]
 
 
 async def _download_one(
-    client: httpx.AsyncClient, url: str, dest_dir: Path, name: str
+    client: httpx.AsyncClient, url: str, dest_dir: Path, name: str,
+    sem: asyncio.Semaphore, retries: int = 3,
 ) -> Path:
-    async with SEMAPHORE:
-        try:
-            response = await client.get(url)
-            response.raise_for_status()
+    # 重試：偶發網路/CDN 抖動。指數退避 0.8s/1.6s/3.2s，避免少圖卻沒被發現。
+    # sem 由呼叫端每次建立（綁當前 event loop）— 不可用 module 層級 Semaphore，
+    # 否則 main.py images 每個商品各跑一次 asyncio.run() 時，第二個商品會用到
+    # 已關閉舊 loop 的 semaphore → 大量下載失敗（曾踩過：第二個商品只下到 5/5/5）。
+    async with sem:
+        last_err: Exception | None = None
+        for attempt in range(retries):
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
 
-            content_type = response.headers.get("content-type", "")
-            ext = _guess_ext(url, content_type)
-            path = dest_dir / f"{name}{ext}"
-            path.write_bytes(response.content)
-            logger.debug(f"Saved: {path}")
-            return path
-        except Exception as e:
-            logger.warning(f"Failed to download {url}: {e}")
-            raise
+                content_type = response.headers.get("content-type", "")
+                ext = _guess_ext(url, content_type)
+                path = dest_dir / f"{name}{ext}"
+                path.write_bytes(response.content)
+                logger.debug(f"Saved: {path}")
+                return path
+            except Exception as e:
+                last_err = e
+                if attempt < retries - 1:
+                    await asyncio.sleep(0.8 * (2 ** attempt))
+        logger.warning(f"Failed to download {url} after {retries} tries: {last_err}")
+        raise last_err
 
 
 async def download_product_images_from_json(product_data: dict, dest_dir: Path) -> dict:
@@ -79,15 +90,16 @@ async def download_product_images_from_json(product_data: dict, dest_dir: Path) 
     detail_urls = product_data.get("detail_images", [])
     sku_images = product_data.get("sku_images", {})
 
+    sem = asyncio.Semaphore(MAX_CONCURRENT)
     async with httpx.AsyncClient(headers=HEADERS, timeout=30, follow_redirects=True) as client:
         # 主圖
-        main_tasks = [_download_one(client, url, main_dir, f"main_{i:03d}")
+        main_tasks = [_download_one(client, url, main_dir, f"main_{i:03d}", sem)
                       for i, url in enumerate(main_urls)]
         # 細節圖
-        detail_tasks = [_download_one(client, url, detail_dir, f"detail_{i:03d}")
+        detail_tasks = [_download_one(client, url, detail_dir, f"detail_{i:03d}", sem)
                         for i, url in enumerate(detail_urls)]
         # SKU 圖
-        sku_tasks = [_download_one(client, url, sku_dir, f"sku_{i:03d}")
+        sku_tasks = [_download_one(client, url, sku_dir, f"sku_{i:03d}", sem)
                      for i, (name, url) in enumerate(sku_images.items())]
 
         main_results = await asyncio.gather(*main_tasks, return_exceptions=True)

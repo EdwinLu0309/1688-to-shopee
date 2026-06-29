@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-06-30
+
+### 新增
+- `scraper/video_maker.py` — 蝦皮商品短影片合成（本機圖片 → 1:1 mp4，移植自 listing-optimization-tool 的 ffmpeg 合成核心）。`make_product_video()` 隨機挑 N 張圖、淡入淡出、≥11 秒、自動配樂
+
+### 變更
+- `scraper/extract_1688.js` 升級為**兩軸抓取**：除第一軸（顏色/款式 `.sku-filter-button`）外，新增第二軸尺碼（`sizes`）、商品屬性表（`attributes`，Ant Design 表格，供文案規格欄）、1688 單價（`price_cny`）、各尺碼價格/庫存（`size_stock`）。先前只抓到顏色軸、完全漏掉尺碼
+
+### 修復
+- `scraper/downloader.py` 修掉**跨 event loop 的 Semaphore bug**：原 module 層級 `asyncio.Semaphore` 綁第一個 loop，`images` 指令對每個商品各跑一次 `asyncio.run()`，第二個商品起會用到已關閉舊 loop 的 semaphore → 大量少圖（症狀：第二個商品只下到 5/5/5）。改為每次呼叫建立 semaphore + 下載失敗指數退避重試 3 次
+
 ## 2026-06-29
 
 ### 新增
