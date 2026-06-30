@@ -35,6 +35,7 @@
 │   ├── gemini_generator.py    # Gemini API 多模態生成文案+電商圖片
 │   ├── sheet_reader.py        # Google Sheet 採購表讀取（hyperlink 提取）
 │   ├── shopee_excel.py        # 蝦皮 Excel 模板填入（zip 直改保留隱藏 sheet）
+│   ├── copywriter.py          # ★文案引擎：Claude + SOP 生標題/詳情/簡稱/變體命名（build_variants）
 │   ├── video_maker.py         # 蝦皮短影片合成（本機圖→1:1 mp4，ffmpeg）
 │   ├── pipeline.py            # 單商品全流程串接
 │   └── batch_pipeline.py      # 批次處理（採購表→逐一處理→合併 Excel）
@@ -94,8 +95,14 @@ detail 頁已無 `__INIT_DATA__`，且 Playwright 會被反爬擋下。現行作
 Blob 下載是唯一穩定把 JSON 落地的方式。
 
 ## 環境變數
-- `ANTHROPIC_API_KEY` — Claude API key（保留備用）
-- `GEMINI_API_KEY` — Google Gemini API key（主要 AI 生成）
+- `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py 用，標題+詳情）
+- `OPENAI_API_KEY` — GPT（之後電商生圖用）
+- `GEMINI_API_KEY` — Google Gemini API key（舊文案/生圖，保留備用）
+
+## 文案引擎（copywriter.py）
+讀 `config/sop/` 的女裝 SOP（03f + 母規範 v2.4）→ Claude 生：商品簡稱（繁體台灣用語、無中國用語）、
+蝦皮標題、8 區塊詳情、顏色簡繁對照、尺碼標籤、flags。`build_variants()` 用程式拼蝦皮二階規格選項名
+（`編號_簡稱_顏色` / 尺碼），確保精準不交給 LLM。大 SOP 走 Anthropic prompt cache。
 
 ## 爬取方式說明
 1688 反爬嚴格（Playwright 即使用 channel="chrome" 仍被偵測），目前實際爬取是透過 Claude in Chrome MCP 在用戶已登入的 Chrome 中執行 JS 提取 DOM。Playwright 相關程式碼保留作為備用。
@@ -103,13 +110,38 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
 ## AI 生成規則
 蝦皮商品描述禁止：產地、出貨速度字眼、導外聯繫、站外交易引導、其他平台名稱、絕對化用語、醫療宣稱。詳見 `gemini_generator.py` 的 SHOPEE_SYSTEM_PROMPT（與 `ai_generator.py` 同規則）。
 
-## 蝦皮 Excel 注意事項
-- 模板有 7 個 sheet（含隱藏的 HiddenShopBrand、HiddenTax），必須完整保留
-- 寫入方式：直接修改模板 zip 中的 sheet2.xml，不用 openpyxl 重建（會破壞 metadata）
-- 危險物品欄位值：`Yes`/`No`（不是「是」/「否」）
-- 物流欄位值：`開啟`/`關閉`（不是「啟用」/「停用」）
-- 圖片必須用 https URL（不能用本地路徑）
-- 每個 SKU 行都需要填商品名稱（不能只填第一行）
+## 蝦皮大量上架 Excel 黃金規則（2026-06-30 實測過審，血淚換來，務必照做）
+產檔邏輯在 `shopee_excel.py` 的 `generate_two_tier_excel` / `build_two_tier_rows` / `_insert_data_rows`。
+對照「已過審的範本」逐欄比對得出（花花 2026-05-22 檔），任一條錯都會被蝦皮擋。
+
+**檔案結構（最關鍵，錯了會「版本不同/請下載最新模板」）：**
+1. **用蝦皮當下給的最新模板**：模板第 2 列藏版本 hash（`basic | <hash>`），蝦皮比對它。
+   不同次下載 hash 不同；產檔時 `config/shopee_template.xlsx` 要是使用者該次下載的那份。
+2. **只「插入」資料列，模板其餘 100% 原封不動**：表頭、sharedStrings、所有 sheet 一個 byte 都不能改。
+   重建表頭或 rebuild sharedStrings 會動到 hash → 被擋。`_insert_data_rows` 只在 `</sheetData>` 前塞列、
+   sharedStrings 只「追加」新字串不動既有索引。
+3. **資料從第 7 列開始**（前 6 列是表頭，第 6 列是提示行也要保留）。放第 6 列會吃到提示行。
+4. **儲存格用 sharedStrings（`t="s"`），不可用 inlineStr**（蝦皮解析器只吃 sharedStrings）。
+5. **欄位用第 0 列內部 key 動態對應**（`ps_category`/`et_title_*`/`channel_id.*`），不可寫死欄號——
+   模板版本會在 43 欄/44 欄、物流頻道組合間變動，寫死必跑版（`build_col_map`）。
+
+**欄位值（錯了會「型號與變體不匹配」或「格式錯誤」）：**
+6. **數字欄一律寫「文字字串」**：蝦皮用 Go `ParseUint` 讀，數字儲存格會被讀成 `"1.0"` → 失敗。
+   價格/庫存/識別碼/最低購買量/備貨天數存成 `"998"`、`"1"`、`"9"`。
+7. **商品規格識別碼**（`et_title_variation_integration_no`）：同商品所有列填**同一整數**（如 `1`）——
+   這是把多列歸成「一個商品」的鑰匙。只填第一列 → 每個 SKU 變成獨立商品。
+8. **規格名稱1/2（顏色/尺碼）每列都填**；規格選項1/2 每列填各自的值。
+9. **主商品貨號（`ps_sku_parent_short`）留空**（變體商品填了會「型號與變體不匹配」）。
+10. **危險物品（`ps_dangerous_goods`）留空**（= 預設否；不要填 Yes/No/是/否）。
+11. **商品選項貨號＝型號（`ps_sku_short`）純英數、不可含中文**，每個顏色一個（如 `P-a1-1`）。
+    含中文 → 「型號與變體不匹配」。
+12. **物流**：啟用的頻道填 `開啟`，停用的**留空**（不必填「關閉」）；每列都填。
+13. **分類（`ps_category`）填分類 ID（數字，如 `100358` 女生衣著/長褲）**，不是文字。
+    ID 在模板「較長備貨天數範圍」sheet 查（`et_title_category_name`/`et_title_category_id`）。
+14. **圖片**用 https 網址（1688 原圖即可，選填）；**品牌**基本模板沒欄位，UI 選 JoysLu（編號 6379087 通用）。
+
+**二階規格命名（與庫存系統一致）：** 規格選項1 = `編號_商品簡稱_顏色`（底線可被庫存系統解析）；
+規格選項2 = 尺碼（廠商有給體重/身高才加，如 `M(建議47-55kg)`）。`copywriter.build_variants` 產生。
 
 ## 圖片後製介面
 `downloader.py` 中的 `download_product_images_from_json()` 預留了 TODO 註解，之後接入圖片後製 pipeline。

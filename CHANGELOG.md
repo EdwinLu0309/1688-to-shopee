@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-06-30（下午：文案引擎 + 蝦皮二階上架實測過審）
+
+### 新增
+- `scraper/copywriter.py` — 文案引擎：Claude + 女裝 SOP 生標題/詳情/商品簡稱（繁體台灣用語）/flags；`build_variants()` 拼蝦皮二階規格選項名（`編號_簡稱_顏色` / 尺碼）
+- `config/sop/` — 收進女裝 SOP（03f）+ 母規範 v2.4 + 視覺風格規範
+- `shopee_excel.py` 新增 `generate_two_tier_excel` / `build_two_tier_rows` / `build_col_map` / `_insert_data_rows` — 二階規格（顏色×尺碼）上架
+
+### 變更
+- 蝦皮 Excel 產檔改為「只插入資料列、模板 100% 原封不動」：保留版本 hash、sharedStrings 只追加、資料從第 7 列起、用 sharedStrings 而非 inlineStr
+- 欄位改用模板內部 key 動態對應（吃不同版本模板：43/44 欄、物流頻道變動不跑版）
+- `config/shopee_template.xlsx` 換成 2026-06-30 最新模板
+
+### 修復（實測過審逐條）
+- 數字欄寫文字字串（避免 Go ParseUint 讀成 "1.0" 失敗）
+- 商品規格識別碼每列同值（歸成一個商品，否則 SKU 被拆成獨立商品）
+- 主商品貨號 / 危險物品留空、商品選項貨號純英數（否則「型號與變體不匹配」）
+- 分類填分類 ID（100358 女生衣著/長褲）；物流啟用填「開啟」停用留空
+- ✅ 商品 P-a1（冰絲寬褲 3 色×7 尺碼 21 SKU）實際匯入蝦皮**過審成功**
+
 ## 2026-06-30
 
 ### 新增

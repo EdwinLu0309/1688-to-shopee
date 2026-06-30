@@ -207,6 +207,252 @@ def generate_shopee_excel(
     return output_path
 
 
+# 內部 key（模板第 0 列）→ 語意名稱。用 key 動態對應欄位，避免不同版本模板
+# 欄數/欄序不同造成跑版（曾踩過：43 欄 vs 44 欄、物流頻道數不同）。
+_KEY_TO_NAME = {
+    "ps_category": "category",
+    "ps_product_name": "product_name",
+    "ps_product_description": "description",
+    "ps_minimum_purchase_quantity": "min_purchase",
+    "ps_sku_parent_short": "parent_sku",
+    "ps_dangerous_goods": "dangerous",
+    "et_title_variation_integration_no": "var_id",
+    "et_title_variation_1": "var_name_1",
+    "et_title_option_for_variation_1": "var_option_1",
+    "et_title_image_per_variation": "var_image",
+    "et_title_variation_2": "var_name_2",
+    "et_title_option_for_variation_2": "var_option_2",
+    "ps_price": "price",
+    "ps_stock": "stock",
+    "ps_sku_short": "option_sku",
+    "ps_item_cover_image": "cover_image",
+    "ps_weight": "weight",
+    "ps_product_pre_order_dts": "pre_order_days",
+}
+
+
+def build_col_map(df_template) -> tuple[dict, dict]:
+    """從模板第 0 列的內部 key 動態建立 {語意名稱: 欄index} + {物流頻道id: 欄index}。"""
+    col: dict = {}
+    logistics: dict = {}
+    for c in range(df_template.shape[1]):
+        key = str(df_template.iloc[0, c]).split("|")[0].strip()
+        if key in _KEY_TO_NAME:
+            col[_KEY_TO_NAME[key]] = c
+        elif key.startswith("ps_item_image_"):
+            col[f"image_{key.rsplit('_', 1)[1]}"] = c
+        elif key.startswith("channel_id."):
+            logistics[key.split(".", 1)[1]] = c   # "30001" -> col index
+    return col, logistics
+
+
+# JoysLu Lady 預設啟用的物流頻道（依 Edwin 賣場設定；預購品不支援「蝦皮店到店-隔日到貨」）
+DEFAULT_ENABLED_CHANNELS = {
+    "30020",  # 新竹物流
+    "30006",  # 全家
+    "30005",  # 7-ELEVEN
+    "30017",  # 店到家宅配
+    "30015",  # 蝦皮店到店
+    "30018",  # 嘉里快遞
+}
+
+
+def build_two_tier_rows(
+    product_data: dict,
+    ai_content: dict,
+    variants: dict,
+    config: dict,
+    col: dict,
+    logistics: dict,
+    num_cols: int,
+    var_group_id: int = 1,
+) -> list[list]:
+    """建立蝦皮「二階規格」(顏色 × 尺碼) 的資料行。
+
+    col / logistics：build_col_map() 動態解出的欄位對應（不寫死 index）。
+    variants：scraper.copywriter.build_variants() 的輸出。
+    config：{"category","selling_price","stock_per_option","weight","code",
+            "enabled_channels"(set), "pre_order_days"(int or None)}
+
+    重要（依 CLAUDE.md 蝦皮注意事項）：
+    - 禁運品 = No / 物流啟用 = 開啟、停用 = 關閉
+    - 每個 SKU 行都要填商品名稱 + 規格識別碼 + 規格名稱1/2
+    - 圖片用 https 網址只填第一行
+    """
+    COL = col  # 區域別名，下面沿用
+    enabled = config.get("enabled_channels") or DEFAULT_ENABLED_CHANNELS
+    pre_order_days = config.get("pre_order_days")
+    title = ai_content.get("title", product_data.get("title", ""))
+    description = ai_content.get("description", "")
+    code = config.get("code") or product_data.get("item_id", "unknown")
+    price = config.get("selling_price", 99)
+    stock = config.get("stock_per_option", 10)
+    weight = config.get("weight", 0.1)
+    category = config.get("category", "")
+
+    main_imgs = [_to_jpg_url(u) for u in product_data.get("main_images", [])]
+    sku_imgs = product_data.get("sku_images", {})
+
+    colors = variants.get("規格1_顏色", [])
+    sizes = variants.get("規格2_尺碼", [])
+    if not sizes:  # 沒有第二軸 → 退化成單軸
+        sizes = [{"size": "", "option_name": ""}]
+
+    rows = []
+    first = True
+    for ci, c in enumerate(colors):
+        color_opt = c["option_name"]                       # 編號_簡稱_顏色
+        color_img = _to_jpg_url(sku_imgs.get(c["src_1688"], "")) if sku_imgs.get(c["src_1688"]) else ""
+        color_first = True
+        for s in sizes:
+            row = [None] * num_cols
+            # 以下全部對齊「已驗證能過的檔」(花花 2026-05-22)：
+            # - 數字欄寫文字整數字串（蝦皮 Go ParseUint，寫數字會讀成 "1.0" 失敗）
+            # - 主商品貨號 / 危險物品：留空（變體商品填了會「型號與變體不匹配」）
+            # - 商品選項貨號（型號）：純英數、每個顏色一個（不可含中文）
+            row[COL["category"]] = category
+            row[COL["product_name"]] = title
+            row[COL["description"]] = description
+            row[COL["min_purchase"]] = "1"
+            row[COL["weight"]] = str(weight)
+            row[COL["price"]] = str(int(round(float(price))))
+            row[COL["stock"]] = str(int(round(float(stock))))
+            # 規格欄位：每行都填；識別碼相同 → 歸成同一商品
+            row[COL["var_id"]] = str(int(var_group_id))
+            row[COL["var_name_1"]] = "顏色"
+            row[COL["var_option_1"]] = color_opt
+            if s["option_name"]:
+                row[COL["var_name_2"]] = "尺碼"
+                row[COL["var_option_2"]] = s["option_name"]
+            # 商品選項貨號（型號）：純英數、每個顏色一個（同花花檔 BH...100 的填法）
+            row[COL["option_sku"]] = f"{code}-{ci + 1}"
+
+            # ── 以下「每一行都填」（Edwin 要求：規格圖同色同一張、商品圖/物流每行都一樣，不要跳填）──
+            # 規格圖片：同一顏色用同一張
+            if color_img:
+                row[COL["var_image"]] = color_img
+            # 商品圖片（主圖 + 1~8）：每行都放同一組
+            if main_imgs:
+                row[COL["cover_image"]] = main_imgs[0]
+                for j, img in enumerate(main_imgs[1:9]):
+                    ck = f"image_{j+1}"
+                    if ck in COL:
+                        row[COL[ck]] = img
+            # 物流：啟用填「開啟」，停用的「留空」（同能過的檔；填「關閉」非必要）
+            for cid, lc in logistics.items():
+                if cid in enabled:
+                    row[lc] = "開啟"
+            # 較長備貨天數（預購）
+            if pre_order_days and "pre_order_days" in COL:
+                row[COL["pre_order_days"]] = str(int(pre_order_days))
+
+            rows.append(row)
+            first = False
+            color_first = False
+    return rows
+
+
+def generate_two_tier_excel(
+    product_data: dict,
+    ai_content: dict,
+    variants: dict,
+    config: dict,
+    output_path: Path,
+    template_path: Path | None = None,
+) -> Path:
+    """單一商品 → 二階規格蝦皮上架 Excel。"""
+    import pandas as pd
+
+    template = template_path or TEMPLATE_PATH
+    if not template.exists():
+        raise FileNotFoundError(f"Template not found: {template}")
+    df_template = pd.read_excel(template, sheet_name="上傳模板", header=None, engine="calamine")
+    num_cols = df_template.shape[1]
+    col, logistics_cols = build_col_map(df_template)
+    rows = build_two_tier_rows(product_data, ai_content, variants, config,
+                               col, logistics_cols, num_cols)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    _insert_data_rows(template, output_path, rows, num_cols)
+    logger.info(f"蝦皮 Excel（二階）已產生：{output_path}（{len(rows)} SKU 行）")
+    return output_path
+
+
+# 蝦皮從第 7 列開始讀資料（前 6 列是表頭，第 6 列是提示行、保留不動）。
+# 依「已驗證能過的檔」(花花 2026-05-22)：資料在第 7 列、6 列表頭全保留。
+# 注意：第 2 列藏版本 hash → 全部表頭與其他 sheet 一律原封不動。
+_HEADER_ROWS = 6
+
+
+def _insert_data_rows(template_path: Path, output_path: Path, data_rows: list, num_cols: int) -> None:
+    """把資料列插進模板，其餘 100% 原封不動。
+
+    踩坑記錄：
+    - 資料從第 7 列開始（保留全部 6 列表頭，含第 6 列提示行）。對齊能過的檔。
+    - cell 用 sharedStrings（t="s"），不要用 inlineStr（蝦皮解析器只吃 sharedStrings）。
+    - sharedStrings 只「追加」新字串、不動既有內容/索引 → 版本 hash 與其他 sheet 不受影響。
+    """
+    sheet_xml_path = _find_upload_sheet(template_path)
+    with zipfile.ZipFile(template_path) as z:
+        sheet_xml = z.read(sheet_xml_path).decode("utf-8")
+        ss_xml = z.read("xl/sharedStrings.xml").decode("utf-8")
+
+    # 既有 sharedStrings 數量（新字串從這個 index 之後接續，不碰既有）
+    mu = re.search(r'<sst\b[^>]*\buniqueCount="(\d+)"', ss_xml)
+    base = int(mu.group(1)) if mu else ss_xml.count("<si>")
+    mc = re.search(r'<sst\b[^>]*\bcount="(\d+)"', ss_xml)
+    base_count = int(mc.group(1)) if mc else base
+
+    new_strings: list[str] = []
+    idx_map: dict[str, int] = {}
+    total_refs = 0
+
+    def sidx(text: str) -> int:
+        nonlocal total_refs
+        total_refs += 1
+        if text in idx_map:
+            return idx_map[text]
+        i = base + len(new_strings)
+        new_strings.append(text)
+        idx_map[text] = i
+        return i
+
+    rows_xml = []
+    for d_idx, row_data in enumerate(data_rows):
+        r_num = _HEADER_ROWS + 1 + d_idx  # 7, 8, ...
+        cells = []
+        for c_idx in range(num_cols):
+            val = row_data[c_idx] if c_idx < len(row_data) else None
+            if val is None or val == "":
+                continue
+            ref = f"{_col_to_letter(c_idx)}{r_num}"
+            cells.append(f'<c r="{ref}" t="s"><v>{sidx(str(val))}</v></c>')
+        rows_xml.append(f'<row r="{r_num}">{"".join(cells)}</row>')
+
+    sheet_xml = sheet_xml.replace("</sheetData>", "".join(rows_xml) + "</sheetData>", 1)
+    last_row = _HEADER_ROWS + len(data_rows)
+    last_col = _col_to_letter(num_cols - 1)
+    sheet_xml = re.sub(r'<dimension ref="[^"]*"',
+                       f'<dimension ref="A1:{last_col}{last_row}"', sheet_xml, count=1)
+
+    # 追加新字串到 sharedStrings（既有內容一字不動）+ 更新 count/uniqueCount
+    new_si = "".join(f'<si><t xml:space="preserve">{_xml_escape(s)}</t></si>' for s in new_strings)
+    ss_xml = ss_xml.replace("</sst>", new_si + "</sst>", 1)
+    ss_xml = re.sub(r'(<sst\b[^>]*\buniqueCount=")\d+(")',
+                    lambda m: m.group(1) + str(base + len(new_strings)) + m.group(2), ss_xml, count=1)
+    ss_xml = re.sub(r'(<sst\b[^>]*\bcount=")\d+(")',
+                    lambda m: m.group(1) + str(base_count + total_refs) + m.group(2), ss_xml, count=1)
+
+    with zipfile.ZipFile(template_path, "r") as z_in:
+        with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as z_out:
+            for item in z_in.infolist():
+                if item.filename == sheet_xml_path:
+                    z_out.writestr(item, sheet_xml.encode("utf-8"))
+                elif item.filename == "xl/sharedStrings.xml":
+                    z_out.writestr(item, ss_xml.encode("utf-8"))
+                else:
+                    z_out.writestr(item, z_in.read(item.filename))
+
+
 def _find_upload_sheet(template_path: Path) -> str:
     """找出蝦皮模板中「上傳模板」對應的 sheet XML 檔名。"""
     import pandas as pd
