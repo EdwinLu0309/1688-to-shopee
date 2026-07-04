@@ -194,7 +194,17 @@ def _make_video_for(product: dict, video_n: int = 9) -> str | None:
         if not collect_images(item_dir):
             logger.info(f"[{code}] 本機無圖，下載 1688 圖片供影片使用…")
             asyncio.run(download_product_images_from_json(product["product_data"], item_dir / "images"))
-        out = make_product_video(item_dir, n=video_n, name=code)
+        # 影片也排除有簡體字的主圖（config image_skip）：挑乾淨主圖(+SKU)前 n 張
+        skip = set(product.get("config", {}).get("image_skip", []))
+        curated = None
+        if skip:
+            main_dir = item_dir / "images" / "main"
+            mains = sorted(main_dir.glob("*.*")) if main_dir.exists() else []
+            clean_mains = [p for i, p in enumerate(mains) if i not in skip]
+            sku_dir = item_dir / "images" / "sku"
+            skus = sorted(sku_dir.glob("*.*")) if sku_dir.exists() else []
+            curated = (clean_mains + skus)[:video_n]
+        out = make_product_video(item_dir, n=video_n, name=code, images=curated)
         if out is None:
             logger.warning(f"[{code}] 無可用圖片，跳過影片")
             return None
