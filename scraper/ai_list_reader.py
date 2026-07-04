@@ -102,6 +102,8 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10) -> list[dict]:
             "style_filter": style,       # 「三色長褲」等 → batch 端配合色卡挑
             "sizes": "all" if ("全" in size_text or not size_text) else size_text,
             "demand": demand,
+            # 預購品填較長備貨天數（AP 欄）；現貨留空
+            "pre_order_days": 10 if "預購" in demand else None,
             "name": name,
             "reuse_content": False,
             "_category_text": cat_text,

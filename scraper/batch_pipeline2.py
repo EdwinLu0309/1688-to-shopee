@@ -176,6 +176,7 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
             "code": code,
             "size_chart_url": entry.get("size_chart_url", ""),  # Q 欄圖片尺寸表
             "image_skip": entry.get("image_skip", []),          # 排除的主圖 index（如有簡體字）
+            "pre_order_days": entry.get("pre_order_days"),       # AP 較長備貨天數
         },
         "_meta": {"code": code, "item_id": item_id,
                   "sku_count": variants.get("sku_count", 0),
