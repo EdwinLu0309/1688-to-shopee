@@ -207,6 +207,37 @@ def _make_video_for(product: dict, video_n: int = 9) -> str | None:
         return None
 
 
+def assemble_upload_assets(code: str, item_id: str) -> Path | None:
+    """把「要手動補到蝦皮」的素材（影片 + 尺寸表）按編號歸到一個好找的資料夾。
+
+    產出 output/上架素材/{編號}/：
+      {編號}_影片.mp4     ← 蝦皮商品影片（大量上架 Excel 沒影片欄，手動補）
+      {編號}_尺寸表.png   ← 繁體尺寸表（若有；上傳蝦皮後可取得網址填 Q 欄）
+
+    直觀用法：上架某商品時，打開 output/上架素材/{編號}/ 把裡面的東西補上蝦皮即可。
+    """
+    import shutil
+
+    item_dir = Path(OUTPUT_DIR) / item_id
+    dest = Path(OUTPUT_DIR) / "上架素材" / code
+    dest.mkdir(parents=True, exist_ok=True)
+
+    copied = []
+    video = item_dir / "video" / f"{code}.mp4"
+    if video.exists():
+        shutil.copy2(video, dest / f"{code}_影片.mp4")
+        copied.append("影片")
+    size_chart = item_dir / "images" / "generated" / f"size_chart_{code}.png"
+    if size_chart.exists():
+        shutil.copy2(size_chart, dest / f"{code}_尺寸表.png")
+        copied.append("尺寸表")
+
+    if copied:
+        logger.info(f"[{code}] 上架素材已歸位 {dest}（{'/'.join(copied)}）")
+        return dest
+    return None
+
+
 def run_batch_two_tier(
     manifest_path: Path | None = None,
     json_dir: Path = Path("output"),
@@ -244,6 +275,8 @@ def run_batch_two_tier(
             else:
                 if make_video:
                     p["_meta"]["video"] = _make_video_for(p, video_n)
+                # 影片 + 尺寸表歸到 output/上架素材/{編號}/ 方便手動補上蝦皮
+                assemble_upload_assets(p["_meta"]["code"], p["_meta"]["item_id"])
                 prepared.append(p)
         except Exception as e:
             logger.error(f"[{code}] 例外：{e}")
