@@ -327,8 +327,10 @@ def build_two_tier_rows(
             if s["option_name"]:
                 row[COL["var_name_2"]] = "尺碼"
                 row[COL["var_option_2"]] = s["option_name"]
-            # 商品選項貨號（型號）：純英數、每個 SKU 唯一（色序+尺碼，庫存好追蹤）
-            row[COL["option_sku"]] = f"{code}-{ci + 1}-{s['size']}".rstrip("-")
+            # 商品選項貨號（型號）：純英數、**每個顏色一個**（如 P-a1-1），對齊過審版
+            # (commit d36a6f6) 與花花檔。實測：改成每 SKU 唯一（P-a1-1-S）→ 蝦皮判
+            # 「型號與變體不匹配」、資料整片不進（型號對應第一軸顏色，不含尺碼）。
+            row[COL["option_sku"]] = f"{code}-{ci + 1}"
 
             # ── 以下「每一行都填」（Edwin 要求：規格圖同色同一張、商品圖/物流每行都一樣，不要跳填）──
             # 規格圖片：同一顏色用同一張
