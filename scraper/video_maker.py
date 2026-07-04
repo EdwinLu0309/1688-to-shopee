@@ -94,14 +94,27 @@ def _pick_music(item_id: str) -> Path | None:
     return tracks[idx]
 
 
-def collect_images(item_dir: Path) -> list[Path]:
-    """收集商品資料夾內可用的圖片（main 優先，再 detail、sku）。"""
+_IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def collect_images(item_dir: Path, prefer_clean: bool = True) -> list[Path]:
+    """收集商品資料夾內可用的圖片。
+
+    prefer_clean=True（預設）：**主圖 + SKU 圖優先，detail 排最後**。
+    因為 1688 的 detail（細節圖 = 描述 HTML 內的圖）幾乎都是簡體行銷文案圖/尺碼表，
+    不適合直接上架；主圖（主商品圖）通常是乾淨的模特兒穿搭/商品圖。做影片時前面
+    的圖會被優先挑到，自然避開簡體 detail 圖。
+    """
     images_dir = item_dir / "images"
-    pool: list[Path] = []
-    for sub in ("main", "detail", "sku"):
+
+    def glob_sub(sub: str) -> list[Path]:
         d = images_dir / sub
-        if d.exists():
-            pool += sorted(p for p in d.glob("*.*") if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"))
+        return sorted(p for p in d.glob("*.*") if p.suffix.lower() in _IMG_EXT) if d.exists() else []
+
+    order = ("main", "sku", "detail") if prefer_clean else ("main", "detail", "sku")
+    pool: list[Path] = []
+    for sub in order:
+        pool += glob_sub(sub)
     return pool
 
 
@@ -111,26 +124,30 @@ def make_product_video(
     name: str | None = None,
     music_path: Path | None = None,
     seed: int | None = None,
+    images: list[Path] | None = None,
 ) -> Path | None:
-    """從商品資料夾隨機挑 n 張圖合成短影片 → item_dir/video/{name}.mp4。
+    """合成 1:1 短影片 → item_dir/video/{name}.mp4。
 
+    images：明確指定要用的圖片清單（按此順序），適合人工挑好乾淨穿搭圖後傳入。
+            不傳則從 item_dir 收圖（主圖/SKU 優先、detail 最後），取前 n 張。
     Returns 影片路徑；ffmpeg 不存在或無圖回 None。
     """
     if not _FFMPEG.exists():
         raise FileNotFoundError(
             f"找不到 ffmpeg：{_FFMPEG}\n   先到 tools/video-maker 跑 `npm install`"
         )
-    pool = collect_images(item_dir)
-    if not pool:
-        return None
 
-    # 隨機挑 n 張（不足就全用），保持原順序讓畫面較連貫
-    if len(pool) > n:
-        rng = random.Random(seed)
-        chosen = sorted(rng.sample(range(len(pool)), n))
-        images = [pool[i] for i in chosen]
+    if images:
+        # 明確指定：只用存在的檔，按給定順序
+        images = [Path(p) for p in images if Path(p).exists()]
+        if not images:
+            return None
     else:
-        images = pool
+        pool = collect_images(item_dir)
+        if not pool:
+            return None
+        # 主圖/SKU 已排前面：取前 n 張（自然避開後面的簡體 detail 圖），不再隨機
+        images = pool[:n]
 
     item_id = name or item_dir.name
     video_dir = item_dir / "video"
