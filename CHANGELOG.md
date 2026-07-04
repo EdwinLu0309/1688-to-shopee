@@ -2,6 +2,11 @@
 
 ## 2026-07-05（晚上：可正常匯入後的調整）
 
+### 變更（回到 1688 原圖，排除簡體封面）
+- 決定商品圖用 1688 原圖、不走 GPT（GPT 生圖模組 gpt_image_generator.py 保留備用，Edwin 覺得還要再調）
+- `build_two_tier_rows` 加 `config["image_skip"]`：排除有簡體字的主圖 index；P-a1 排除 main_000（含「冰丝 阔腿裤」簡體），封面改用乾淨 main_001
+
+
 ### 變更（影片改用乾淨穿搭圖）
 - **影片選圖邏輯**：`collect_images` 改「主圖 + SKU 優先、detail 最後」（1688 的 detail 幾乎都是簡體行銷文案圖/尺碼表，不適合上架；主圖是乾淨模特兒穿搭）；預設取前 n 張不再隨機
 - `make_product_video` 加 `images=` 參數：可傳入人工挑好的乾淨穿搭圖清單（按序）

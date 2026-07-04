@@ -292,7 +292,10 @@ def build_two_tier_rows(
     category = config.get("category", "")
     size_chart_url = config.get("size_chart_url", "")  # Q 欄圖片尺寸表（圖片網址）
 
-    main_imgs = [_to_jpg_url(u) for u in product_data.get("main_images", [])]
+    # 商品圖：預設用 1688 主圖；config["image_skip"] 可排除有簡體字/不要的張（index）。
+    skip = set(config.get("image_skip", []))
+    all_mains = product_data.get("main_images", [])
+    main_imgs = [_to_jpg_url(u) for i, u in enumerate(all_mains) if i not in skip]
     sku_imgs = product_data.get("sku_images", {})
 
     colors = variants.get("規格1_顏色", [])
