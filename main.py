@@ -94,6 +94,100 @@ def generate(ctx: click.Context, product_json: str, template: str, price: int,
     click.echo("")
 
 
+@cli.command("generate2")
+@click.argument("product_json", type=click.Path(exists=True))
+@click.option("--code", required=True, help="商品編號（如 P-a1），用於變體命名 + 主商品貨號")
+@click.option("--price", "-p", type=int, required=True, help="蝦皮售價 (NT$)")
+@click.option("--stock", "-s", type=int, default=10, help="每個 SKU 庫存數")
+@click.option("--category", "-c", type=str, default="", help="蝦皮分類 ID（數字，如 100358）")
+@click.option("--template", "-t", type=click.Path(exists=True), default=None, help="蝦皮模板（預設 config/shopee_template.xlsx）")
+@click.option("--colors", default="", help="挑選的第一軸顏色：逗號分隔，可用 src=乾淨名（如 '米白色【长裤】=米白色,黑色【长裤】=黑色'）；空=全部用 color_map")
+@click.option("--sizes", default="", help="挑選的尺碼：逗號分隔；空=全部")
+@click.option("--reuse-content", is_flag=True, help="用 output/{item_id}/ai_content.json 快取，不重呼 Claude")
+@click.option("--demand", default="", help="訂貨需求脈絡（給文案引擎參考）")
+@click.option("--weight", "-w", type=float, default=0.1, help="商品重量 (kg)")
+@click.pass_context
+def generate2(ctx: click.Context, product_json: str, code: str, price: int, stock: int,
+              category: str, template: str | None, colors: str, sizes: str,
+              reuse_content: bool, demand: str, weight: float) -> None:
+    """二階規格（顏色×尺碼）蝦皮上架 Excel（過審路徑：Claude 文案 + 程式拼變體）。"""
+    from config.settings import OUTPUT_DIR
+    from scraper.copywriter import generate_listing, build_variants
+    from scraper.shopee_excel import generate_two_tier_excel, TEMPLATE_PATH
+
+    product_data = json.loads(Path(product_json).read_text(encoding="utf-8"))
+    item_id = product_data.get("item_id", "unknown")
+    item_dir = Path(OUTPUT_DIR) / item_id
+    item_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. 文案：優先用快取，否則呼 Claude
+    ai_cache = item_dir / "ai_content.json"
+    if reuse_content and ai_cache.exists():
+        ai_content = json.loads(ai_cache.read_text(encoding="utf-8"))
+        click.echo(f"  使用快取文案: {ai_cache}")
+    else:
+        ai_content = generate_listing(product_data, {
+            "code": code, "selling_price": price,
+            "demand": demand, "category": category,
+        })
+        if ai_content.get("error"):
+            click.echo(f"  ✗ 文案生成失敗: {ai_content.get('error')}")
+            sys.exit(1)
+        ai_cache.write_text(json.dumps(ai_content, ensure_ascii=False, indent=2), encoding="utf-8")
+        click.echo(f"  ✓ 文案已生成並存檔: {ai_cache}")
+
+    short_name = ai_content.get("product_short_name", "")
+    color_map = dict(ai_content.get("color_map", {}))
+    size_labels = ai_content.get("size_labels", {})
+
+    # 2. 挑色 + 清名（--colors 可 src=乾淨名 覆寫 color_map）
+    if colors:
+        selected_colors = []
+        for part in colors.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "=" in part:
+                src, clean = part.split("=", 1)
+                src, clean = src.strip(), clean.strip()
+                color_map[src] = clean
+            else:
+                src = part
+            selected_colors.append(src)
+    else:
+        selected_colors = list(color_map.keys())
+
+    # 3. 挑尺碼（空=全部）
+    all_sizes = product_data.get("sizes", []) or list(size_labels.keys())
+    selected_sizes = [s.strip() for s in sizes.split(",") if s.strip()] if sizes else all_sizes
+
+    variants = build_variants(code, short_name, color_map,
+                              selected_colors, size_labels, selected_sizes)
+
+    # 4. 二階 Excel
+    tpl = Path(template) if template else TEMPLATE_PATH
+    excel_path = item_dir / f"shopee_upload_{code}.xlsx"
+    generate_two_tier_excel(
+        product_data=product_data,
+        ai_content=ai_content,
+        variants=variants,
+        config={
+            "category": category, "selling_price": price,
+            "stock_per_option": stock, "weight": weight, "code": code,
+        },
+        output_path=excel_path,
+        template_path=tpl,
+    )
+
+    click.echo("")
+    click.echo(f"  ✓ 蝦皮 Excel（二階）: {excel_path}")
+    click.echo(f"  ✓ 標題: {ai_content.get('title', '')[:60]}")
+    click.echo(f"  ✓ 變體: {len(selected_colors)} 色 × {len(selected_sizes)} 尺碼 = {variants.get('sku_count')} SKU")
+    if ai_content.get("flags"):
+        click.echo(f"  ⚠ flags: {len(ai_content['flags'])} 則（詳見 {ai_cache}）")
+    click.echo("")
+
+
 @cli.command()
 @click.option("--sheet", "-s", type=click.Path(exists=True), help="採購表 .xlsx 路徑")
 @click.option("--download-sheet", is_flag=True, help="從 Google Sheets 下載採購表")
@@ -135,6 +229,34 @@ def batch(ctx: click.Context, sheet: str | None, download_sheet: bool,
         click.echo(f"  蝦皮 Excel: {result['excel_path']}")
     if result.get("output_dir"):
         click.echo(f"  輸出目錄:   {result['output_dir']}")
+    click.echo("")
+
+
+@cli.command("batch2")
+@click.option("--manifest", "-m", type=click.Path(exists=True), required=True, help="批次清單 JSON（見 config/batch_manifest.example.json）")
+@click.option("--json-dir", "-j", type=click.Path(exists=True), default="output", help="pre-scraped JSON 目錄")
+@click.option("--output", "-o", type=click.Path(), default=None, help="合併 Excel 輸出路徑（預設 output/shopee_batch_upload.xlsx）")
+@click.option("--template", "-t", type=click.Path(exists=True), default=None, help="蝦皮模板（預設用 manifest.template 或內建）")
+@click.pass_context
+def batch2(ctx: click.Context, manifest: str, json_dir: str, output: str | None, template: str | None) -> None:
+    """批次過審二階路徑：manifest → 逐商品 Claude 文案 + 變體 → 合併一個蝦皮 Excel。"""
+    from scraper.batch_pipeline2 import run_batch_two_tier
+
+    result = run_batch_two_tier(
+        manifest_path=Path(manifest),
+        json_dir=Path(json_dir),
+        output_path=Path(output) if output else None,
+        template_path=Path(template) if template else None,
+    )
+
+    click.echo("")
+    click.echo(f"  批次完成：{result['success']}/{result['total']} 成功，失敗 {result['failed']}")
+    for m in result.get("products", []):
+        click.echo(f"    ✓ {m['code']}: {m['sku_count']} SKU | {m['title'][:40]}")
+    for f in result.get("failures", []):
+        click.echo(f"    ✗ {f['code']}: {f['error']}")
+    if result.get("excel_path"):
+        click.echo(f"  蝦皮 Excel: {result['excel_path']}")
     click.echo("")
 
 

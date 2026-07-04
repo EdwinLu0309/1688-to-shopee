@@ -2,6 +2,16 @@
 
 ## 2026-07-05
 
+### 新增（過審二階路徑固化成 CLI + 批次串接器）
+- `main.py generate2` — 單商品過審二階路徑正式入口：串 `copywriter.generate_listing` + `build_variants` + `generate_two_tier_excel`（#S064 過審路徑以前只存在臨時 inline 呼叫，現固化）。支援 `--colors "src=乾淨名"` 挑色清名、`--reuse-content` 用 ai_content.json 快取不重呼 Claude
+- `main.py batch2` + `scraper/batch_pipeline2.py` — 批次過審二階路徑：讀 manifest → 逐商品文案+變體 → 合併成**一個**蝦皮 Excel
+- `shopee_excel.generate_batch_two_tier_excel` — 多商品合併寫入器：**每商品一個遞增規格識別碼**（1,2,3…），是蝦皮把多列歸成同商品又不互相混淆的鑰匙
+- `config/batch_manifest.example.json` — 批次清單範例（item_id / 編號 / 售價 / 分類 ID / 挑色）
+- ✅ 實測：P-a1(長褲) + P-a2(九分褲) 兩商品跑 batch2 → 合併 42 SKU，識別碼 1/2 分開、型號全唯一無中文、售價各異、模板 14/16 檔原封不動
+
+### 決策：批次用 manifest 不直接解析採購表
+- 採購表（Google Sheet）**沒有「編號」、沒有「蝦皮分類 ID」**，1688 網址是超連結（gviz CSV 讀不到 target、xlsx 匯出被 docs CSP 擋 fetch）。編號/分類 ID/挑色都是人為決策 → 落地成 manifest 才穩、可版本控管
+
 ### 測試中
 - 蝦皮 Excel 測試版：在過審版基礎上把「主商品貨號」加回編號、「商品選項貨號(型號)」改成每 SKU 唯一（`P-a1-1-S` 色序+尺碼），待實測是否仍過審；若觸發「型號與變體不匹配」則主商品貨號改回留空
 

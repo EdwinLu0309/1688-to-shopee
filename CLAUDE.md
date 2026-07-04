@@ -59,15 +59,26 @@ python main.py login
 # 爬取單一商品（Playwright）
 python main.py scrape "https://detail.1688.com/offer/XXX.html" -v -j
 
-# 從已爬取的 JSON 生成蝦皮上架 Excel（單商品，Claude API）
-python main.py generate product.json -t config/shopee_template.xlsx -p 85 -s 5
+# ★單商品「過審二階路徑」（Claude 文案 + 程式拼變體 → 二階規格 Excel）
+#   --colors 可 src=乾淨名 挑色清名；--reuse-content 用 ai_content.json 快取不重呼 Claude
+python main.py generate2 output/784712770291.json --code P-a1 -p 998 -s 10 -c 100358 \
+  --reuse-content --colors "米白色【长裤】=米白色,黑色【长裤】=黑色,灰色【长裤】=灰色"
 
-# 從採購表批次處理（Gemini 文案+生圖 → 蝦皮 Excel）
-python main.py batch --sheet procurement.xlsx --json-dir output/ --template config/shopee_template.xlsx
+# ★批次「過審二階路徑」（manifest → 逐商品文案+變體 → 合併一個蝦皮 Excel，每商品一個識別碼）
+python main.py batch2 -m config/batch_manifest.example.json -j output -o output/shopee_batch_upload.xlsx
 
 # 批次下載 1688 圖片（讀 Chrome MCP 抓出的 JSON，不經 AI）
 python main.py images --ingest-downloads
+
+# （舊路徑，保留備用）generate/batch 走 Gemini 單階，未接過審二階格式：
+# python main.py generate product.json -t config/shopee_template.xlsx -p 85 -s 5
+# python main.py batch --sheet procurement.xlsx --json-dir output/ --template config/shopee_template.xlsx
 ```
+
+**過審二階路徑（generate2 / batch2）＝ #S064 實測過審的正線**（單/批次）。舊 `generate`/`batch`
+走 Gemini 單階、未接二階過審格式，僅備用。批次用 **manifest**（`config/batch_manifest.example.json`）
+當輸入而非直接解析採購表——因為採購表沒有「編號」、沒有「蝦皮分類 ID」，且 1688 網址是超連結
+（gviz CSV 讀不到 target）；編號 / 分類 ID / 挑色都是人為決策，落地成 manifest 才穩。
 
 ## 抓取流程（現行，2026-06 實測可用）
 舊的 `data_extractor.py`（Playwright + `window.__INIT_DATA__`）已失效：現代 1688

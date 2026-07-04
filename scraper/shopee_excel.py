@@ -379,6 +379,47 @@ def generate_two_tier_excel(
     return output_path
 
 
+def generate_batch_two_tier_excel(
+    products: list[dict],
+    output_path: Path,
+    template_path: Path | None = None,
+) -> Path:
+    """多商品 → 合併成一個蝦皮二階上架 Excel（每商品一個規格識別碼）。
+
+    Args:
+        products: 每筆 {"product_data","ai_content","variants","config"}，
+                  格式同 generate_two_tier_excel 的參數。
+        output_path: 輸出 Excel 路徑
+        template_path: 蝦皮模板
+
+    重點：每個商品用「遞增的規格識別碼」(var_group_id = 1,2,3…)，這是蝦皮把
+    多列歸成「同一個商品」的鑰匙；不同商品必須不同 id，否則會被併成一個商品。
+    """
+    import pandas as pd
+
+    template = template_path or TEMPLATE_PATH
+    if not template.exists():
+        raise FileNotFoundError(f"Template not found: {template}")
+    df_template = pd.read_excel(template, sheet_name="上傳模板", header=None, engine="calamine")
+    num_cols = df_template.shape[1]
+    col, logistics_cols = build_col_map(df_template)
+
+    all_rows: list[list] = []
+    for gid, p in enumerate(products, start=1):
+        rows = build_two_tier_rows(
+            p["product_data"], p["ai_content"], p["variants"], p["config"],
+            col, logistics_cols, num_cols, var_group_id=gid,
+        )
+        all_rows.extend(rows)
+        logger.info(f"  [商品 {gid}] {p['config'].get('code','')} → {len(rows)} SKU 行")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    _insert_data_rows(template, output_path, all_rows, num_cols)
+    logger.info(f"蝦皮批次 Excel（二階）已產生：{output_path}"
+                f"（{len(products)} 商品，{len(all_rows)} SKU 行）")
+    return output_path
+
+
 # 蝦皮從第 7 列開始讀資料（前 6 列是表頭，第 6 列是提示行、保留不動）。
 # 依「已驗證能過的檔」(花花 2026-05-22)：資料在第 7 列、6 列表頭全保留。
 # 注意：第 2 列藏版本 hash → 全部表頭與其他 sheet 一律原封不動。

@@ -1,0 +1,17 @@
+{
+  "template": "config/shopee_template.xlsx",
+  "products": [
+    {
+      "item_id": "784712770291",
+      "code": "P-a1",
+      "price": 998,
+      "stock": 10,
+      "category": "100358",
+      "colors": "米白色【长裤】=米白色,黑色【长裤】=黑色,灰色【长裤】=灰色",
+      "sizes": "all",
+      "reuse_content": true,
+      "demand": "",
+      "weight": 0.1
+    }
+  ]
+}
