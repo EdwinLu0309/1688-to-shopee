@@ -68,6 +68,46 @@ def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], 
     return selected, color_map
 
 
+# 款式關鍵詞（繁, 簡）成對——AI 名單「款式」欄常寫繁體，1688 色卡 key 是簡體。
+_STYLE_TOKENS = [
+    ("長褲", "长裤"), ("九分褲", "九分裤"), ("八分褲", "八分裤"),
+    ("七分褲", "七分裤"), ("短褲", "短裤"), ("中褲", "中裤"),
+]
+
+
+def _clean_color_name(key: str) -> str:
+    """把色卡原名清成乾淨顏色名：去掉【…】/（…）款式括號與空白。"""
+    import re
+    s = re.sub(r"[【\[（(][^】\]）)]*[】\]）)]", "", key)
+    return s.strip()
+
+
+def _apply_style_filter(color_map: dict, style_filter: str) -> tuple[list[str], dict]:
+    """依 AI 名單「款式」欄（如「三色長褲」）從色卡挑對應款式的色，並清乾淨顏色名。
+
+    - style_filter 含某款式詞（長褲/九分褲…）→ 只挑 key 含該款式的色，名字去括號。
+    - 不含任何款式詞（純顏色軸，無款式混色）→ 全選，名字照樣清乾淨。
+    回傳 (selected_src_keys, 更新後 color_map)。
+    """
+    color_map = dict(color_map)
+    keys = list(color_map.keys())
+    matched_token = None
+    for trad, simp in _STYLE_TOKENS:
+        if trad in (style_filter or "") or simp in (style_filter or ""):
+            matched_token = (trad, simp)
+            break
+
+    if matched_token:
+        trad, simp = matched_token
+        selected = [k for k in keys if trad in k or simp in k]
+    else:
+        selected = keys  # 無款式詞 → 純顏色軸全選
+
+    for k in selected:
+        color_map[k] = _clean_color_name(k)
+    return selected, color_map
+
+
 def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
     """把一個 manifest 商品項處理成 generate_batch_two_tier_excel 需要的 dict。"""
     item_id = str(entry["item_id"])
@@ -102,7 +142,15 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
 
     short_name = ai_content.get("product_short_name", "")
     size_labels = ai_content.get("size_labels", {})
-    selected_colors, color_map = _parse_colors(entry.get("colors"), ai_content.get("color_map", {}))
+    base_color_map = ai_content.get("color_map", {})
+    # 挑色優先序：明確 colors > AI 名單款式 style_filter > 全部
+    if entry.get("colors"):
+        selected_colors, color_map = _parse_colors(entry["colors"], base_color_map)
+    elif entry.get("style_filter"):
+        selected_colors, color_map = _apply_style_filter(base_color_map, entry["style_filter"])
+        logger.info(f"[{code}] 依款式「{entry['style_filter']}」挑色 → {selected_colors}")
+    else:
+        selected_colors, color_map = _parse_colors(None, base_color_map)
 
     all_sizes = product_data.get("sizes", []) or list(size_labels.keys())
     sizes_spec = entry.get("sizes")
@@ -159,23 +207,30 @@ def _make_video_for(product: dict, video_n: int = 9) -> str | None:
 
 
 def run_batch_two_tier(
-    manifest_path: Path,
-    json_dir: Path,
+    manifest_path: Path | None = None,
+    json_dir: Path = Path("output"),
     output_path: Path | None = None,
     template_path: Path | None = None,
     make_video: bool = True,
     video_n: int = 9,
+    products: list[dict] | None = None,
 ) -> dict:
-    """讀 manifest → 逐商品處理（文案+變體，選配影片）→ 合併蝦皮二階 Excel。"""
-    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-    entries = manifest.get("products", [])
-    if not entries:
-        logger.warning("manifest 中沒有 products")
-        return {"total": 0, "success": 0, "failed": 0, "excel_path": None, "failures": []}
+    """逐商品處理（文案+變體，選配影片）→ 合併蝦皮二階 Excel。
 
-    tpl = template_path or (
-        Path(manifest["template"]) if manifest.get("template") else TEMPLATE_PATH
-    )
+    輸入二擇一：manifest_path（JSON 檔）或 products（清單，如 ai_list_reader 的輸出）。
+    """
+    if products is not None:
+        entries = products
+        tpl = template_path or TEMPLATE_PATH
+    else:
+        manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        entries = manifest.get("products", [])
+        tpl = template_path or (
+            Path(manifest["template"]) if manifest.get("template") else TEMPLATE_PATH
+        )
+    if not entries:
+        logger.warning("沒有商品可處理")
+        return {"total": 0, "success": 0, "failed": 0, "excel_path": None, "failures": []}
 
     prepared, failures = [], []
     for entry in entries:

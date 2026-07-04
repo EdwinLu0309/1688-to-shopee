@@ -2,7 +2,8 @@
 
 ## 高優先
 - [ ] ⚠️ 驗證蝦皮 Excel 測試改動（`parent_sku` 填回編號、型號 `option_sku` 改每 SKU 唯一）上傳是否仍過審；若被退（「型號與變體不匹配」）則 `parent_sku` 改回留空（黃金規則 #9）
-- [ ] 分類自動對照（關鍵字/子品類 → 蝦皮分類 ID，目前 manifest 手填）
+- [ ] 分類自動對照擴充（`ai_list_reader.CATEGORY_MAP` 目前只有長褲類，遇新分類要補；可改讀模板分類 sheet）
+- [ ] AI 名單 CSV 落地半自動（目前 Chrome 同源 fetch → 手動存 input/；可固化成指令）
 - [ ] batch2 抓取自動化（目前每商品仍需手動 Chrome MCP 注入 extract_1688.js 抓 JSON）
 - [ ] 訂貨表分流（正式款 / 預購款 分頁；餵 1688-order 自動下單）
 - [ ] 選項勾選表（兩軸 → 人工勾選上架哪些 + 訂貨數量）
@@ -18,6 +19,8 @@
 - [ ] 批次處理進度報告
 
 ## 已完成
+- [x] 2026-07-05 ★AI 名單驅動端到端跑通：`ai_list_reader` 讀「【Lady】AI 上架名單」→ `batch2 --ai-list`；款式「三色長褲」自動挑色、分類→ID、影片整合。第一次測試 P-a1 21 SKU 逐欄對齊過審檔
+- [x] 2026-07-05 ★影片合成整合進 batch2（每商品順便出 1:1 短影片，缺圖自動先下載）
 - [x] 2026-07-05 ★過審二階路徑固化成 CLI（`generate2` 單商品 / `batch2` 批次）+ `generate_batch_two_tier_excel` 多商品合併（每商品遞增識別碼）+ manifest 輸入；P-a1+P-a2 實測 42 SKU 合併過審格式
 - [x] 2026-06-30 ★蝦皮二階上架 Excel 實測過審（P-a1 冰絲寬褲 21 SKU）— 黃金規則見 CLAUDE.md
 - [x] 2026-06-30 文案引擎 copywriter.py（Claude + 女裝 SOP，標題/詳情/簡稱/變體命名）

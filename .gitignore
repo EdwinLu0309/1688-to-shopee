@@ -9,3 +9,6 @@ __pycache__/
 *.egg-info/
 AI-Memory/
 .pytest_cache/
+
+# AI 上架名單 CSV（商業資料，Chrome 同源下載到本機）
+input/

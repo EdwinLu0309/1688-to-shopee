@@ -233,25 +233,36 @@ def batch(ctx: click.Context, sheet: str | None, download_sheet: bool,
 
 
 @cli.command("batch2")
-@click.option("--manifest", "-m", type=click.Path(exists=True), required=True, help="批次清單 JSON（見 config/batch_manifest.example.json）")
+@click.option("--manifest", "-m", type=click.Path(exists=True), default=None, help="批次清單 JSON（見 config/batch_manifest.example.json）")
+@click.option("--ai-list", type=click.Path(exists=True), default=None, help="【Lady】AI 上架名單 CSV（Chrome 同源下載）— 自動轉 manifest")
 @click.option("--json-dir", "-j", type=click.Path(exists=True), default="output", help="pre-scraped JSON 目錄")
 @click.option("--output", "-o", type=click.Path(), default=None, help="合併 Excel 輸出路徑（預設 output/shopee_batch_upload.xlsx）")
 @click.option("--template", "-t", type=click.Path(exists=True), default=None, help="蝦皮模板（預設用 manifest.template 或內建）")
 @click.option("--video/--no-video", default=True, help="每商品順便合成短影片（預設開；缺圖會先下載）")
 @click.option("--video-n", type=int, default=9, help="影片挑幾張圖")
 @click.pass_context
-def batch2(ctx: click.Context, manifest: str, json_dir: str, output: str | None,
-           template: str | None, video: bool, video_n: int) -> None:
-    """批次過審二階路徑：manifest → 逐商品 Claude 文案 + 變體（+影片）→ 合併一個蝦皮 Excel。"""
+def batch2(ctx: click.Context, manifest: str | None, ai_list: str | None, json_dir: str,
+           output: str | None, template: str | None, video: bool, video_n: int) -> None:
+    """批次過審二階路徑：manifest / AI 名單 → 逐商品 Claude 文案 + 變體（+影片）→ 合併一個蝦皮 Excel。"""
     from scraper.batch_pipeline2 import run_batch_two_tier
 
+    if not manifest and not ai_list:
+        click.echo("錯誤：請提供 --manifest 或 --ai-list")
+        sys.exit(1)
+
+    products = None
+    if ai_list:
+        from scraper.ai_list_reader import parse_ai_list_csv
+        products = parse_ai_list_csv(Path(ai_list))
+
     result = run_batch_two_tier(
-        manifest_path=Path(manifest),
+        manifest_path=Path(manifest) if manifest else None,
         json_dir=Path(json_dir),
         output_path=Path(output) if output else None,
         template_path=Path(template) if template else None,
         make_video=video,
         video_n=video_n,
+        products=products,
     )
 
     click.echo("")
