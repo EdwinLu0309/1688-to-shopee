@@ -13,6 +13,24 @@ from loguru import logger
 
 TEMPLATE_PATH = Path(__file__).parent.parent / "config" / "shopee_template.xlsx"
 
+# 簡體→繁體（台灣用語）。1688 來源的顏色/文字可能夾雜簡體，上架前一律轉繁體。
+_CC = None
+
+
+def _zh_tw(text) -> str:
+    """把字串轉成繁體台灣用語；opencc 不在時原樣回傳。"""
+    global _CC
+    s = "" if text is None else str(text)
+    if not s:
+        return s
+    if _CC is None:
+        try:
+            from opencc import OpenCC
+            _CC = OpenCC("s2twp")
+        except Exception:
+            _CC = False
+    return _CC.convert(s) if _CC else s
+
 
 def _to_jpg_url(img) -> str:
     """把 1688/alicdn 圖片網址的影像處理後綴去掉，取回原始 JPG/PNG。
@@ -283,8 +301,9 @@ def build_two_tier_rows(
     COL = col  # 區域別名，下面沿用
     enabled = config.get("enabled_channels") or DEFAULT_ENABLED_CHANNELS
     pre_order_days = config.get("pre_order_days")
-    title = ai_content.get("title", product_data.get("title", ""))
-    description = ai_content.get("description", "")
+    # 標題/詳情一律轉繁體台灣用語（保險：Claude 應已繁體，仍過濾夾雜簡體）
+    title = _zh_tw(ai_content.get("title", product_data.get("title", "")))
+    description = _zh_tw(ai_content.get("description", ""))
     code = config.get("code") or product_data.get("item_id", "unknown")
     price = config.get("selling_price", 99)
     stock = config.get("stock_per_option", 10)
@@ -306,7 +325,7 @@ def build_two_tier_rows(
     rows = []
     first = True
     for ci, c in enumerate(colors):
-        color_opt = c["option_name"]                       # 編號_簡稱_顏色
+        color_opt = _zh_tw(c["option_name"])               # 編號_簡稱_顏色（轉繁體）
         color_img = _to_jpg_url(sku_imgs.get(c["src_1688"], "")) if sku_imgs.get(c["src_1688"]) else ""
         color_first = True
         for s in sizes:
@@ -332,7 +351,7 @@ def build_two_tier_rows(
             row[COL["var_option_1"]] = color_opt
             if s["option_name"]:
                 row[COL["var_name_2"]] = "尺碼"
-                row[COL["var_option_2"]] = s["option_name"]
+                row[COL["var_option_2"]] = _zh_tw(s["option_name"])
             # 商品選項貨號（型號 ps_sku_short）：Edwin 要求**留空**（改用主商品貨號 +
             # 規格選項辨識變體）。留空同時避免「型號與變體不匹配」。
             # row[COL["option_sku"]] = f"{code}-{ci + 1}"  # ← 留空

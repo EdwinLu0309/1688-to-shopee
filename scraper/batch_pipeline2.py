@@ -152,7 +152,9 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
     else:
         selected_colors, color_map = _parse_colors(None, base_color_map)
 
-    all_sizes = product_data.get("sizes", []) or list(size_labels.keys())
+    # 尺碼優先用 Claude 的 size_labels keys（已正規化 S/M/L，且值已換算公斤/繁體），
+    # 而非 product_data["sizes"]（1688 原始如 "S(60-80斤)"，含斤、對不上 labels）。
+    all_sizes = list(size_labels.keys()) or product_data.get("sizes", [])
     sizes_spec = entry.get("sizes")
     if not sizes_spec or str(sizes_spec).strip().lower() == "all":
         selected_sizes = all_sizes
