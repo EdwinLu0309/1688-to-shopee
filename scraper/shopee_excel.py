@@ -314,6 +314,8 @@ def build_two_tier_rows(
             row[COL["product_name"]] = title
             row[COL["description"]] = description
             row[COL["min_purchase"]] = "1"
+            # 測試：主商品貨號加回編號（商品識別用）。若觸發「型號與變體不匹配」要改回留空。
+            row[COL["parent_sku"]] = code
             row[COL["weight"]] = str(weight)
             row[COL["price"]] = str(int(round(float(price))))
             row[COL["stock"]] = str(int(round(float(stock))))
@@ -324,8 +326,8 @@ def build_two_tier_rows(
             if s["option_name"]:
                 row[COL["var_name_2"]] = "尺碼"
                 row[COL["var_option_2"]] = s["option_name"]
-            # 商品選項貨號（型號）：純英數、每個顏色一個（同花花檔 BH...100 的填法）
-            row[COL["option_sku"]] = f"{code}-{ci + 1}"
+            # 商品選項貨號（型號）：純英數、每個 SKU 唯一（色序+尺碼，庫存好追蹤）
+            row[COL["option_sku"]] = f"{code}-{ci + 1}-{s['size']}".rstrip("-")
 
             # ── 以下「每一行都填」（Edwin 要求：規格圖同色同一張、商品圖/物流每行都一樣，不要跳填）──
             # 規格圖片：同一顏色用同一張
