@@ -32,6 +32,7 @@ manifest 格式（JSON）：
   ]
 }
 """
+import asyncio
 import json
 from pathlib import Path
 
@@ -39,7 +40,9 @@ from loguru import logger
 
 from config.settings import OUTPUT_DIR
 from scraper.copywriter import build_variants, generate_listing
+from scraper.downloader import download_product_images_from_json
 from scraper.shopee_excel import TEMPLATE_PATH, generate_batch_two_tier_excel
+from scraper.video_maker import collect_images, make_product_video
 
 
 def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], dict]:
@@ -128,13 +131,42 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
     }
 
 
+def _make_video_for(product: dict, video_n: int = 9) -> str | None:
+    """為單一商品合成短影片：缺本機圖就先下載，再挑 n 張合成 → video/{編號}.mp4。
+
+    影片吃本機圖（Excel 用的是 1688 URL、不落地），故這裡確保圖先下好。
+    回傳影片路徑字串；無圖或 ffmpeg 缺失回 None。
+    """
+    meta = product["_meta"]
+    item_id, code = meta["item_id"], meta["code"]
+    item_dir = Path(OUTPUT_DIR) / item_id
+    try:
+        if not collect_images(item_dir):
+            logger.info(f"[{code}] 本機無圖，下載 1688 圖片供影片使用…")
+            asyncio.run(download_product_images_from_json(product["product_data"], item_dir / "images"))
+        out = make_product_video(item_dir, n=video_n, name=code)
+        if out is None:
+            logger.warning(f"[{code}] 無可用圖片，跳過影片")
+            return None
+        logger.info(f"[{code}] 影片：{out}")
+        return str(out)
+    except FileNotFoundError as e:
+        logger.warning(f"[{code}] ffmpeg 缺失，跳過影片：{e}")
+        return None
+    except Exception as e:
+        logger.error(f"[{code}] 影片合成失敗：{e}")
+        return None
+
+
 def run_batch_two_tier(
     manifest_path: Path,
     json_dir: Path,
     output_path: Path | None = None,
     template_path: Path | None = None,
+    make_video: bool = True,
+    video_n: int = 9,
 ) -> dict:
-    """讀 manifest → 逐商品處理 → 合併蝦皮二階 Excel。"""
+    """讀 manifest → 逐商品處理（文案+變體，選配影片）→ 合併蝦皮二階 Excel。"""
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     entries = manifest.get("products", [])
     if not entries:
@@ -154,6 +186,8 @@ def run_batch_two_tier(
             if p is None:
                 failures.append({"code": code, "error": "缺 JSON 或文案失敗"})
             else:
+                if make_video:
+                    p["_meta"]["video"] = _make_video_for(p, video_n)
                 prepared.append(p)
         except Exception as e:
             logger.error(f"[{code}] 例外：{e}")
@@ -179,7 +213,8 @@ def run_batch_two_tier(
     logger.info(f"{'='*50}\n批次完成：{summary['success']}/{summary['total']} 成功"
                 f"，Excel：{output_path}")
     for m in summary["products"]:
-        logger.info(f"  ✓ {m['code']}: {m['sku_count']} SKU | {m['title'][:40]}")
+        vtag = " | 🎬" if m.get("video") else ""
+        logger.info(f"  ✓ {m['code']}: {m['sku_count']} SKU{vtag} | {m['title'][:40]}")
     if failures:
         for f in failures:
             logger.warning(f"  ✗ {f['code']}: {f['error']}")

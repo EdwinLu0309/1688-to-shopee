@@ -64,7 +64,8 @@ python main.py scrape "https://detail.1688.com/offer/XXX.html" -v -j
 python main.py generate2 output/784712770291.json --code P-a1 -p 998 -s 10 -c 100358 \
   --reuse-content --colors "米白色【长裤】=米白色,黑色【长裤】=黑色,灰色【长裤】=灰色"
 
-# ★批次「過審二階路徑」（manifest → 逐商品文案+變體 → 合併一個蝦皮 Excel，每商品一個識別碼）
+# ★批次「過審二階路徑」（manifest → 逐商品文案+變體+短影片 → 合併一個蝦皮 Excel，每商品一個識別碼）
+#   --no-video 可關影片；影片吃本機圖，缺圖會先自動下載
 python main.py batch2 -m config/batch_manifest.example.json -j output -o output/shopee_batch_upload.xlsx
 
 # 批次下載 1688 圖片（讀 Chrome MCP 抓出的 JSON，不經 AI）

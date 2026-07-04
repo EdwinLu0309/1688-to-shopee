@@ -2,9 +2,10 @@
 
 ## 2026-07-05
 
-### 新增（過審二階路徑固化成 CLI + 批次串接器）
+### 新增（過審二階路徑固化成 CLI + 批次串接器 + 影片整合）
 - `main.py generate2` — 單商品過審二階路徑正式入口：串 `copywriter.generate_listing` + `build_variants` + `generate_two_tier_excel`（#S064 過審路徑以前只存在臨時 inline 呼叫，現固化）。支援 `--colors "src=乾淨名"` 挑色清名、`--reuse-content` 用 ai_content.json 快取不重呼 Claude
-- `main.py batch2` + `scraper/batch_pipeline2.py` — 批次過審二階路徑：讀 manifest → 逐商品文案+變體 → 合併成**一個**蝦皮 Excel
+- `main.py batch2` + `scraper/batch_pipeline2.py` — 批次過審二階路徑：讀 manifest → 逐商品文案+變體（**+短影片**）→ 合併成**一個**蝦皮 Excel
+- **影片整合進 batch2**：每商品順便合成 1:1 短影片（`--video/--no-video`，預設開）；影片吃本機圖，缺圖會先自動下載再合成。P-a1/P-a2 實測各 1080×1080、18.5s、~2MB
 - `shopee_excel.generate_batch_two_tier_excel` — 多商品合併寫入器：**每商品一個遞增規格識別碼**（1,2,3…），是蝦皮把多列歸成同商品又不互相混淆的鑰匙
 - `config/batch_manifest.example.json` — 批次清單範例（item_id / 編號 / 售價 / 分類 ID / 挑色）
 - ✅ 實測：P-a1(長褲) + P-a2(九分褲) 兩商品跑 batch2 → 合併 42 SKU，識別碼 1/2 分開、型號全唯一無中文、售價各異、模板 14/16 檔原封不動

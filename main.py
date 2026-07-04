@@ -237,9 +237,12 @@ def batch(ctx: click.Context, sheet: str | None, download_sheet: bool,
 @click.option("--json-dir", "-j", type=click.Path(exists=True), default="output", help="pre-scraped JSON 目錄")
 @click.option("--output", "-o", type=click.Path(), default=None, help="合併 Excel 輸出路徑（預設 output/shopee_batch_upload.xlsx）")
 @click.option("--template", "-t", type=click.Path(exists=True), default=None, help="蝦皮模板（預設用 manifest.template 或內建）")
+@click.option("--video/--no-video", default=True, help="每商品順便合成短影片（預設開；缺圖會先下載）")
+@click.option("--video-n", type=int, default=9, help="影片挑幾張圖")
 @click.pass_context
-def batch2(ctx: click.Context, manifest: str, json_dir: str, output: str | None, template: str | None) -> None:
-    """批次過審二階路徑：manifest → 逐商品 Claude 文案 + 變體 → 合併一個蝦皮 Excel。"""
+def batch2(ctx: click.Context, manifest: str, json_dir: str, output: str | None,
+           template: str | None, video: bool, video_n: int) -> None:
+    """批次過審二階路徑：manifest → 逐商品 Claude 文案 + 變體（+影片）→ 合併一個蝦皮 Excel。"""
     from scraper.batch_pipeline2 import run_batch_two_tier
 
     result = run_batch_two_tier(
@@ -247,12 +250,15 @@ def batch2(ctx: click.Context, manifest: str, json_dir: str, output: str | None,
         json_dir=Path(json_dir),
         output_path=Path(output) if output else None,
         template_path=Path(template) if template else None,
+        make_video=video,
+        video_n=video_n,
     )
 
     click.echo("")
     click.echo(f"  批次完成：{result['success']}/{result['total']} 成功，失敗 {result['failed']}")
     for m in result.get("products", []):
-        click.echo(f"    ✓ {m['code']}: {m['sku_count']} SKU | {m['title'][:40]}")
+        vtag = f" | 🎬 {m['video']}" if m.get("video") else ""
+        click.echo(f"    ✓ {m['code']}: {m['sku_count']} SKU{vtag} | {m['title'][:40]}")
     for f in result.get("failures", []):
         click.echo(f"    ✗ {f['code']}: {f['error']}")
     if result.get("excel_path"):
