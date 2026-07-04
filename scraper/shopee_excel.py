@@ -314,8 +314,9 @@ def build_two_tier_rows(
             row[COL["product_name"]] = title
             row[COL["description"]] = description
             row[COL["min_purchase"]] = "1"
-            # 測試：主商品貨號加回編號（商品識別用）。若觸發「型號與變體不匹配」要改回留空。
-            row[COL["parent_sku"]] = code
+            # 主商品貨號：留空。實測（2026-07-05 新模板）填了編號 → 上傳成功但資料整片
+            # 不進（蝦皮判「型號與變體不匹配」靜默丟列）。黃金規則 #9，血淚第二次確認。
+            # row[COL["parent_sku"]] = code   # ← 絕對不要填（變體商品）
             row[COL["weight"]] = str(weight)
             row[COL["price"]] = str(int(round(float(price))))
             row[COL["stock"]] = str(int(round(float(stock))))

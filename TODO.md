@@ -1,7 +1,7 @@
 # TODO
 
 ## 高優先
-- [ ] ⚠️ 驗證蝦皮 Excel 測試改動（`parent_sku` 填回編號、型號 `option_sku` 改每 SKU 唯一）上傳是否仍過審；若被退（「型號與變體不匹配」）則 `parent_sku` 改回留空（黃金規則 #9）
+- [x] 2026-07-05 ⚠️→✅ 測試版 `parent_sku` 填回編號**實測失敗**（新模板：上傳成功但資料整片不進）→ 已改回**留空**（黃金規則 #9 第二次血淚確認）；型號 `option_sku` 每 SKU 唯一保留（庫存用，非元兇）
 - [ ] 分類自動對照擴充（`ai_list_reader.CATEGORY_MAP` 目前只有長褲類，遇新分類要補；可改讀模板分類 sheet）
 - [ ] AI 名單 CSV 落地半自動（目前 Chrome 同源 fetch → 手動存 input/；可固化成指令）
 - [ ] batch2 抓取自動化（目前每商品仍需手動 Chrome MCP 注入 extract_1688.js 抓 JSON）
