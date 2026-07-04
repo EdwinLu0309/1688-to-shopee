@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-05（晚上：可正常匯入後的調整）
+
+### 變更（Edwin 實測可匯入後要求）
+- **主商品貨號填回編號 + 型號留空**：可匯入版基礎上，`ps_sku_parent_short` 填編號（庫存商品識別）、`ps_sku_short`（型號）改**全留空**。此組合合法（商品層用主貨號、變體靠規格選項辨識），不觸發「型號與變體不匹配」
+- **圖片尺寸表（Q 欄 et_title_size_chart）**：`build_col_map` 補上此欄 key；`build_two_tier_rows` 支援 `config["size_chart_url"]` 每行填圖片網址。P-a1 用 1688 尺碼表（detail_020）CDN 網址
+- **`scraper/size_chart_maker.py`**：用尺碼數據重繪乾淨繁體尺碼表 PNG（去掉 1688 簡體版的九分褲等不相關欄）。P-a1 產出 `output/784712770291/images/generated/size_chart_P-a1.png`（供 Edwin 上傳蝦皮取得網址後替換 Q 欄）
+
 ## 2026-07-05（傍晚：新模板 + 主貨號留空修復）
 
 ### 修復（實測第三輪 — 資料整片不進的兩個元兇都拔掉）

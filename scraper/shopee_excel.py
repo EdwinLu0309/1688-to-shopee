@@ -225,6 +225,7 @@ _KEY_TO_NAME = {
     "ps_price": "price",
     "ps_stock": "stock",
     "ps_sku_short": "option_sku",
+    "et_title_size_chart": "size_chart_img",   # Q: 圖片尺寸表（填圖片網址）
     "ps_item_cover_image": "cover_image",
     "ps_weight": "weight",
     "ps_product_pre_order_dts": "pre_order_days",
@@ -289,6 +290,7 @@ def build_two_tier_rows(
     stock = config.get("stock_per_option", 10)
     weight = config.get("weight", 0.1)
     category = config.get("category", "")
+    size_chart_url = config.get("size_chart_url", "")  # Q 欄圖片尺寸表（圖片網址）
 
     main_imgs = [_to_jpg_url(u) for u in product_data.get("main_images", [])]
     sku_imgs = product_data.get("sku_images", {})
@@ -314,9 +316,10 @@ def build_two_tier_rows(
             row[COL["product_name"]] = title
             row[COL["description"]] = description
             row[COL["min_purchase"]] = "1"
-            # 主商品貨號：留空。實測（2026-07-05 新模板）填了編號 → 上傳成功但資料整片
-            # 不進（蝦皮判「型號與變體不匹配」靜默丟列）。黃金規則 #9，血淚第二次確認。
-            # row[COL["parent_sku"]] = code   # ← 絕對不要填（變體商品）
+            # 主商品貨號：填編號（Edwin 要求，庫存商品識別）。
+            # ⚠ 注意：填主貨號 + 型號每SKU唯一 會「型號與變體不匹配」（實測過）；
+            #   但「填主貨號 + 型號留空」是合法組合（商品層用主貨號、變體靠規格選項辨識）。
+            row[COL["parent_sku"]] = code
             row[COL["weight"]] = str(weight)
             row[COL["price"]] = str(int(round(float(price))))
             row[COL["stock"]] = str(int(round(float(stock))))
@@ -327,10 +330,9 @@ def build_two_tier_rows(
             if s["option_name"]:
                 row[COL["var_name_2"]] = "尺碼"
                 row[COL["var_option_2"]] = s["option_name"]
-            # 商品選項貨號（型號）：純英數、**每個顏色一個**（如 P-a1-1），對齊過審版
-            # (commit d36a6f6) 與花花檔。實測：改成每 SKU 唯一（P-a1-1-S）→ 蝦皮判
-            # 「型號與變體不匹配」、資料整片不進（型號對應第一軸顏色，不含尺碼）。
-            row[COL["option_sku"]] = f"{code}-{ci + 1}"
+            # 商品選項貨號（型號 ps_sku_short）：Edwin 要求**留空**（改用主商品貨號 +
+            # 規格選項辨識變體）。留空同時避免「型號與變體不匹配」。
+            # row[COL["option_sku"]] = f"{code}-{ci + 1}"  # ← 留空
 
             # ── 以下「每一行都填」（Edwin 要求：規格圖同色同一張、商品圖/物流每行都一樣，不要跳填）──
             # 規格圖片：同一顏色用同一張
@@ -343,6 +345,9 @@ def build_two_tier_rows(
                     ck = f"image_{j+1}"
                     if ck in COL:
                         row[COL[ck]] = img
+            # 圖片尺寸表（Q 欄）：填圖片網址，每行都填
+            if size_chart_url and "size_chart_img" in COL:
+                row[COL["size_chart_img"]] = size_chart_url
             # 物流：啟用填「開啟」，停用的「留空」（同能過的檔；填「關閉」非必要）
             for cid, lc in logistics.items():
                 if cid in enabled:

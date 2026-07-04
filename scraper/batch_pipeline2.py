@@ -172,6 +172,7 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
             "stock_per_option": entry.get("stock", 10),
             "weight": entry.get("weight", 0.1),
             "code": code,
+            "size_chart_url": entry.get("size_chart_url", ""),  # Q 欄圖片尺寸表
         },
         "_meta": {"code": code, "item_id": item_id,
                   "sku_count": variants.get("sku_count", 0),
