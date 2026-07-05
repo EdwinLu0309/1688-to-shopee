@@ -111,9 +111,8 @@ python main.py images --ingest-downloads
 路 B（GUI「🔍 抓取」＝ `scraper/playwright_scraper.py`，#S066 去風險驗證通過）：
 帶 `config/cookies.json` 登入 cookie + stealth（改 `navigator.webdriver`/UA/locale/timezone）
 用 Playwright 抓 detail 頁，**未被反爬擋**——推翻 #S064「Playwright 被 1688 擋」的舊結論
-（當時的差別是**沒帶登入 cookie**）。主圖抓「圖庫所有縮圖」，headed 模式另逐一 hover 縮圖
-觸發 lazy-load。⚠️ `EXTRACT_JS`（此檔）與 `extract_1688.js` 是兩份平行實作、同一套選擇器，
-1688 改版時兩邊都要改。
+（當時的差別是**沒帶登入 cookie**）。主圖抓 JS 的 `offerImgList`（完整 9 張，非只 DOM 5 張縮圖）。
+⚠️ `EXTRACT_JS`（此檔）與 `extract_1688.js` 是兩份平行實作、同一套選擇器，1688 改版時兩邊都要改。
 
 路 A（Chrome MCP 手動注入）：不靠 Playwright、直接在「已登入的真實 Chrome」注入 JS，
 最保險（連 stealth 都不必），但每商品要手動注入一次。步驟：
@@ -124,7 +123,8 @@ python main.py images --ingest-downloads
 3. `python main.py images --ingest-downloads` → 搬進 `output/` 並下載所有圖片。
 
 抓取選擇器（寫在 `extract_1688.js`，1688 改版時改這裡）：
-- 主圖：`.od-gallery-list img`
+- 主圖：JS 狀態的 `offerImgList`（遞迴找 window）→ 去重取原圖；找不到才退回 `.od-gallery-list img`。
+  ⚠️ DOM 只 render 前幾張縮圖（P-a1 只 5 張），`offerImgList` 才是完整 9 張——**別只抓 DOM**。
 - 第一軸（顏色/款式）：`.sku-filter-button`（圖在 `img`、名稱在 `.label-name`）
 - 第二軸（尺碼）：商品屬性表 `尺码` 列（Ant Design `.ant-table-tbody`）
 - 商品屬性：`.ant-table-tbody` 整張表 → `attributes` dict（餵文案規格欄：版型/材質/厚薄/彈力）

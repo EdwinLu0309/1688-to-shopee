@@ -50,10 +50,33 @@
   const itemId = (location.href.match(/offer\/(\d+)\.html/) || [])[1] || "unknown";
 
   // ── 主圖 ──
-  const main = uniq(
-    [...document.querySelectorAll(".od-gallery-list img, .od-gallery-list-wapper img")]
-      .map((i) => orig(i.getAttribute("src") || i.getAttribute("data-src") || ""))
-  );
+  // 1688 把完整圖庫存在 JS 狀態的 offerImgList（DOM 只 render 前幾張縮圖，只抓
+  // .od-gallery-list img 會少抓）。先從 window 遞迴找 offerImgList 去重取原圖，
+  // 找不到才退回 DOM 選擇器。P-a1 實測：offerImgList 11 筆→去重 9 張。
+  const findOfferImgList = () => {
+    const seen = new WeakSet();
+    let found = null;
+    const walk = (o, d) => {
+      if (found || d > 6 || !o || typeof o !== "object" || seen.has(o)) return;
+      seen.add(o);
+      for (const k in o) {
+        try {
+          if (k === "offerImgList" && Array.isArray(o[k]) && o[k].length) { found = o[k]; return; }
+          const v = o[k];
+          if (v && typeof v === "object") walk(v, d + 1);
+        } catch (e) {}
+      }
+    };
+    for (const k of Object.keys(window)) { try { walk(window[k], 0); } catch (e) {} if (found) break; }
+    return found;
+  };
+  let main = uniq((findOfferImgList() || []).map(orig));
+  if (!main.length) {
+    main = uniq(
+      [...document.querySelectorAll(".od-gallery-list img, .od-gallery-list-wapper img")]
+        .map((i) => orig(i.getAttribute("src") || i.getAttribute("data-src") || ""))
+    );
+  }
 
   // ── SKU 色卡（name -> url）+ skus 清單 ──
   const sku_images = {};

@@ -3,7 +3,8 @@
 ## 高優先
 - [x] 2026-07-05 ★桌面 GUI（`gui.py`，tkinter Win/Mac）：🔑登入 → 🔍抓取（Playwright+cookie）→ ▶產Excel（batch2）→ 📁素材夾。`scraper/playwright_scraper.py` 正式化去風險腳本；`run_mac.command`/`run_windows.bat` 啟動
 - [x] 2026-07-05 ⚠️→✅ 測試版 `parent_sku` 填回編號**實測失敗**（新模板：上傳成功但資料整片不進）→ 已改回**留空**（黃金規則 #9 第二次血淚確認）；型號 `option_sku` 每 SKU 唯一保留（庫存用，非元兇）
-- [ ] GUI 用 Edwin 實機驗證（登入→抓取→產Excel→補素材）；主圖數依賣場當下圖庫而定（P-a1 現為 5 張，非漏抓）
+- [ ] GUI 用 Edwin 實機驗證（登入→抓取→產Excel→補素材）
+- [x] 2026-07-05 主圖抓滿：改讀 JS `offerImgList`（非只 DOM 縮圖）→ P-a1 由 5 張補回 9 張（extract_1688.js + playwright_scraper.py 兩邊都改）
 - [ ] 分類自動對照擴充（`ai_list_reader.CATEGORY_MAP` 目前只有長褲類，遇新分類要補；可改讀模板分類 sheet）
 - [ ] AI 名單 CSV 落地半自動（目前 Chrome 同源 fetch → 手動存 input/；可固化成 GUI 內按鈕/指令）
 - [ ] GUI 抓取穩定度：批次抓多商品時的節流/重試；被擋自動退回路A（Chrome MCP）提示
