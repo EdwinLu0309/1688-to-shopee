@@ -1,10 +1,12 @@
 # TODO
 
 ## 高優先
+- [x] 2026-07-05 ★桌面 GUI（`gui.py`，tkinter Win/Mac）：🔑登入 → 🔍抓取（Playwright+cookie）→ ▶產Excel（batch2）→ 📁素材夾。`scraper/playwright_scraper.py` 正式化去風險腳本；`run_mac.command`/`run_windows.bat` 啟動
 - [x] 2026-07-05 ⚠️→✅ 測試版 `parent_sku` 填回編號**實測失敗**（新模板：上傳成功但資料整片不進）→ 已改回**留空**（黃金規則 #9 第二次血淚確認）；型號 `option_sku` 每 SKU 唯一保留（庫存用，非元兇）
+- [ ] GUI 用 Edwin 實機驗證（登入→抓取→產Excel→補素材）；主圖數依賣場當下圖庫而定（P-a1 現為 5 張，非漏抓）
 - [ ] 分類自動對照擴充（`ai_list_reader.CATEGORY_MAP` 目前只有長褲類，遇新分類要補；可改讀模板分類 sheet）
-- [ ] AI 名單 CSV 落地半自動（目前 Chrome 同源 fetch → 手動存 input/；可固化成指令）
-- [ ] batch2 抓取自動化（目前每商品仍需手動 Chrome MCP 注入 extract_1688.js 抓 JSON）
+- [ ] AI 名單 CSV 落地半自動（目前 Chrome 同源 fetch → 手動存 input/；可固化成 GUI 內按鈕/指令）
+- [ ] GUI 抓取穩定度：批次抓多商品時的節流/重試；被擋自動退回路A（Chrome MCP）提示
 - [ ] 訂貨表分流（正式款 / 預購款 分頁；餵 1688-order 自動下單）
 - [ ] 選項勾選表（兩軸 → 人工勾選上架哪些 + 訂貨數量）
 

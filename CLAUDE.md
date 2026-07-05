@@ -4,9 +4,10 @@
 1688 商品資訊爬取 → AI 生成蝦皮文案 → 蝦皮批次上架 Excel 自動產生。
 
 ## 技術棧
-- Python 3.14
-- Playwright（備用，1688 反爬嚴格目前未使用）
-- Claude in Chrome MCP（實際爬取方式）
+- Python 3.12（.venv；Tk 9.0 深色模式正常）
+- tkinter（桌面 GUI，gui.py，Win/Mac 雙平台）
+- Playwright + 登入 cookie + stealth（GUI 抓取法B，#S066 起實測可過 1688 反爬）
+- Claude in Chrome MCP（抓取法A，手動注入，最保險）
 - Google Gemini API（google-genai SDK，文案+圖片生成，取代 Claude API）
 - Anthropic SDK（Claude API，保留備用）
 - HTTPX（圖片下載）
@@ -17,6 +18,9 @@
 
 ## 檔案結構
 ```
+├── gui.py                     # ★桌面 GUI（tkinter，四步：登入→抓取→產Excel→素材夾）
+├── run_mac.command            # Mac 啟動 GUI（優先 .venv/bin/python，Tk 9.0 深色正常）
+├── run_windows.bat            # Windows 啟動 GUI
 ├── main.py                    # CLI 入口（login/scrape/generate/batch）
 ├── config/
 │   ├── settings.py            # 全域設定（含 Gemini、Google Sheet）
@@ -24,7 +28,8 @@
 │   └── browser_profile/       # Playwright 登入 profile（gitignored）
 ├── scraper/
 │   ├── models.py              # Product1688, SKUOption, PriceRange
-│   ├── extract_1688.js        # ★現行抓取：Chrome MCP 注入此 JS 抽 DOM → 下載 JSON
+│   ├── extract_1688.js        # 抓取法A：Chrome MCP 注入此 JS 抽 DOM → Blob 下載 JSON
+│   ├── playwright_scraper.py  # ★抓取法B（GUI 用）：Playwright+cookie+stealth 抽 DOM（免 Chrome MCP，同一套選擇器）
 │   ├── data_extractor.py      # （已失效）__INIT_DATA__ 提取，現代 1688 已無此全域變數
 │   ├── item_page.py           # Playwright 爬取 + DOM fallback（反爬擋下，未使用）
 │   ├── network.py             # XHR 攔截 + SKU 解析
@@ -83,9 +88,35 @@ python main.py images --ingest-downloads
 當輸入而非直接解析採購表——因為採購表沒有「編號」、沒有「蝦皮分類 ID」，且 1688 網址是超連結
 （gviz CSV 讀不到 target）；編號 / 分類 ID / 挑色都是人為決策，落地成 manifest 才穩。
 
-## 抓取流程（現行，2026-06 實測可用）
-舊的 `data_extractor.py`（Playwright + `window.__INIT_DATA__`）已失效：現代 1688
-detail 頁已無 `__INIT_DATA__`，且 Playwright 會被反爬擋下。現行作法：
+## 桌面 GUI（gui.py，一條龍、免打指令）
+給非工程使用者的「登入按鈕→App 自己抓」全包 App（tkinter，Win/Mac 雙平台）。
+啟動：Mac 雙擊 `run_mac.command`、Windows 雙擊 `run_windows.bat`（皆優先用 `.venv`）。
+四步對應四顆按鈕，輸入是一份「【Lady】AI 上架名單」CSV（放 `input/`）：
+1. **🔑 登入 1688** → `playwright_scraper.save_cookies` 開瀏覽器手動登入 → 存 `config/cookies.json`
+   （抄 1688-order launcher 的 `_save_cookies`；偵測跳離 login 頁視為成功，最多等 5 分）。
+2. **🔍 抓取商品** → 讀 AI 名單取每筆 item_id → `playwright_scraper.scrape_many`
+   （Playwright+cookie+stealth，共用一個瀏覽器逐頁抓）→ 存 `output/{item_id}.json`。
+   抓到 0 主圖 = cookie 過期/被擋 → 彈窗提示重登。
+3. **▶ 產出 Excel** → `batch_pipeline2.run_batch_two_tier(products=…)`（= `batch2`，Claude 文案
+   +變體+影片 → 合併一個蝦皮二階 Excel）。缺 JSON 的編號會先提醒去抓取。
+4. **📁 開素材夾** → 開 `output/上架素材/`（影片+尺寸表，蝦皮 Excel 無影片欄，手動補）。
+
+執行緒模型同 launcher：worker thread 跑 `asyncio.new_event_loop()`，`root.after(0,…)` 回主緒更新 UI。
+深色模式配色沿用 launcher（`tk_setPalette` + 每 widget 明確 bg/fg，避免 macOS 撞色隱形）。
+
+## 抓取流程（兩條路，2026-07 更新）
+**路 A（Chrome MCP 手動注入，半自動）** 與 **路 B（Playwright+cookie，GUI 全自動）** 選其一，
+產出 JSON schema 完全一致，下游（images / batch2 / generate2）不用改。
+
+路 B（GUI「🔍 抓取」＝ `scraper/playwright_scraper.py`，#S066 去風險驗證通過）：
+帶 `config/cookies.json` 登入 cookie + stealth（改 `navigator.webdriver`/UA/locale/timezone）
+用 Playwright 抓 detail 頁，**未被反爬擋**——推翻 #S064「Playwright 被 1688 擋」的舊結論
+（當時的差別是**沒帶登入 cookie**）。主圖抓「圖庫所有縮圖」，headed 模式另逐一 hover 縮圖
+觸發 lazy-load。⚠️ `EXTRACT_JS`（此檔）與 `extract_1688.js` 是兩份平行實作、同一套選擇器，
+1688 改版時兩邊都要改。
+
+路 A（Chrome MCP 手動注入）：不靠 Playwright、直接在「已登入的真實 Chrome」注入 JS，
+最保險（連 stealth 都不必），但每商品要手動注入一次。步驟：
 1.（一次性）Chrome 設定把 `detail.1688.com` 的「自動下載」設為允許
    （`chrome://settings/content/automaticDownloads`），否則 Blob 下載會被擋。
 2. 在已登入的 Chrome 開商品頁，透過 Chrome MCP 注入 `scraper/extract_1688.js`
