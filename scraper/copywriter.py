@@ -154,15 +154,19 @@ def generate_listing(product_data: dict, sheet_ctx: dict) -> dict:
 def build_variants(code: str, short_name: str, color_map: dict,
                    selected_colors: list[str], size_labels: dict,
                    selected_sizes: list[str]) -> dict:
-    """用程式拼蝦皮二階規格選項名稱（確保精準，不交給 LLM）。
+    """用程式拼蝦皮二階規格（確保精準，不交給 LLM）。各司其職：
 
-    規格1（顏色）：編號_簡稱_繁體顏色
-    規格2（尺碼）：size_labels[尺碼]（尺碼 + 廠商數據）
+    - 規格選項1（買家看，I 欄）：`簡稱_繁體顏色`（不含編號；蝦皮限 ≤20 字，故砍編號）
+    - 規格選項2（買家看，L 欄）：size_labels[尺碼]（尺碼 + 廠商數據）
+    - `color` / `size`：純顏色 / 純尺碼，供 shopee_excel 拼「商品選項貨號」= 編號_顏色_尺碼
+
+    每個 tier1 帶 color（供貨號），tier2 帶 size（供貨號）。
     """
     tier1 = []
     for c in selected_colors:
         zh = color_map.get(c, c)
-        tier1.append({"src_1688": c, "option_name": f"{code}_{short_name}_{zh}"})
+        buyer = f"{short_name}_{zh}" if short_name else zh
+        tier1.append({"src_1688": c, "color": zh, "option_name": buyer})
     tier2 = [{"size": s, "option_name": size_labels.get(s, s)} for s in selected_sizes]
     return {"規格1_顏色": tier1, "規格2_尺碼": tier2,
             "sku_count": len(tier1) * len(tier2)}

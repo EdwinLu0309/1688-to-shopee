@@ -32,6 +32,16 @@ def _zh_tw(text) -> str:
     return _CC.convert(s) if _CC else s
 
 
+def _clip20(s, fallback=None, limit: int = 20) -> str:
+    """蝦皮規格選項名稱限 1~20 字。超過先退 fallback（如純顏色），再不行硬截。"""
+    s = str(s)
+    if len(s) <= limit:
+        return s
+    if fallback is not None and 0 < len(str(fallback)) <= limit:
+        return str(fallback)
+    return s[:limit]
+
+
 def _to_jpg_url(img) -> str:
     """把 1688/alicdn 圖片網址的影像處理後綴去掉，取回原始 JPG/PNG。
 
@@ -325,7 +335,9 @@ def build_two_tier_rows(
     rows = []
     first = True
     for ci, c in enumerate(colors):
-        color_opt = _zh_tw(c["option_name"])               # 編號_簡稱_顏色（轉繁體）
+        color_clean = _zh_tw(c.get("color") or c["option_name"])   # 純顏色/身高款（供貨號 + 退位）
+        # 規格選項1（買家看）：簡稱_顏色，蝦皮限 ≤20 字 → 超過退成純顏色
+        color_opt = _clip20(_zh_tw(c["option_name"]), fallback=color_clean)
         color_img = _to_jpg_url(sku_imgs.get(c["src_1688"], "")) if sku_imgs.get(c["src_1688"]) else ""
         color_first = True
         for s in sizes:
@@ -351,10 +363,15 @@ def build_two_tier_rows(
             row[COL["var_option_1"]] = color_opt
             if s["option_name"]:
                 row[COL["var_name_2"]] = "尺碼"
-                row[COL["var_option_2"]] = _zh_tw(s["option_name"])
-            # 商品選項貨號（型號 ps_sku_short）：Edwin 要求**留空**（改用主商品貨號 +
-            # 規格選項辨識變體）。留空同時避免「型號與變體不匹配」。
-            # row[COL["option_sku"]] = f"{code}-{ci + 1}"  # ← 留空
+                row[COL["var_option_2"]] = _clip20(_zh_tw(s["option_name"]))
+            # 商品選項貨號（O 欄 ps_sku_short）＝編號_顏色_尺碼（各司其職：買家選項不顯貨號、
+            # 貨號不顯商品名，供庫存系統以此解析到 SKU 層）。
+            # ⚠ 血淚提醒：#S066 實測「型號每 SKU 唯一填值」曾被判「型號與變體不匹配」、資料
+            #   靜默不進（故一度改留空）。此值 per-SKU 唯一且含中文，屬同一風險模式——
+            #   Edwin 要求填此格式，務必先測 1~2 筆確認資料真的有進，再全批。
+            size_code = s.get("size", "")
+            row[COL["option_sku"]] = (
+                f"{code}_{color_clean}_{size_code}" if size_code else f"{code}_{color_clean}")
 
             # ── 以下「每一行都填」（Edwin 要求：規格圖同色同一張、商品圖/物流每行都一樣，不要跳填）──
             # 規格圖片：同一顏色用同一張

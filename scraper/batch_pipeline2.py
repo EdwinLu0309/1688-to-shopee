@@ -47,8 +47,9 @@ from scraper.video_maker import collect_images, make_product_video
 
 
 def base_color_of(color_map: dict, key: str) -> str:
-    """第一軸 key → 純底色（去身高款/版型），用繁體名判斷較準。"""
-    return base_color(color_map.get(key, key)) or key
+    """第一軸 key → 純底色（去身高款/版型）。用「簡體原始 key」為準（穩定），
+    與 select_first_axis 的分組一致；Claude 繁體渲染多變不可靠。"""
+    return base_color(key) or key
 
 
 def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], dict]:
