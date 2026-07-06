@@ -50,3 +50,9 @@
 - [x] 2026-04-10 Claude AI 生成蝦皮標題/描述
 - [x] 2026-04-10 蝦皮批次上架 Excel 自動產生
 - [x] 2026-04-10 完整 pipeline 跑通（651869906762 甲油膠）
+
+## GPT 生圖路線（2026-07-06）
+- [x] ✨GPT 支線接回：`gpt_image_generator.generate_all`（分類挑主題）+ `image_host.py`（Supabase 圖床）+ batch route 串接 + GUI 每支「✨GPT」勾選 + 成本確認。全鏈實測通（生圖→上傳→公開 URL 200）
+- [ ] ★用 Supabase URL 塞蝦皮 Excel 上傳測 1 張，確認蝦皮抓得到公開圖不被擋，再全量
+- [ ] 非褲類主題微調（目前褲類 PANTS_THEMES、其餘 GENERIC_THEMES 通用）
+- [ ] GPT 生圖品質/prompt 依實拍調校

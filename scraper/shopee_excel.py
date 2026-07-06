@@ -323,8 +323,12 @@ def build_two_tier_rows(
 
     # 商品圖：預設用 1688 主圖；config["image_skip"] 可排除有簡體字/不要的張（index）。
     skip = set(config.get("image_skip", []))
-    all_mains = product_data.get("main_images", [])
-    main_imgs = [_to_jpg_url(u) for i, u in enumerate(all_mains) if i not in skip]
+    override_urls = config.get("image_urls") or []
+    if override_urls:
+        main_imgs = list(override_urls)                      # ✨ GPT 生圖（已上圖床），照用
+    else:
+        all_mains = product_data.get("main_images", [])
+        main_imgs = [_to_jpg_url(u) for i, u in enumerate(all_mains) if i not in skip]
     sku_imgs = product_data.get("sku_images", {})
 
     colors = variants.get("規格1_顏色", [])

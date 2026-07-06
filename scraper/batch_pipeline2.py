@@ -52,6 +52,36 @@ def base_color_of(color_map: dict, key: str) -> str:
     return base_color(key) or key
 
 
+def _gpt_images_for(product_data: dict, code: str, category: str,
+                    item_dir: Path, product_name: str) -> list[str]:
+    """✨ GPT 路線：下載 1688 圖當參考 → 生品牌電商圖 → 上傳圖床 → 回公開 URL 清單。
+
+    圖床未設定 / 無參考圖 / 生圖失敗 → 回 []（呼叫端會退回 1688 原圖）。
+    """
+    from scraper.gpt_image_generator import generate_all
+    from scraper.image_host import is_configured, upload_images
+
+    if not is_configured():
+        logger.warning(f"[{code}] 圖床未設定（SUPABASE_*），GPT 路線退回 1688 圖")
+        return []
+    main_dir = item_dir / "images" / "main"
+    if not (main_dir.exists() and any(main_dir.glob("*.*"))):
+        logger.info(f"[{code}] 下載 1688 主圖當 GPT 參考…")
+        asyncio.run(download_product_images_from_json(product_data, item_dir / "images"))
+    refs = sorted(main_dir.glob("*.*")) if main_dir.exists() else []
+    if not refs:
+        logger.warning(f"[{code}] 無主圖可當參考，GPT 路線退回 1688 圖")
+        return []
+    logger.info(f"[{code}] ✨ GPT 生圖中（{len(refs)} 張參考）…")
+    gen = generate_all(refs, item_dir / "images" / "generated", product_name, category)
+    if not gen:
+        logger.warning(f"[{code}] GPT 沒生出圖，退回 1688 圖")
+        return []
+    urls = upload_images(gen, code, subdir="gpt")
+    logger.info(f"[{code}] ✨ GPT 完成：{len(gen)} 張生圖 → {len(urls)} 張上圖床")
+    return urls
+
+
 def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], dict]:
     """解析 colors 設定 → (selected_colors 的 src key 清單, 更新後的 color_map)。
 
@@ -155,6 +185,13 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
                 f"（{'✓' if sku_count <= 100 else '⚠ 超過 100！'}）"
                 f" 底色：{sorted({base_color_of(color_map, k) for k in selected_colors})}")
 
+    # 路線：gpt = 生品牌電商圖上圖床當商品圖；1688（預設）= 直接用 1688 原圖
+    image_urls = []
+    if str(entry.get("route", "1688")).lower() == "gpt":
+        image_urls = _gpt_images_for(
+            product_data, code, str(entry.get("category", "")), item_dir,
+            ai_content.get("product_short_name") or product_data.get("title", ""))
+
     return {
         "product_data": product_data,
         "ai_content": ai_content,
@@ -168,11 +205,13 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
             "size_chart_url": entry.get("size_chart_url", ""),  # Q 欄圖片尺寸表
             "image_skip": entry.get("image_skip", []),          # 排除的主圖 index（如有簡體字）
             "pre_order_days": entry.get("pre_order_days"),       # AP 較長備貨天數
+            "image_urls": image_urls,                            # ✨ GPT 生圖圖床 URL（有=覆蓋 1688）
         },
         "_meta": {"code": code, "item_id": item_id,
                   "sku_count": sku_count,
                   "n_base_colors": n_base, "n_options": len(selected_colors),
                   "n_sizes": n_sizes, "color_flag": color_flag,
+                  "route": entry.get("route", "1688"), "gpt_images": len(image_urls),
                   "title": ai_content.get("title", "")},
     }
 
@@ -190,10 +229,15 @@ def _make_video_for(product: dict, video_n: int = 9) -> str | None:
         if not collect_images(item_dir):
             logger.info(f"[{code}] 本機無圖，下載 1688 圖片供影片使用…")
             asyncio.run(download_product_images_from_json(product["product_data"], item_dir / "images"))
-        # 影片也排除有簡體字的主圖（config image_skip）：挑乾淨主圖(+SKU)前 n 張
-        skip = set(product.get("config", {}).get("image_skip", []))
+        # ✨ GPT 路線：影片用生的品牌電商圖（generated/gpt_*.png）
+        gen_dir = item_dir / "images" / "generated"
+        gpt_imgs = sorted(gen_dir.glob("gpt_*.png")) if gen_dir.exists() else []
         curated = None
-        if skip:
+        if product.get("config", {}).get("image_urls") and gpt_imgs:
+            curated = gpt_imgs[:video_n]
+        # 1688 路線：排除有簡體字的主圖（config image_skip）：挑乾淨主圖(+SKU)前 n 張
+        skip = set(product.get("config", {}).get("image_skip", []))
+        if curated is None and skip:
             main_dir = item_dir / "images" / "main"
             mains = sorted(main_dir.glob("*.*")) if main_dir.exists() else []
             clean_mains = [p for i, p in enumerate(mains) if i not in skip]

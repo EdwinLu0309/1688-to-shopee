@@ -37,7 +37,9 @@
 │   ├── login.py               # 手動登入模組
 │   ├── downloader.py          # 圖片下載（主圖/細節/SKU）
 │   ├── ai_generator.py        # Claude API 生成蝦皮標題/描述（保留備用）
-│   ├── gemini_generator.py    # Gemini API 多模態生成文案+電商圖片
+│   ├── gemini_generator.py    # Gemini API 多模態生成文案+電商圖片（舊，備用）
+│   ├── gpt_image_generator.py # ★GPT 生圖（gpt-image-1.5，JoysLu Lady V1.0 品牌 prompt，5 主題）
+│   ├── image_host.py          # ★Supabase Storage 圖床：本機 PNG → 公開 https URL（GPT 路線用）
 │   ├── sheet_reader.py        # Google Sheet 採購表讀取（hyperlink 提取）
 │   ├── shopee_excel.py        # 蝦皮 Excel 模板填入（zip 直改保留隱藏 sheet）
 │   ├── copywriter.py          # ★文案引擎：Claude + SOP 生標題/詳情/簡稱/變體命名（build_variants）
@@ -170,9 +172,20 @@ Storage" → PBKDF2-SHA1(saltysalt,1003) → AES-CBC v10）→ httpx 帶 cookie 
 注入的 JS 無 user activation 寫不了剪貼簿；MCP 回傳字串 ~1000 字會截斷。
 Blob 下載是唯一穩定把 JSON 落地的方式。
 
+## 圖片兩條路線（GUI 每支勾選 ✨GPT / 不勾＝1688）
+- **1688 直用（預設）**：Excel 圖片欄直接填 1688 原圖 URL（免圖床）。
+- **✨GPT 生圖**：1688 主圖當參考 → `gpt_image_generator.generate_all`（gpt-image-1.5、
+  `input_fidelity=high` 保留實物、品牌 prompt、褲類 5 主題/其餘通用）→ 生本機 PNG →
+  `image_host.upload_images` 上傳 **Supabase Storage public bucket** 拿公開 URL → 塞 Excel 圖片欄。
+  影片也改用生的圖。GPT 路線在 `batch_pipeline2._gpt_images_for`，`config["image_urls"]` 有值時
+  `shopee_excel.build_two_tier_rows` 就用它覆蓋 1688 圖。**要錢+慢，故 per-product 勾選只對需要的跑**。
+  ⚠️ Supabase URL 塞蝦皮沒實測過 → 先測 1 張確認蝦皮抓得到再全量。
+
 ## 環境變數
 - `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py 用，標題+詳情）
-- `OPENAI_API_KEY` — GPT（之後電商生圖用）
+- `OPENAI_API_KEY` — GPT 生圖（gpt-image-1.5）
+- `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`（`sb_secret_…`）/ `SUPABASE_BUCKET`（預設 `joyslu-images`）
+  — GPT 生圖圖床（Supabase Storage public bucket；只 GPT 路線用）。service key 是機密，勿 commit。
 - `GEMINI_API_KEY` — Google Gemini API key（舊文案/生圖，保留備用）
 
 ## 顏色/尺寸選項政策（color_policy.py + batch 兩層篩選）

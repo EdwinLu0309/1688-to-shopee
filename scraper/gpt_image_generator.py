@@ -66,6 +66,48 @@ PANTS_THEMES = [
 ]
 
 
+# 通用主題（非褲類 fallback：上衣/裙/外套皆可用）
+GENERIC_THEMES = [
+    ("silhouette", "Focus ONLY on the overall SILHOUETTE and how the garment falls on the body: elegant full "
+                   "or half-body lookbook composition with generous margins.",
+     "SILHOUETTE", "版型輪廓"),
+    ("fabric", "Focus ONLY on the FABRIC quality: texture, drape and hand-feel, a serene mid/close shot letting "
+               "the material breathe against warm white space.",
+     "FABRIC", "面料質感"),
+    ("detail", "Focus ONLY on the refined DETAILS (collar / cuff / hem / stitching), a minimal premium detail "
+               "study with lots of whitespace.",
+     "THE DETAILS", "質感細節"),
+    ("daily", "Focus ONLY on a DAILY LIFESTYLE LOOK: an effortless everyday outfit, relaxed elegant mood, "
+              "natural setting.",
+     "DAILY LOOK", "日常穿搭"),
+    ("styling", "Focus ONLY on STYLING: how to pair this piece into a complete elegant outfit, editorial "
+                "full-look composition.",
+     "STYLING", "穿搭示範"),
+]
+
+# 蝦皮分類 ID → 主題組（褲類走 PANTS，其餘走 GENERIC）
+_PANTS_CATS = {"100358", "100360", "100361", "100103"}  # 長褲/短褲/褲裙/牛仔褲
+
+
+def themes_for_category(category_id: str) -> list:
+    return PANTS_THEMES if str(category_id) in _PANTS_CATS else GENERIC_THEMES
+
+
+def generate_all(ref_paths: list[Path], out_dir: Path, product_name: str,
+                 category_id: str = "") -> list[Path]:
+    """一支商品：用同一組參考圖對每個主題各生一張。回傳本機 PNG 路徑清單。
+
+    themes 依分類挑（褲/非褲）；refs 用商品的乾淨主圖（每個主題共用同一組）。
+    """
+    themes = themes_for_category(category_id)
+    refs = [Path(p) for p in ref_paths if Path(p).exists()][:6]
+    if not refs:
+        logger.warning("無參考圖，無法生圖")
+        return []
+    refs_by_theme = {key: refs for key, *_ in themes}
+    return generate_branded_images(refs_by_theme, themes, out_dir, product_name)
+
+
 def _client():
     key = os.environ.get("OPENAI_API_KEY")
     if not key:

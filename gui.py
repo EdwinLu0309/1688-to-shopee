@@ -89,6 +89,7 @@ class App:
 
         self.products: list[dict] = []
         self.check_vars: list[tk.BooleanVar] = []
+        self.route_vars: list[tk.BooleanVar] = []   # True = ✨GPT 生圖；False = 🖼 1688 直用
         self.action_buttons: list[tk.Button] = []
 
         self._build_ui()
@@ -142,7 +143,8 @@ class App:
         # ── 商品勾選清單 ──
         list_lbl = tk.Frame(self.root, padx=24, pady=6, bg=BG)
         list_lbl.pack(fill="x")
-        tk.Label(list_lbl, text="② 勾選要處理的商品：", font=F_LBL_B, bg=BG, fg=FG).pack(side="left")
+        tk.Label(list_lbl, text="② 勾選商品（右側 ✨GPT＝改用 GPT 生圖，不勾＝1688 直用）：",
+                 font=F_LBL_B, bg=BG, fg=FG).pack(side="left")
         self.count_var = tk.StringVar(value="尚未載入名單")
         tk.Label(list_lbl, textvariable=self.count_var, font=F_LBL, bg=BG, fg="#1a7f37").pack(side="left", padx=8)
         tk.Button(list_lbl, text="全不選", font=F_BTN_SM,
@@ -234,7 +236,7 @@ class App:
     def _refresh_products(self) -> None:
         for w in self.checks_frame.winfo_children():
             w.destroy()
-        self.products, self.check_vars = [], []
+        self.products, self.check_vars, self.route_vars = [], [], []
 
         csv = Path(self.csv_path.get())
         if not csv.exists():
@@ -248,15 +250,22 @@ class App:
             return
 
         for p in self.products:
-            var = tk.BooleanVar(value=False)
-            self.check_vars.append(var)
+            sel_var = tk.BooleanVar(value=False)
+            gpt_var = tk.BooleanVar(value=False)
+            self.check_vars.append(sel_var)
+            self.route_vars.append(gpt_var)
+            row = tk.Frame(self.checks_frame, bg="#ffffff")
+            row.pack(fill="x", anchor="w")
             cat = _CAT_NAME.get(p.get("category", ""), p.get("category", ""))
             warn = "" if p.get("category") else " ⚠️"
-            label = f"{p['code']}　[{cat}{warn}]　{p.get('name','')[:20]}"
-            tk.Checkbutton(self.checks_frame, text=label, variable=var, anchor="w",
-                           font=F_CHK, bg="#ffffff", fg="#111111", selectcolor="#ffffff",
+            label = f"{p['code']}　[{cat}{warn}]　{p.get('name','')[:18]}"
+            tk.Checkbutton(row, text="✨GPT", variable=gpt_var, font=("Arial", 12),
+                           bg="#ffffff", fg="#7a3ea8", selectcolor="#ffffff",
+                           activebackground="#f0f0f0", command=self._update_count).pack(side="right", padx=6)
+            tk.Checkbutton(row, text=label, variable=sel_var, anchor="w", font=F_CHK,
+                           bg="#ffffff", fg="#111111", selectcolor="#ffffff",
                            activebackground="#f0f0f0", command=self._update_count,
-                           padx=4, pady=2).pack(fill="x", anchor="w")
+                           padx=4, pady=2).pack(side="left", fill="x", expand=True)
         self._update_count()
 
     def _set_all_checks(self, val: bool) -> None:
@@ -266,10 +275,18 @@ class App:
 
     def _update_count(self) -> None:
         sel = sum(1 for v in self.check_vars if v.get())
-        self.count_var.set(f"名單 {len(self.products)} 筆，已勾 {sel} 筆")
+        gpt = sum(1 for sv, gv in zip(self.check_vars, self.route_vars) if sv.get() and gv.get())
+        extra = f"（其中 {gpt} 支走 ✨GPT）" if gpt else ""
+        self.count_var.set(f"名單 {len(self.products)} 筆，已勾 {sel} 筆{extra}")
 
     def _selected(self) -> list[dict]:
-        return [p for p, v in zip(self.products, self.check_vars) if v.get()]
+        out = []
+        for p, sv, gv in zip(self.products, self.check_vars, self.route_vars):
+            if sv.get():
+                q = dict(p)
+                q["route"] = "gpt" if gv.get() else "1688"
+                out.append(q)
+        return out
 
     # ── 共用 helpers ──────────────────────────────
     def _log(self, msg: str) -> None:
@@ -328,6 +345,15 @@ class App:
                 f"這些勾選商品沒有分類 ID（上傳蝦皮會被擋）：\n{', '.join(nocat)}\n\n要繼續嗎？")
         return True
 
+    def _warn_gpt(self, sel: list[dict]) -> bool:
+        gpt = [p["code"] for p in sel if p.get("route") == "gpt"]
+        if gpt:
+            return messagebox.askyesno(
+                "✨ GPT 生圖確認",
+                f"這 {len(gpt)} 支走 GPT 生圖（每支 5 張、要花錢 + 較慢，會上傳圖床）：\n"
+                f"{', '.join(gpt)}\n\n要繼續嗎？")
+        return True
+
     # ── ⬇️ 更新名單 ──────────────────────────────
     def _on_fetch_list(self) -> None:
         if not self._guard():
@@ -364,6 +390,8 @@ class App:
         if sel is None:
             return
         if not self._warn_no_category(sel):
+            return
+        if not self._warn_gpt(sel):
             return
         self._busy(True, cancellable=True)
         self.cancel_event.clear()
@@ -500,6 +528,8 @@ class App:
                 "缺的會被跳過。要繼續嗎？（建議先按「🔍 只抓取」或用「🚀 一鍵完成」）"):
                 return
         if not self._warn_no_category(sel):
+            return
+        if not self._warn_gpt(sel):
             return
         self._busy(True)
         self._log(f"開始產出（{len(sel)} 個勾選商品，影片={'開' if self.make_video.get() else '關'}）…")
