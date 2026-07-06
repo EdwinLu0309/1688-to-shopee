@@ -39,10 +39,16 @@ from pathlib import Path
 from loguru import logger
 
 from config.settings import OUTPUT_DIR
+from scraper.color_policy import base_color, select_first_axis
 from scraper.copywriter import build_variants, generate_listing
 from scraper.downloader import download_product_images_from_json
 from scraper.shopee_excel import TEMPLATE_PATH, generate_batch_two_tier_excel
 from scraper.video_maker import collect_images, make_product_video
+
+
+def base_color_of(color_map: dict, key: str) -> str:
+    """第一軸 key → 純底色（去身高款/版型），用繁體名判斷較準。"""
+    return base_color(color_map.get(key, key)) or key
 
 
 def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], dict]:
@@ -65,46 +71,6 @@ def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], 
         else:
             src = part
         selected.append(src)
-    return selected, color_map
-
-
-# 款式關鍵詞（繁, 簡）成對——AI 名單「款式」欄常寫繁體，1688 色卡 key 是簡體。
-_STYLE_TOKENS = [
-    ("長褲", "长裤"), ("九分褲", "九分裤"), ("八分褲", "八分裤"),
-    ("七分褲", "七分裤"), ("短褲", "短裤"), ("中褲", "中裤"),
-]
-
-
-def _clean_color_name(key: str) -> str:
-    """把色卡原名清成乾淨顏色名：去掉【…】/（…）款式括號與空白。"""
-    import re
-    s = re.sub(r"[【\[（(][^】\]）)]*[】\]）)]", "", key)
-    return s.strip()
-
-
-def _apply_style_filter(color_map: dict, style_filter: str) -> tuple[list[str], dict]:
-    """依 AI 名單「款式」欄（如「三色長褲」）從色卡挑對應款式的色，並清乾淨顏色名。
-
-    - style_filter 含某款式詞（長褲/九分褲…）→ 只挑 key 含該款式的色，名字去括號。
-    - 不含任何款式詞（純顏色軸，無款式混色）→ 全選，名字照樣清乾淨。
-    回傳 (selected_src_keys, 更新後 color_map)。
-    """
-    color_map = dict(color_map)
-    keys = list(color_map.keys())
-    matched_token = None
-    for trad, simp in _STYLE_TOKENS:
-        if trad in (style_filter or "") or simp in (style_filter or ""):
-            matched_token = (trad, simp)
-            break
-
-    if matched_token:
-        trad, simp = matched_token
-        selected = [k for k in keys if trad in k or simp in k]
-    else:
-        selected = keys  # 無款式詞 → 純顏色軸全選
-
-    for k in selected:
-        color_map[k] = _clean_color_name(k)
     return selected, color_map
 
 
@@ -134,6 +100,7 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
             "selling_price": entry.get("price", ""),
             "demand": entry.get("demand", ""),
             "category": entry.get("category", ""),
+            "style_note": entry.get("style_filter", ""),  # 第一層：Edwin 的款式備註
         })
         if ai_content.get("error"):
             logger.error(f"[{code}] 文案生成失敗：{ai_content.get('error')}")
@@ -142,27 +109,50 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
 
     short_name = ai_content.get("product_short_name", "")
     size_labels = ai_content.get("size_labels", {})
-    base_color_map = ai_content.get("color_map", {})
-    # 挑色優先序：明確 colors > AI 名單款式 style_filter > 全部
-    if entry.get("colors"):
-        selected_colors, color_map = _parse_colors(entry["colors"], base_color_map)
-    elif entry.get("style_filter"):
-        selected_colors, color_map = _apply_style_filter(base_color_map, entry["style_filter"])
-        logger.info(f"[{code}] 依款式「{entry['style_filter']}」挑色 → {selected_colors}")
-    else:
-        selected_colors, color_map = _parse_colors(None, base_color_map)
+    color_map = ai_content.get("color_map", {})
 
-    # 尺碼優先用 Claude 的 size_labels keys（已正規化 S/M/L，且值已換算公斤/繁體），
-    # 而非 product_data["sizes"]（1688 原始如 "S(60-80斤)"，含斤、對不上 labels）。
+    # ── 尺寸：全留（尺寸不對無法替換，是硬需求）──
+    # 用 Claude 的 size_labels keys（已正規化 S/M/L、值已換算公斤/繁體），而非 1688 原始。
     all_sizes = list(size_labels.keys()) or product_data.get("sizes", [])
     sizes_spec = entry.get("sizes")
     if not sizes_spec or str(sizes_spec).strip().lower() == "all":
         selected_sizes = all_sizes
     else:
         selected_sizes = [s.strip() for s in str(sizes_spec).split(",") if s.strip()]
+    n_sizes = max(1, len(selected_sizes))
+
+    # ── 顏色：明確 colors 覆寫 > 兩層篩選（款式備註 → 中性色 ≤5）──
+    color_flag = None
+    if entry.get("colors"):
+        # 手動指定顏色（如舊 P-a1 --colors）→ 照填，不套中性政策
+        selected_colors, color_map = _parse_colors(entry["colors"], color_map)
+    else:
+        # 第一層：Claude 依款式備註留下的第一軸選項（沒有就全部）
+        all_keys = list(color_map.keys())
+        kept = ai_content.get("style_kept") or []
+        kept = [k for k in kept if k in color_map] or all_keys  # 對不上就退回全部
+        # 第二層：第一軸＝顏色×身高款；身高款當尺寸全留，只砍底色到中性 ≤5，100 保底。
+        pick = select_first_axis(kept, color_map, n_sizes, max_base_colors=5, sku_cap=100)
+        selected_colors = pick["selected"]
+        color_flag = pick["flag"]
+        if pick["dropped_fashion"]:
+            logger.info(f"[{code}] 丟流行色（不進貨）：{sorted({base_color_of(color_map, k) for k in pick['dropped_fashion']})}")
+        if pick["dropped_overflow"]:
+            logger.info(f"[{code}] 中性底色超額砍：{sorted({base_color_of(color_map, k) for k in pick['dropped_overflow']})}")
+        if color_flag:
+            logger.warning(f"[{code}] {color_flag}")
+            if not selected_colors:  # 0 中性色 → 保底留原始前幾個（仍標記人工覆核）
+                selected_colors = kept[:5]
 
     variants = build_variants(code, short_name, color_map,
                               selected_colors, size_labels, selected_sizes)
+
+    sku_count = variants.get("sku_count", 0)
+    n_base = len({base_color_of(color_map, k) for k in selected_colors})
+    logger.info(f"[{code}] 留 {n_base} 底色（{len(selected_colors)} 個第一軸選項含身高款）"
+                f" × {n_sizes} 尺碼 = {sku_count} SKU"
+                f"（{'✓' if sku_count <= 100 else '⚠ 超過 100！'}）"
+                f" 底色：{sorted({base_color_of(color_map, k) for k in selected_colors})}")
 
     return {
         "product_data": product_data,
@@ -179,7 +169,9 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
             "pre_order_days": entry.get("pre_order_days"),       # AP 較長備貨天數
         },
         "_meta": {"code": code, "item_id": item_id,
-                  "sku_count": variants.get("sku_count", 0),
+                  "sku_count": sku_count,
+                  "n_base_colors": n_base, "n_options": len(selected_colors),
+                  "n_sizes": n_sizes, "color_flag": color_flag,
                   "title": ai_content.get("title", "")},
     }
 

@@ -44,6 +44,7 @@ _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文
 - 蝦皮售價：NT${price}
 - 訂貨需求：{demand}
 - 蝦皮分類：{category}
+- 款式備註（Edwin 指定這支要哪些款式/季節）：{style_note}
 
 【1688 商品資料】
 - 原始商品名：{title}
@@ -53,6 +54,11 @@ _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文
 - 1688 單價：¥{price_cny}
 
 【要做的事】
+0. 款式篩選（第一層）：依「款式備註」從第一軸選項挑出 Edwin 要的，列進 style_kept。
+   - 備註排除某季節/款式（例：「不要加絨的冬天款，其他都需要」）→ 排除加絨/冬款選項、其餘保留。
+   - 備註指定某款式（例：「只要長褲」）→ 只留該款式選項。
+   - 備註空白或「全款式 / 全部顏色 / 全部」→ 第一軸「全部」原樣列入 style_kept。
+   - style_kept 內容必須是第一軸的「原始選項名（簡體、照原文一字不差）」，不要改寫。
 1. 判子品類（上衣/外套/下身/裙裝/連身類）
 2. 商品簡稱：依商品名濃縮成 2-5 字繁體台灣用語（如「冰丝阔腿裤」→「冰絲寬褲」）
 3. 蝦皮標題：依 SOP §11 / 標題規則，含【JoysLu Lady】+ 核心關鍵字 +「女裝」+ 編號，57-60 字寬內
@@ -67,6 +73,7 @@ _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文
   "product_short_name": "商品簡稱（繁體）",
   "title": "蝦皮標題",
   "description": "完整 8 區塊詳情頁文案（含換行）",
+  "style_kept": ["依款式備註保留的第一軸原始選項名（簡體照原文）"],
   "color_map": {{"1688簡體顏色": "繁體乾淨顏色"}},
   "size_labels": {{"尺碼": "尺碼+數據或純尺碼"}},
   "flags": ["..."]
@@ -107,6 +114,7 @@ def generate_listing(product_data: dict, sheet_ctx: dict) -> dict:
         price=sheet_ctx.get("selling_price", ""),
         demand=sheet_ctx.get("demand", ""),
         category=sheet_ctx.get("category", "") or "（未指定，依商品判斷）",
+        style_note=sheet_ctx.get("style_note", "") or "全款式（全部保留）",
         title=product_data.get("title", ""),
         attributes=json.dumps(product_data.get("attributes", {}), ensure_ascii=False),
         colors="、".join(colors),
