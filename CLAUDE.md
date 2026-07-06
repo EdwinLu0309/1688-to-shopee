@@ -88,6 +88,26 @@ python main.py images --ingest-downloads
 當輸入而非直接解析採購表——因為採購表沒有「編號」、沒有「蝦皮分類 ID」，且 1688 網址是超連結
 （gviz CSV 讀不到 target）；編號 / 分類 ID / 挑色都是人為決策，落地成 manifest 才穩。
 
+## AI 上架名單讀取（ai_list_reader.py）
+`batch2 --ai-list` 讀「【Lady】AI 上架名單」CSV。兩個關鍵設計（都是踩坑換來）：
+- **欄位靠「表頭名稱」動態對應，不寫死欄號**（`_find_header_row`+`_build_colmap`）。因為
+  Edwin 會在表裡插欄/搬欄——實際踩過：插一個「廠商」欄，害款式/尺寸/售價整排右移一格，
+  舊版寫死欄號（COL_STYLE=11…）整個錯位、把廠商名當款式。售價欄無表頭 → 取尺寸欄右邊
+  「最後一個純數字」（跳過利潤率 65.14% 那種帶 % 的）。
+- **分類欄空白 → 從商品名關鍵詞推斷蝦皮分類 ID**（`_infer_category_from_name`，規則由具體到
+  籠統：裙褲→牛仔→裙→短褲→長褲→上衣）。Edwin 有填「分類」欄時優先用 `CATEGORY_MAP`。
+  分類 ID 是查 `config/shopee_template.xlsx`「較長備貨天數範圍」sheet（2013 個分類）得來的真實 ID：
+  長褲 100358 / 牛仔褲 100103 / 短褲 100360 / 褲裙 100361 / 裙裝 100102 / T恤 100352。
+
+## AI 名單怎麼從 Google Sheet 落地成 CSV（私有表）
+名單是**私有** Google Sheet（`AI_LIST_SHEET_ID`，見 settings.py），公開匯出 URL 會 401。
+現行落地法＝**登入 Chrome 同源 gviz + Blob 下載**（跟採購表同套，#S064 起用）：
+在已登入該 Google 帳號的 Chrome，開試算表分頁後同源 `fetch('/spreadsheets/d/<id>/gviz/tq?tqx=out:csv&gid=0')`
+→ 存 `window.__csv` → Blob 下載到 ~/Downloads（Chrome MCP `javascript_tool` 直接回傳 CSV 會被
+「Cookie/query string data」安全過濾擋掉，只能走 Blob）→ 覆蓋 `input/lady_ai_list.csv`。
+⚠️ 這步目前**手動/半自動**（Chrome MCP 驅動），還沒做成 GUI 一鍵按鈕——是「全自動化」最後缺口。
+⚠️ 讀舊本機 CSV = 讀到舊資料：實際踩過本機檔停在 2 商品舊版、線上表其實已 48 商品。
+
 ## 桌面 GUI（gui.py，一條龍、免打指令）
 給非工程使用者的「登入按鈕→App 自己抓」全包 App（tkinter，Win/Mac 雙平台）。
 啟動：Mac 雙擊 `run_mac.command`、Windows 雙擊 `run_windows.bat`（皆優先用 `.venv`）。

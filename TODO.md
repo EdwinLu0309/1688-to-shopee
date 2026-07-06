@@ -5,8 +5,10 @@
 - [x] 2026-07-05 ⚠️→✅ 測試版 `parent_sku` 填回編號**實測失敗**（新模板：上傳成功但資料整片不進）→ 已改回**留空**（黃金規則 #9 第二次血淚確認）；型號 `option_sku` 每 SKU 唯一保留（庫存用，非元兇）
 - [ ] GUI 用 Edwin 實機驗證（登入→抓取→產Excel→補素材）
 - [x] 2026-07-05 主圖抓滿：改讀 JS `offerImgList`（非只 DOM 縮圖）→ P-a1 由 5 張補回 9 張（extract_1688.js + playwright_scraper.py 兩邊都改）
-- [ ] 分類自動對照擴充（`ai_list_reader.CATEGORY_MAP` 目前只有長褲類，遇新分類要補；可改讀模板分類 sheet）
-- [ ] AI 名單 CSV 落地半自動（目前 Chrome 同源 fetch → 手動存 input/；可固化成 GUI 內按鈕/指令）
+- [x] 2026-07-06 ★AI 名單改「表頭名稱」對應（不寫死欄號）+ 分類欄空白時從商品名推斷分類 ID。踩坑：Edwin 在線上表插「廠商」欄→款式/尺寸/售價整排右移，舊版寫死欄號全錯位
+- [x] 2026-07-06 分類 ID 從模板「較長備貨天數範圍」sheet 取真實 ID（長褲/牛仔褲/短褲/褲裙/裙裝/T恤），CATEGORY_MAP + 商品名推斷雙軌
+- [ ] ★AI 名單 CSV 落地做成 GUI 一鍵按鈕（目前靠 Chrome MCP 同源 gviz+Blob 手動抓；這是全自動化最後缺口）。難點：私有表 401，要嘛 Playwright+Google 登入 cookie、要嘛收割日常 Chrome 的 Google session（#S065 解密法）
+- [ ] 48 商品 live 名單：售價/款式已就緒、分類已自動推斷；待 Edwin 決定要不要整批跑（scrape 48 + 文案 + 影片 是大工程 ~30min），或先挑幾支
 - [ ] GUI 抓取穩定度：批次抓多商品時的節流/重試；被擋自動退回路A（Chrome MCP）提示
 - [ ] 訂貨表分流（正式款 / 預購款 分頁；餵 1688-order 自動下單）
 - [ ] 選項勾選表（兩軸 → 人工勾選上架哪些 + 訂貨數量）
