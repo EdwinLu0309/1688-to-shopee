@@ -1,20 +1,18 @@
 """
 1688 → 蝦皮 上架小幫手 — GUI 啟動器（仿 1688-order launcher）
 
-一條龍：⬇️ 更新名單（收割 Chrome 的 Google session 抓私有 Sheet）→ 勾選要處理的商品 →
-🔑 登入 1688 → 🔍 抓取（Playwright+cookie）→ ▶ 產出 Excel（batch2 文案+變體+影片）→
-📁 素材夾補影片/尺寸表。
+一條龍：⬇️ 更新名單 → 勾選商品 → 🚀 一鍵完成（抓取→產出）→ 📁 素材夾。
+（🔍 抓取、📦 產出 也可分步個別按；🔑 登入 1688 首次/過期時用。）
 
-按鈕對應流程（#S066 規劃 + #後續 補齊全自動化）：
+按鈕對應：
   ⬇️ 更新名單  sheet_fetcher.fetch_ai_list（路 B：解密 Chrome Google cookie 抓私有 Sheet）
-  （勾選）     ai_list_reader 解析 → 逐商品 checkbox，先勾幾筆試跑、確認再全選
-  🔑 登入 1688 playwright_scraper.save_cookies  → config/cookies.json
-  🔍 抓取商品  playwright_scraper.scrape_many（只抓勾選的）→ output/{item_id}.json
-  ▶ 產出 Excel batch_pipeline2.run_batch_two_tier（只跑勾選的）→ 合併蝦皮 Excel
+  🚀 一鍵完成  勾選商品 → scrape_many（抓）→ run_batch_two_tier（產）一次到底
+  🔑 登入 1688 playwright_scraper.save_cookies → config/cookies.json
+  🔍 抓取商品  playwright_scraper.scrape_many（去 1688 下載資料/圖）→ output/{id}.json
+  📦 產出上架檔 batch_pipeline2.run_batch_two_tier（文案+挑色+影片+蝦皮 Excel）
   📁 素材夾    output/上架素材/（影片+尺寸表，蝦皮 Excel 無影片欄，手動補）
 
-跨平台：GUI 邏輯 Win/Mac 皆可；但「更新名單」的 cookie 解密目前只實作 macOS。
-深色模式配色沿用 launcher（tk_setPalette + 每 widget 明確 bg/fg）。
+跨平台：GUI 邏輯 Win/Mac 皆可；「更新名單」的 cookie 解密目前只實作 macOS。
 """
 import asyncio
 import json
@@ -40,10 +38,21 @@ STATE_PATH = BASE_DIR / "config" / "gui_state.json"
 DEFAULT_CSV = BASE_DIR / "input" / "lady_ai_list.csv"
 ASSETS_DIR = Path(OUTPUT_DIR) / "上架素材"
 
-# 分類 ID → 顯示名（勾選清單用）
 _CAT_NAME = {"100358": "長褲", "100103": "牛仔褲", "100360": "短褲",
              "100361": "褲裙", "100102": "裙裝", "100352": "上衣",
              "100356": "上衣", "100353": "襯衫", "": "❌無分類"}
+
+# ── 字體（整體放大，看得清楚）──
+F_TITLE = ("Arial", 24, "bold")
+F_LBL = ("Arial", 15)
+F_LBL_B = ("Arial", 15, "bold")
+F_HINT = ("Arial", 12)
+F_BTN = ("Arial", 16)
+F_BTN_HERO = ("Arial", 20, "bold")
+F_BTN_SM = ("Arial", 14)
+F_CHK = ("Arial", 14)
+F_LOG = ("Menlo", 13)
+F_STATUS = ("Arial", 14)
 
 
 def _open_path(path: Path) -> None:
@@ -64,7 +73,6 @@ class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("1688 → 蝦皮 上架小幫手")
-        self.root.resizable(False, False)
 
         self.BG, self.FG = "#f5f5f5", "#222222"
         try:
@@ -84,9 +92,9 @@ class App:
         self.action_buttons: list[tk.Button] = []
 
         self._build_ui()
-        self.root.minsize(600, 0)
+        self.root.minsize(760, 860)
         self._refresh_cookie_status()
-        self._refresh_products()   # 開檔時若有 CSV 就先載入勾選清單
+        self._refresh_products()
         self._center_window()
 
     # ── 狀態記憶 ──────────────────────────────
@@ -114,37 +122,37 @@ class App:
         BG, FG = self.BG, self.FG
 
         tk.Label(self.root, text="1688 → 蝦皮 上架小幫手",
-                 font=("Arial", 17, "bold"), pady=8, bg=BG, fg=FG).pack()
+                 font=F_TITLE, pady=10, bg=BG, fg=FG).pack()
 
-        # AI 名單 + 更新
-        csv_frame = tk.Frame(self.root, padx=20, pady=2, bg=BG)
+        # ── 名單 + 更新 ──
+        csv_frame = tk.Frame(self.root, padx=24, pady=4, bg=BG)
         csv_frame.pack(fill="x")
-        tk.Label(csv_frame, text="AI 名單：", font=("Arial", 11), bg=BG, fg=FG).pack(side="left")
-        tk.Entry(csv_frame, textvariable=self.csv_path, font=("Arial", 9), width=30,
+        tk.Label(csv_frame, text="① 名單：", font=F_LBL_B, bg=BG, fg=FG).pack(side="left")
+        tk.Entry(csv_frame, textvariable=self.csv_path, font=("Arial", 12), width=24,
                  bg="#ffffff", fg="#111111").pack(side="left", fill="x", expand=True, padx=4)
-        tk.Button(csv_frame, text="選檔…", font=("Arial", 9),
-                  command=self._on_pick_csv).pack(side="left", padx=(0, 4))
-        self.fetch_btn = tk.Button(csv_frame, text="⬇️ 更新名單", font=("Arial", 11, "bold"),
+        tk.Button(csv_frame, text="選檔…", font=F_BTN_SM,
+                  command=self._on_pick_csv).pack(side="left", padx=(0, 6))
+        self.fetch_btn = tk.Button(csv_frame, text="⬇️ 更新名單", font=F_BTN,
                                    command=self._on_fetch_list)
         self.fetch_btn.pack(side="left")
         self.action_buttons.append(self.fetch_btn)
         tk.Label(self.root, text="（⬇️ 更新名單＝直接連你 Chrome 的 Google 帳號抓最新線上表，免登入）",
-                 font=("Arial", 9), fg="#888", bg=BG).pack(anchor="w", padx=20)
+                 font=F_HINT, fg="#888", bg=BG).pack(anchor="w", padx=24)
 
-        # 商品勾選清單（可捲動）
-        list_lbl = tk.Frame(self.root, padx=20, pady=4, bg=BG)
+        # ── 商品勾選清單 ──
+        list_lbl = tk.Frame(self.root, padx=24, pady=6, bg=BG)
         list_lbl.pack(fill="x")
+        tk.Label(list_lbl, text="② 勾選要處理的商品：", font=F_LBL_B, bg=BG, fg=FG).pack(side="left")
         self.count_var = tk.StringVar(value="尚未載入名單")
-        tk.Label(list_lbl, textvariable=self.count_var, font=("Arial", 10, "bold"),
-                 bg=BG, fg="#333").pack(side="left")
-        tk.Button(list_lbl, text="全不選", font=("Arial", 9),
-                  command=lambda: self._set_all_checks(False)).pack(side="right", padx=2)
-        tk.Button(list_lbl, text="全選", font=("Arial", 9),
-                  command=lambda: self._set_all_checks(True)).pack(side="right", padx=2)
+        tk.Label(list_lbl, textvariable=self.count_var, font=F_LBL, bg=BG, fg="#1a7f37").pack(side="left", padx=8)
+        tk.Button(list_lbl, text="全不選", font=F_BTN_SM,
+                  command=lambda: self._set_all_checks(False)).pack(side="right", padx=3)
+        tk.Button(list_lbl, text="全選", font=F_BTN_SM,
+                  command=lambda: self._set_all_checks(True)).pack(side="right", padx=3)
 
-        list_outer = tk.Frame(self.root, padx=20, bg=BG)
-        list_outer.pack(fill="x")
-        self.canvas = tk.Canvas(list_outer, height=180, bg="#ffffff",
+        list_outer = tk.Frame(self.root, padx=24, bg=BG)
+        list_outer.pack(fill="both", expand=True)
+        self.canvas = tk.Canvas(list_outer, height=210, bg="#ffffff",
                                 highlightthickness=1, highlightbackground="#ccc")
         scroll = tk.Scrollbar(list_outer, orient="vertical", command=self.canvas.yview)
         self.checks_frame = tk.Frame(self.canvas, bg="#ffffff")
@@ -157,67 +165,73 @@ class App:
         self.canvas.bind_all("<MouseWheel>",
                              lambda e: self.canvas.yview_scroll(int(-1 * (e.delta / 3)), "units"))
 
-        # Cookie 狀態
-        cf = tk.Frame(self.root, padx=20, pady=4, bg=BG)
-        cf.pack(fill="x")
-        tk.Label(cf, text="1688 登入：", font=("Arial", 11), bg=BG, fg=FG).pack(side="left")
-        self.cookie_status = tk.Label(cf, text="", font=("Arial", 11, "bold"), bg=BG)
-        self.cookie_status.pack(side="left")
+        # ── 一鍵完成（主按鈕）──
+        hero = tk.Frame(self.root, padx=24, pady=8, bg=BG)
+        hero.pack(fill="x")
+        self.run_all_btn = tk.Button(hero, text="🚀 一鍵完成（抓取 → 產出上架檔）",
+                                     font=F_BTN_HERO, bg="#1a7f37", fg="#ffffff",
+                                     activebackground="#15682d", activeforeground="#ffffff",
+                                     height=2, command=self._on_run_all)
+        self.run_all_btn.pack(fill="x")
+        self.action_buttons.append(self.run_all_btn)
+        tk.Label(self.root, text="③ 勾好商品按這顆：自動去 1688 抓資料，再做文案+挑色+影片+蝦皮 Excel，一次到底",
+                 font=F_HINT, fg="#888", bg=BG).pack(anchor="w", padx=24)
 
-        tk.Frame(self.root, height=1, bg="#ccc").pack(fill="x", padx=20, pady=4)
+        tk.Checkbutton(self.root, text="產出時順便合成短影片（缺圖自動下載）", variable=self.make_video,
+                       font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
+                       activebackground=BG).pack(anchor="w", padx=24, pady=(2, 4))
 
-        # 四步按鈕
-        steps = tk.Frame(self.root, padx=20, bg=BG)
+        # ── 分步 / 其他 ──
+        tk.Label(self.root, text="分步執行（需要時才個別按）：", font=F_HINT, fg="#666",
+                 bg=BG).pack(anchor="w", padx=24, pady=(4, 0))
+        steps = tk.Frame(self.root, padx=24, pady=2, bg=BG)
         steps.pack(fill="x")
 
-        def step_row(btn_text, cmd, hint):
-            row = tk.Frame(steps, bg=BG)
-            row.pack(fill="x", pady=4)
-            btn = tk.Button(row, text=btn_text, font=("Arial", 12), width=14, command=cmd)
-            btn.pack(side="left")
-            self.action_buttons.append(btn)
-            tk.Label(row, text=hint, font=("Arial", 10), fg="#666", bg=BG,
-                     anchor="w", justify="left", wraplength=360).pack(side="left", padx=(12, 0))
+        def step_btn(text, cmd):
+            b = tk.Button(steps, text=text, font=F_BTN_SM, command=cmd)
+            b.pack(side="left", padx=(0, 6))
+            self.action_buttons.append(b)
+            return b
 
-        step_row("🔑 登入 1688", self._on_login, "首次或 cookie 過期時，開瀏覽器登入 1688 存 cookie")
-        step_row("🔍 抓取商品", self._on_scrape, "只抓「勾選」的商品 → output/{id}.json（9 張主圖）")
-        step_row("▶ 產出 Excel", self._on_run, "只跑「勾選」的：Claude 文案+變體+影片 → 合併 Excel")
-        step_row("📁 開素材夾", self._on_open_assets, "影片+尺寸表按編號歸檔，手動補上蝦皮")
+        step_btn("🔑 登入 1688", self._on_login)
+        step_btn("🔍 只抓取", self._on_scrape)
+        step_btn("📦 只產出", self._on_run)
+        step_btn("📁 素材夾", self._on_open_assets)
 
-        tk.Checkbutton(steps, text="產出時順便合成短影片（缺圖自動下載）", variable=self.make_video,
-                       font=("Arial", 10), bg=BG, fg=FG, selectcolor="#ffffff",
-                       activebackground=BG).pack(anchor="w", pady=(2, 0))
-
-        tk.Frame(self.root, height=1, bg="#ccc").pack(fill="x", padx=20, pady=4)
+        # cookie 狀態
+        cf = tk.Frame(self.root, padx=24, pady=4, bg=BG)
+        cf.pack(fill="x")
+        tk.Label(cf, text="1688 登入：", font=F_LBL, bg=BG, fg=FG).pack(side="left")
+        self.cookie_status = tk.Label(cf, text="", font=F_LBL_B, bg=BG)
+        self.cookie_status.pack(side="left")
 
         # 日誌
-        lf = tk.Frame(self.root, padx=20, bg=BG)
+        lf = tk.Frame(self.root, padx=24, bg=BG)
         lf.pack(fill="both", expand=True)
-        self.log_text = tk.Text(lf, height=7, font=("Menlo", 10), wrap="word", relief="solid",
+        self.log_text = tk.Text(lf, height=7, font=F_LOG, wrap="word", relief="solid",
                                 borderwidth=1, bg="#1e1e1e", fg="#d4d4d4",
                                 insertbackground="#d4d4d4", state="disabled")
         self.log_text.pack(fill="both", expand=True)
 
         # 底部
-        bottom = tk.Frame(self.root, padx=20, pady=6, bg=BG)
+        bottom = tk.Frame(self.root, padx=24, pady=8, bg=BG)
         bottom.pack(fill="x")
-        self.stop_btn = tk.Button(bottom, text="⏹ 停止", font=("Arial", 11), width=8,
+        self.stop_btn = tk.Button(bottom, text="⏹ 停止", font=F_BTN_SM, width=8,
                                   state="disabled", command=self._on_stop)
         self.stop_btn.pack(side="right")
-        tk.Label(bottom, textvariable=self.status_var, font=("Arial", 11), fg="#555", bg=BG,
-                 wraplength=400, justify="left", anchor="w").pack(side="left", fill="x", expand=True)
+        tk.Label(bottom, textvariable=self.status_var, font=F_STATUS, fg="#555", bg=BG,
+                 wraplength=560, justify="left", anchor="w").pack(side="left", fill="x", expand=True)
         tk.Frame(self.root, height=8, bg=BG).pack()
 
     def _center_window(self) -> None:
         self.root.update_idletasks()
-        w, h = self.root.winfo_width(), self.root.winfo_height()
+        w, h = self.root.winfo_reqwidth(), self.root.winfo_reqheight()
         x = (self.root.winfo_screenwidth() - w) // 2
-        y = (self.root.winfo_screenheight() - h) // 2
+        y = max(0, (self.root.winfo_screenheight() - h) // 2)
         self.root.geometry(f"+{x}+{y}")
 
     # ── 商品勾選清單 ──────────────────────────────
     def _refresh_products(self) -> None:
-        """讀 CSV → 解析 → 重建勾選清單。CSV 不存在就清空。"""
         for w in self.checks_frame.winfo_children():
             w.destroy()
         self.products, self.check_vars = [], []
@@ -238,12 +252,11 @@ class App:
             self.check_vars.append(var)
             cat = _CAT_NAME.get(p.get("category", ""), p.get("category", ""))
             warn = "" if p.get("category") else " ⚠️"
-            label = f"{p['code']}　[{cat}{warn}]　{p.get('name','')[:22]}"
-            cb = tk.Checkbutton(self.checks_frame, text=label, variable=var, anchor="w",
-                                font=("Arial", 10), bg="#ffffff", fg="#111111",
-                                selectcolor="#ffffff", activebackground="#f0f0f0",
-                                command=self._update_count)
-            cb.pack(fill="x", anchor="w")
+            label = f"{p['code']}　[{cat}{warn}]　{p.get('name','')[:20]}"
+            tk.Checkbutton(self.checks_frame, text=label, variable=var, anchor="w",
+                           font=F_CHK, bg="#ffffff", fg="#111111", selectcolor="#ffffff",
+                           activebackground="#f0f0f0", command=self._update_count,
+                           padx=4, pady=2).pack(fill="x", anchor="w")
         self._update_count()
 
     def _set_all_checks(self, val: bool) -> None:
@@ -253,7 +266,7 @@ class App:
 
     def _update_count(self) -> None:
         sel = sum(1 for v in self.check_vars if v.get())
-        self.count_var.set(f"名單 {len(self.products)} 筆，已勾選 {sel} 筆")
+        self.count_var.set(f"名單 {len(self.products)} 筆，已勾 {sel} 筆")
 
     def _selected(self) -> list[dict]:
         return [p for p, v in zip(self.products, self.check_vars) if v.get()]
@@ -284,7 +297,7 @@ class App:
             except Exception:  # noqa: BLE001
                 self.cookie_status.config(text="⚠️ cookie 檔壞了", fg="#cf222e")
         else:
-            self.cookie_status.config(text="❌ 未登入（先按「🔑 登入」）", fg="#cf222e")
+            self.cookie_status.config(text="❌ 未登入（先按「🔑 登入 1688」）", fg="#cf222e")
 
     def _busy(self, on: bool, cancellable: bool = False) -> None:
         self.running = on
@@ -306,6 +319,14 @@ class App:
             messagebox.showwarning("提示", "請先在清單勾選要處理的商品（可先勾 1-2 筆試跑）")
             return None
         return sel
+
+    def _warn_no_category(self, sel: list[dict]) -> bool:
+        nocat = [p["code"] for p in sel if not p.get("category")]
+        if nocat:
+            return messagebox.askyesno(
+                "有商品無分類",
+                f"這些勾選商品沒有分類 ID（上傳蝦皮會被擋）：\n{', '.join(nocat)}\n\n要繼續嗎？")
+        return True
 
     # ── ⬇️ 更新名單 ──────────────────────────────
     def _on_fetch_list(self) -> None:
@@ -332,6 +353,72 @@ class App:
         finally:
             self.root.after(0, self._on_task_done)
 
+    # ── 🚀 一鍵完成 ──────────────────────────────
+    def _on_run_all(self) -> None:
+        if not self._guard():
+            return
+        if not COOKIE_PATH.exists():
+            messagebox.showerror("錯誤", "還沒登入 1688，請先按「🔑 登入 1688」")
+            return
+        sel = self._guard_selection()
+        if sel is None:
+            return
+        if not self._warn_no_category(sel):
+            return
+        self._busy(True, cancellable=True)
+        self.cancel_event.clear()
+        self._log(f"🚀 一鍵完成：{len(sel)} 商品（① 抓取 → ② 產出）…")
+        threading.Thread(target=self._run_all_worker, args=(sel,), daemon=True).start()
+
+    def _run_all_worker(self, products: list[dict]) -> None:
+        from scraper.playwright_scraper import scrape_many
+        from scraper.batch_pipeline2 import run_batch_two_tier
+        try:
+            # ① 抓取
+            ids = [p["item_id"] for p in products]
+            self._thread_log(f"① 去 1688 抓 {len(ids)} 商品…")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                res = loop.run_until_complete(scrape_many(
+                    ids, cookie_path=COOKIE_PATH, out_dir=Path(OUTPUT_DIR),
+                    headless=False, progress_cb=self._thread_log,
+                    cancel_check=self.cancel_event.is_set))
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+            self._thread_log(f"① 抓取完成：成功 {res['success']} / 被擋 {res['blocked']} / 失敗 {res['failed']}")
+            if self.cancel_event.is_set():
+                self._thread_log("已取消，未產出")
+                return
+            if res["success"] == 0:
+                self._thread_log("① 一個都沒抓到（cookie 可能過期）→ 停止，未產出")
+                self.root.after(0, self._prompt_relogin)
+                return
+            # ② 產出（run_batch_two_tier 內部自帶 asyncio.run，須無 running loop）
+            self._thread_log(f"② 產出 {len(products)} 商品（文案+挑色+影片+Excel）…")
+            res2 = run_batch_two_tier(json_dir=Path(OUTPUT_DIR),
+                                      make_video=self.make_video.get(), products=products)
+            self._report_batch(res2)
+        except Exception as e:  # noqa: BLE001
+            import traceback
+            traceback.print_exc()
+            self._thread_log(f"一鍵完成錯誤：{e}")
+        finally:
+            self.root.after(0, self._on_task_done)
+
+    def _report_batch(self, res: dict) -> None:
+        self._thread_log(f"✅ 完成：{res['success']}/{res['total']} 成功，失敗 {res['failed']}")
+        for m in res.get("products", []):
+            vtag = " | 🎬" if m.get("video") else ""
+            self._thread_log(f"    ✓ {m['code']}: {m['sku_count']} SKU{vtag} | {m['title'][:24]}")
+        for f in res.get("failures", []):
+            self._thread_log(f"    ✗ {f['code']}: {f['error']}")
+        excel = res.get("excel_path")
+        if excel:
+            self._thread_log(f"📄 蝦皮 Excel：{excel}")
+            self.root.after(0, self._prompt_open_excel, Path(excel))
+
     # ── 🔑 登入 ──────────────────────────────
     def _on_login(self) -> None:
         if not self._guard():
@@ -356,7 +443,7 @@ class App:
             loop.close()
             self.root.after(0, self._on_task_done)
 
-    # ── 🔍 抓取（只抓勾選）──────────────────────────────
+    # ── 🔍 只抓取 ──────────────────────────────
     def _on_scrape(self) -> None:
         if not self._guard():
             return
@@ -396,7 +483,7 @@ class App:
                                "有商品抓到 0 主圖（cookie 可能過期）。要現在重新登入嗎？"):
             self._on_login()
 
-    # ── ▶ 產出（只跑勾選）──────────────────────────────
+    # ── 📦 只產出 ──────────────────────────────
     def _on_run(self) -> None:
         if not self._guard():
             return
@@ -410,17 +497,12 @@ class App:
             if not messagebox.askyesno(
                 "缺抓取資料",
                 f"這些勾選商品還沒抓取（缺 JSON）：\n{', '.join(missing)}\n\n"
-                "缺的會被跳過。要繼續嗎？（建議先按「🔍 抓取商品」）"):
+                "缺的會被跳過。要繼續嗎？（建議先按「🔍 只抓取」或用「🚀 一鍵完成」）"):
                 return
-        nocat = [p["code"] for p in sel if not p.get("category")]
-        if nocat:
-            if not messagebox.askyesno(
-                "有商品無分類",
-                f"這些勾選商品沒有分類 ID（上傳蝦皮會被擋）：\n{', '.join(nocat)}\n\n"
-                "要繼續嗎？（建議先到 Google 表補分類欄再更新名單）"):
-                return
+        if not self._warn_no_category(sel):
+            return
         self._busy(True)
-        self._log(f"開始產出 Excel（{len(sel)} 個勾選商品，影片={'開' if self.make_video.get() else '關'}）…")
+        self._log(f"開始產出（{len(sel)} 個勾選商品，影片={'開' if self.make_video.get() else '關'}）…")
         threading.Thread(target=self._run_worker, args=(sel,), daemon=True).start()
 
     def _run_worker(self, products: list[dict]) -> None:
@@ -428,16 +510,7 @@ class App:
         try:
             res = run_batch_two_tier(json_dir=Path(OUTPUT_DIR),
                                      make_video=self.make_video.get(), products=products)
-            self._thread_log(f"✅ 完成：{res['success']}/{res['total']} 成功，失敗 {res['failed']}")
-            for m in res.get("products", []):
-                vtag = " | 🎬" if m.get("video") else ""
-                self._thread_log(f"    ✓ {m['code']}: {m['sku_count']} SKU{vtag} | {m['title'][:26]}")
-            for f in res.get("failures", []):
-                self._thread_log(f"    ✗ {f['code']}: {f['error']}")
-            excel = res.get("excel_path")
-            if excel:
-                self._thread_log(f"📄 蝦皮 Excel：{excel}")
-                self.root.after(0, self._prompt_open_excel, Path(excel))
+            self._report_batch(res)
         except Exception as e:  # noqa: BLE001
             import traceback
             traceback.print_exc()

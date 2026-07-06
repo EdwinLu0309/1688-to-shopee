@@ -116,7 +116,9 @@ Storage" → PBKDF2-SHA1(saltysalt,1003) → AES-CBC v10）→ httpx 帶 cookie 
 ## 桌面 GUI（gui.py，一條龍、免打指令）
 給非工程使用者的「按幾顆按鈕就上架」全包 App（tkinter，Win/Mac 雙平台）。
 啟動：Mac 雙擊 `run_mac.command`、Windows 雙擊 `run_windows.bat`（皆優先用 `.venv`）。
-流程：⬇️ 更新名單 → 勾選商品 → 🔑 登入 → 🔍 抓取 → ▶ 產出 → 📁 素材：
+流程：⬇️ 更新名單 → 勾選商品 → 🚀 一鍵完成（抓取→產出）→ 📁 素材。字體整體放大（可讀性）。
+主按鈕是 **🚀 一鍵完成**（`_run_all_worker`：scrape_many 抓 → run_batch_two_tier 產，一次到底）；
+下面「分步執行」保留 🔍 只抓取 / 📦 只產出 給需要重跑單一步驟時用。各步驟：
 0. **⬇️ 更新名單** → `sheet_fetcher.fetch_ai_list`（路 B：解密日常 Chrome 的 Google cookie 抓
    私有 Sheet，免登入）→ 覆蓋 `input/lady_ai_list.csv` → 解析成**逐商品勾選清單**（顯示
    編號/推斷分類/名稱）。⚠️ cookie 解密目前只實作 macOS。
