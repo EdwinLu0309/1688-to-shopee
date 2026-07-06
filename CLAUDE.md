@@ -99,27 +99,36 @@ python main.py images --ingest-downloads
   分類 ID 是查 `config/shopee_template.xlsx`「較長備貨天數範圍」sheet（2013 個分類）得來的真實 ID：
   長褲 100358 / 牛仔褲 100103 / 短褲 100360 / 褲裙 100361 / 裙裝 100102 / T恤 100352。
 
-## AI 名單怎麼從 Google Sheet 落地成 CSV（私有表）
+## AI 名單怎麼從 Google Sheet 落地成 CSV（私有表，路 B 已自動化）
 名單是**私有** Google Sheet（`AI_LIST_SHEET_ID`，見 settings.py），公開匯出 URL 會 401。
-現行落地法＝**登入 Chrome 同源 gviz + Blob 下載**（跟採購表同套，#S064 起用）：
-在已登入該 Google 帳號的 Chrome，開試算表分頁後同源 `fetch('/spreadsheets/d/<id>/gviz/tq?tqx=out:csv&gid=0')`
-→ 存 `window.__csv` → Blob 下載到 ~/Downloads（Chrome MCP `javascript_tool` 直接回傳 CSV 會被
-「Cookie/query string data」安全過濾擋掉，只能走 Blob）→ 覆蓋 `input/lady_ai_list.csv`。
-⚠️ 這步目前**手動/半自動**（Chrome MCP 驅動），還沒做成 GUI 一鍵按鈕——是「全自動化」最後缺口。
+**路 B（現行，一鍵）＝收割日常 Chrome 的 Google session cookie**（`scraper/chrome_cookies.py`
++ `sheet_fetcher.py`；GUI「⬇️ 更新名單」/ CLI `python main.py fetch-list`）：
+`chrome_cookies.get_cookies("google.com", profile)` 解密（macOS：`security` 取 "Chrome Safe
+Storage" → PBKDF2-SHA1(saltysalt,1003) → AES-CBC v10）→ httpx 帶 cookie 打
+`/gviz/tq?tqx=out:csv&gid=<gid>` → 存 `input/lady_ai_list.csv`。逐一 Chrome 設定檔試，
+第一個抓到合法 CSV 的就用（自動判斷哪個 profile 登入了名單那個 Google 帳號）。
+不開瀏覽器、不登入、不碰驗證。解密法移植自 listing-optimization-tool 的 `grab_session.py`（#S065）。
+⚠️ cookie 解密**只實作 macOS**；Windows（DPAPI + AES-GCM）待補。
 ⚠️ 讀舊本機 CSV = 讀到舊資料：實際踩過本機檔停在 2 商品舊版、線上表其實已 48 商品。
+（備用：路 A＝登入 Chrome 開試算表分頁後同源 fetch gviz → Blob 下載到 ~/Downloads，Chrome MCP
+`javascript_tool` 直接回傳 CSV 會被「Cookie/query string data」安全過濾擋掉，只能走 Blob。）
 
 ## 桌面 GUI（gui.py，一條龍、免打指令）
-給非工程使用者的「登入按鈕→App 自己抓」全包 App（tkinter，Win/Mac 雙平台）。
+給非工程使用者的「按幾顆按鈕就上架」全包 App（tkinter，Win/Mac 雙平台）。
 啟動：Mac 雙擊 `run_mac.command`、Windows 雙擊 `run_windows.bat`（皆優先用 `.venv`）。
-四步對應四顆按鈕，輸入是一份「【Lady】AI 上架名單」CSV（放 `input/`）：
-1. **🔑 登入 1688** → `playwright_scraper.save_cookies` 開瀏覽器手動登入 → 存 `config/cookies.json`
+流程：⬇️ 更新名單 → 勾選商品 → 🔑 登入 → 🔍 抓取 → ▶ 產出 → 📁 素材：
+0. **⬇️ 更新名單** → `sheet_fetcher.fetch_ai_list`（路 B：解密日常 Chrome 的 Google cookie 抓
+   私有 Sheet，免登入）→ 覆蓋 `input/lady_ai_list.csv` → 解析成**逐商品勾選清單**（顯示
+   編號/推斷分類/名稱）。⚠️ cookie 解密目前只實作 macOS。
+1. **（勾選）** → 先勾 1-2 筆試跑，確認再「全選」整批（`_selected()`；抓取/產出都只做勾選的）。
+2. **🔑 登入 1688** → `playwright_scraper.save_cookies` 開瀏覽器手動登入 → 存 `config/cookies.json`
    （抄 1688-order launcher 的 `_save_cookies`；偵測跳離 login 頁視為成功，最多等 5 分）。
-2. **🔍 抓取商品** → 讀 AI 名單取每筆 item_id → `playwright_scraper.scrape_many`
+3. **🔍 抓取商品** → 勾選商品的 item_id → `playwright_scraper.scrape_many`
    （Playwright+cookie+stealth，共用一個瀏覽器逐頁抓）→ 存 `output/{item_id}.json`。
    抓到 0 主圖 = cookie 過期/被擋 → 彈窗提示重登。
-3. **▶ 產出 Excel** → `batch_pipeline2.run_batch_two_tier(products=…)`（= `batch2`，Claude 文案
-   +變體+影片 → 合併一個蝦皮二階 Excel）。缺 JSON 的編號會先提醒去抓取。
-4. **📁 開素材夾** → 開 `output/上架素材/`（影片+尺寸表，蝦皮 Excel 無影片欄，手動補）。
+4. **▶ 產出 Excel** → `batch_pipeline2.run_batch_two_tier(products=勾選的)`（= `batch2`，Claude
+   文案+變體+影片 → 合併蝦皮二階 Excel）。缺 JSON / 無分類的編號會先彈窗提醒。
+5. **📁 開素材夾** → 開 `output/上架素材/`（影片+尺寸表，蝦皮 Excel 無影片欄，手動補）。
 
 執行緒模型同 launcher：worker thread 跑 `asyncio.new_event_loop()`，`root.after(0,…)` 回主緒更新 UI。
 深色模式配色沿用 launcher（`tk_setPalette` + 每 widget 明確 bg/fg，避免 macOS 撞色隱形）。

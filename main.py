@@ -328,6 +328,22 @@ def images(ctx: click.Context, json_dir: str, ingest_downloads: bool) -> None:
     click.echo("")
 
 
+@cli.command("fetch-list")
+@click.option("--output", "-o", type=click.Path(), default=None, help="輸出 CSV（預設 input/lady_ai_list.csv）")
+@click.option("--profile", default=None, help="指定 Chrome 設定檔（預設自動掃描所有設定檔）")
+@click.pass_context
+def fetch_list(ctx: click.Context, output: str | None, profile: str | None) -> None:
+    """抓私有「AI 上架名單」Google Sheet → CSV（路 B：解密日常 Chrome 的 Google cookie，免登入）。"""
+    from scraper.sheet_fetcher import fetch_ai_list
+
+    res = fetch_ai_list(out_path=Path(output) if output else None, profile=profile)
+    if res.get("ok"):
+        click.echo(f"\n  ✓ 名單已更新（設定檔 {res['profile']}，{res['bytes']} bytes）\n")
+    else:
+        click.echo(f"\n  ✗ 抓取失敗：{res.get('error')}\n")
+        sys.exit(1)
+
+
 async def _run(url: str, download_images: bool, save_json: bool) -> None:
     logger.info(f"Starting scrape: {url}")
     product = await scrape_item(url)

@@ -10,3 +10,4 @@ openpyxl>=3.1.0
 python-calamine>=0.2.0
 pandas>=2.0.0
 opencc-python-reimplemented
+cryptography>=42.0.0
