@@ -136,9 +136,9 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
         selected_colors = pick["selected"]
         color_flag = pick["flag"]
         if pick["dropped_fashion"]:
-            logger.info(f"[{code}] 丟流行色（不進貨）：{sorted({base_color_of(color_map, k) for k in pick['dropped_fashion']})}")
+            logger.info(f"[{code}] 丟亮色系（不進貨）：{sorted({base_color_of(color_map, k) for k in pick['dropped_fashion']})}")
         if pick["dropped_overflow"]:
-            logger.info(f"[{code}] 中性底色超額砍：{sorted({base_color_of(color_map, k) for k in pick['dropped_overflow']})}")
+            logger.info(f"[{code}] 熱門底色超額砍：{sorted({base_color_of(color_map, k) for k in pick['dropped_overflow']})}")
         if color_flag:
             logger.warning(f"[{code}] {color_flag}")
             if not selected_colors:  # 0 中性色 → 保底留原始前幾個（仍標記人工覆核）
