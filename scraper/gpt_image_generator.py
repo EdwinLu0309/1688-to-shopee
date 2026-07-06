@@ -21,29 +21,33 @@ MODEL = "gpt-image-1.5"
 SIZE = "1024x1024"      # 品牌規範：1:1 Square, Mobile First
 QUALITY = "high"        # 精品感
 
-# ── 品牌視覺語言（JoysLu Lady V1.0，濃縮但忠實）────────────────────────────
-BRAND = """You are a senior fashion art director for a PREMIUM women's fashion brand (not a marketplace seller).
-Design this as a modern fashion LOOKBOOK image in the visual language of UNIQLO, GU, COS, Muji, Mercci22 —
-elegant, minimal, soft, natural, timeless. The PRODUCT is the hero; typography only supports it; whitespace is
-part of the design; less is more; luxury through simplicity.
+# ── 品牌視覺語言（JoysLu Lady V2.0：穿搭 lookbook + 繁體特色標註）──────────────
+# v2 更新：gpt-image-1.5 已能正確渲染中文（Edwin 實測），故不再禁中文、不再後製疊字，
+# 直接讓 GPT 把「繁體特色標註」畫在圖上；風格從「極簡純圖」轉向「穿搭 lookbook + 賣點」。
+BRAND = """You are a senior fashion art director for a premium women's fashion brand. Design a modern fashion
+LOOKBOOK / editorial image in the styling language of Korean & Japanese fashion magazines and stylish 穿搭
+lookbooks — the MODEL WEARS the garment in a real, aspirational lifestyle scene with genuine styling (nice
+outfit pairing, natural setting, editorial mood). Tasteful, elegant, warm — not an empty product-only shot,
+and NOT a marketplace promo.
 
-COMPOSITION: 1:1 square. Product occupies 65-85% of canvas. Large clean margins, strong hierarchy, one clear
-focal point, comfortable breathing space, no clutter. Editorial magazine / Swiss-minimal grid.
+COMPOSITION: 1:1 square. The styled model wearing the product is the hero (60-80% of canvas). Editorial
+magazine layout with intentional negative space reserved for the caption text.
 
-COLOR: background warm white / cream / light beige / soft gray. Accents only soft blue / light brown / taupe /
-stone gray / black. NEVER saturated colors. LIGHT: natural daylight, soft almost-invisible shadow, boutique
-editorial lighting — no dramatic or fake lens flare.
+TEXT — RENDER CLEARLY (this is important): include ONE elegant Traditional-Chinese (繁體中文, Taiwan wording)
+FEATURE CAPTION that highlights the selling point given below, set in a thin refined magazine-grade font,
+plus optionally a small English label or 1-2 short keywords. Typography must be clean, minimal, beautifully
+integrated like a fashion editorial caption — NOT stickers, NOT badges. Render every Chinese character
+accurately, legibly and with correct strokes; never garbled.
 
-TYPOGRAPHY: thin, elegant, modern, generous spacing. VERY LITTLE text — at most an English title, a short
-Chinese subtitle, and 1-3 keywords. No paragraphs, no marketing copy.
+COLOR / LIGHT: warm white / cream / beige / soft gray palette; natural daylight; soft shadow; boutique
+editorial lighting. Never saturated colors, no fake lens flare.
 
-GARMENT (critical): keep the EXACT original garment from the reference photo — do NOT change its fabric, fit,
-cut, color, pleats or stitching; maintain realistic fabric texture. MODEL: natural, relaxed, elegant, lifestyle
-pose — never sexy, never runway.
+GARMENT (critical): keep the EXACT garment from the reference photo — same fabric, fit, cut, color, pleats,
+stitching, texture. MODEL: natural, relaxed, elegant lifestyle pose — never sexy, never runway.
 
-STRICTLY FORBIDDEN: Taobao / Temu / Pinduoduo / discount style, promotional graphics, price labels, coupons,
-badges, stickers, arrows, explosions, speech bubbles, colorful icons, cartoon elements, busy collage, fake
-lens flare, low-end typography. Each image solves exactly ONE point below."""
+STRICTLY FORBIDDEN: Taobao / Temu / Pinduoduo discount style, price tags, coupons, promo badges, sale
+stickers, arrows, explosions, speech bubbles, colorful icons, cartoon elements, busy collage, low-end
+typography, garbled text. Each image tells exactly ONE styling story below."""
 
 # ── 下身類（寬褲）5 個主題：每張只講一件事 ───────────────────────────────
 # (theme_key, 焦點 prompt, 建議英文標題, 中文副標)
@@ -122,11 +126,11 @@ def generate_one(reference_images: list[Path], theme_prompt: str,
     """用參考圖 + 主題 prompt 生一張品牌電商圖。"""
     client = _client()
     prompt = (
-        f"{BRAND}\n\nPRODUCT: {product_name}.\n\nTHIS IMAGE: {theme_prompt}\n"
-        f"If any text appears, use ONLY the short English title \"{title}\" in a thin elegant font, "
-        f"small and in a corner, never covering the product. "
-        f"Do NOT render any Chinese characters or any other text (AI-rendered Chinese looks broken); "
-        f"the Chinese subtitle will be added later by us."
+        f"{BRAND}\n\nPRODUCT: {product_name}.\n\nTHIS IMAGE: {theme_prompt}\n\n"
+        f"FEATURE CAPTION to render on the image (Traditional Chinese, Taiwan, keep it short & elegant): "
+        f"「{subtitle}」。 Optionally add a small English label \"{title}\". "
+        f"Place the caption in the reserved negative space, thin elegant magazine typography, "
+        f"accurate legible Chinese strokes — never covering the model's face or the garment."
     )
     files = [open(p, "rb") for p in reference_images if Path(p).exists()]
     if not files:
