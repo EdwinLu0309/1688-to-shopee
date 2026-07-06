@@ -168,14 +168,18 @@ class App:
                              lambda e: self.canvas.yview_scroll(int(-1 * (e.delta / 3)), "units"))
 
         # ── 一鍵完成（主按鈕）──
+        # macOS 的 tk.Button 會忽略 bg（用原生白按鈕），故改用 Frame+Label 自己上色，
+        # Label 的 bg 在 mac 才會真的渲染 → 綠底白字看得到。
         hero = tk.Frame(self.root, padx=24, pady=8, bg=BG)
         hero.pack(fill="x")
-        self.run_all_btn = tk.Button(hero, text="🚀 一鍵完成（抓取 → 產出上架檔）",
-                                     font=F_BTN_HERO, bg="#1a7f37", fg="#ffffff",
-                                     activebackground="#15682d", activeforeground="#ffffff",
-                                     height=2, command=self._on_run_all)
-        self.run_all_btn.pack(fill="x")
-        self.action_buttons.append(self.run_all_btn)
+        self.hero_bg = tk.Frame(hero, bg="#1a7f37", height=60, cursor="hand2")
+        self.hero_bg.pack(fill="x")
+        self.hero_bg.pack_propagate(False)
+        self.run_all_lbl = tk.Label(self.hero_bg, text="🚀 一鍵完成（抓取 → 產出上架檔）",
+                                    font=F_BTN_HERO, bg="#1a7f37", fg="#ffffff", cursor="hand2")
+        self.run_all_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        for w in (self.hero_bg, self.run_all_lbl):
+            w.bind("<Button-1>", lambda e: (None if self.running else self._on_run_all()))
         tk.Label(self.root, text="③ 勾好商品按這顆：自動去 1688 抓資料，再做文案+挑色+影片+蝦皮 Excel，一次到底",
                  font=F_HINT, fg="#888", bg=BG).pack(anchor="w", padx=24)
 
@@ -320,6 +324,10 @@ class App:
         self.running = on
         self._set_buttons("disabled" if on else "normal")
         self.stop_btn.config(state="normal" if (on and cancellable) else "disabled")
+        # 一鍵按鈕（Frame+Label 自製）：忙碌時轉灰，閒置時綠色
+        color = "#9aa0a6" if on else "#1a7f37"
+        self.hero_bg.config(bg=color)
+        self.run_all_lbl.config(bg=color)
 
     def _guard(self) -> bool:
         if self.running:
