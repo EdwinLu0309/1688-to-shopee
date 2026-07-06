@@ -174,11 +174,15 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
 
 ## 圖片兩條路線（GUI 每支勾選 ✨GPT / 不勾＝1688）
 - **1688 直用（預設）**：Excel 圖片欄直接填 1688 原圖 URL（免圖床）。
-- **✨GPT 生圖**：1688 主圖當參考 → `gpt_image_generator.generate_all`（gpt-image-1.5、
-  `input_fidelity=high` 保留實物、品牌 prompt、褲類 5 主題/其餘通用）→ 生本機 PNG →
-  `image_host.upload_images` 上傳 **Supabase Storage public bucket** 拿公開 URL → 塞 Excel 圖片欄。
-  影片也改用生的圖。GPT 路線在 `batch_pipeline2._gpt_images_for`，`config["image_urls"]` 有值時
-  `shopee_excel.build_two_tier_rows` 就用它覆蓋 1688 圖。**要錢+慢，故 per-product 勾選只對需要的跑**。
+- **✨GPT 生圖**（開放做法）：1688 **主圖+細節圖全丟**當參考 → `gpt_image_generator.generate_store_set`
+  （gpt-image-1.5、`input_fidelity=high` 保留實物、**最少限制**讓 GPT 用電商理解出 9 張女裝賣場圖、
+  `STORE_ROLES` 只給輕度拍攝角度建議）→ 生本機 PNG → `image_host.upload_images` 上傳
+  **Supabase Storage public bucket** 拿公開 URL → 塞 Excel 圖片欄。影片也改用生的圖。
+  GPT 路線在 `batch_pipeline2._gpt_images_for`，`config["image_urls"]` 有值時
+  `shopee_excel.build_two_tier_rows` 用它覆蓋 1688 圖。**要錢+慢，故 per-product 勾選只對需要的跑**。
+- **GPT 圖策略**（Edwin 定案）：實拍（學賣得好的對手乾淨現貨畫面、**無字**）+ AI 賣點排版
+  （補對手沒有的解說）＝拉差距。配比：實拍 ×6-7（無字→零錯字）+ 賣點圖 ×2-3（有繁體字）。
+  ⚠️ **GPT 中文字多會錯字**（顯瘦→顯庚等）→ 短字/無字才穩；賣點圖要嘛 prompt 指定確切字串、要嘛後製疊字。
   ⚠️ Supabase URL 塞蝦皮沒實測過 → 先測 1 張確認蝦皮抓得到再全量。
 
 ## 環境變數

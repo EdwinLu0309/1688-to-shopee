@@ -51,8 +51,11 @@
 - [x] 2026-04-10 蝦皮批次上架 Excel 自動產生
 - [x] 2026-04-10 完整 pipeline 跑通（651869906762 甲油膠）
 
-## GPT 生圖路線（2026-07-06）
-- [x] ✨GPT 支線接回：`gpt_image_generator.generate_all`（分類挑主題）+ `image_host.py`（Supabase 圖床）+ batch route 串接 + GUI 每支「✨GPT」勾選 + 成本確認。全鏈實測通（生圖→上傳→公開 URL 200）
+## GPT 生圖路線（2026-07-06～07）
+- [x] ✨GPT 支線接回：`image_host.py`（Supabase 圖床）+ batch route 串接 + GUI 每支「✨GPT」勾選 + 成本確認。全鏈實測通（生圖→上傳→公開 URL 200）
+- [x] 2026-07-07 改「開放做法」`generate_store_set`：主圖+細節圖全丟、最少限制、出 9 張女裝賣場圖（取代寫死主題 `generate_all`）
+- [x] 2026-07-07 GPT 圖策略定調：實拍（學對手乾淨現貨、無字）+ AI 賣點排版（補對手沒有的解說）拉差距
+- [ ] ★賣點圖 prompt（零錯字版，Edwin 調）貼回 → 接進 `generate_store_set`；實拍×6-7 + 賣點×2-3 配比
 - [ ] ★用 Supabase URL 塞蝦皮 Excel 上傳測 1 張，確認蝦皮抓得到公開圖不被擋，再全量
-- [ ] 非褲類主題微調（目前褲類 PANTS_THEMES、其餘 GENERIC_THEMES 通用）
-- [ ] GPT 生圖品質/prompt 依實拍調校
+- [ ] GPT 中文字多會錯字（顯瘦→顯庚等）→ 短字/無字才穩；賣點圖要嘛 prompt 指定確切字串、要嘛後製疊字
+- [ ] 非褲類主題微調（目前褲類 PANTS_THEMES、其餘 GENERIC_THEMES 通用；開放做法用 STORE_ROLES）

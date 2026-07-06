@@ -58,22 +58,25 @@ def _gpt_images_for(product_data: dict, code: str, category: str,
 
     圖床未設定 / 無參考圖 / 生圖失敗 → 回 []（呼叫端會退回 1688 原圖）。
     """
-    from scraper.gpt_image_generator import generate_all
+    from scraper.gpt_image_generator import generate_store_set
     from scraper.image_host import is_configured, upload_images
 
     if not is_configured():
         logger.warning(f"[{code}] 圖床未設定（SUPABASE_*），GPT 路線退回 1688 圖")
         return []
     main_dir = item_dir / "images" / "main"
+    detail_dir = item_dir / "images" / "detail"
     if not (main_dir.exists() and any(main_dir.glob("*.*"))):
-        logger.info(f"[{code}] 下載 1688 主圖當 GPT 參考…")
+        logger.info(f"[{code}] 下載 1688 圖當 GPT 參考…")
         asyncio.run(download_product_images_from_json(product_data, item_dir / "images"))
-    refs = sorted(main_dir.glob("*.*")) if main_dir.exists() else []
+    # 開放做法：主圖 + 細節圖一起餵（細節圖含賣點/材質，GPT 會轉繁體理解）
+    refs = (sorted(main_dir.glob("*.*"))[:8] if main_dir.exists() else []) + \
+           (sorted(detail_dir.glob("*.*"))[:6] if detail_dir.exists() else [])
     if not refs:
-        logger.warning(f"[{code}] 無主圖可當參考，GPT 路線退回 1688 圖")
+        logger.warning(f"[{code}] 無圖可當參考，GPT 路線退回 1688 圖")
         return []
-    logger.info(f"[{code}] ✨ GPT 生圖中（{len(refs)} 張參考）…")
-    gen = generate_all(refs, item_dir / "images" / "generated", product_name, category)
+    logger.info(f"[{code}] ✨ GPT 生圖中（{len(refs)} 張參考 → 9 張賣場圖）…")
+    gen = generate_store_set(refs, item_dir / "images" / "generated", product_name, category)
     if not gen:
         logger.warning(f"[{code}] GPT 沒生出圖，退回 1688 圖")
         return []

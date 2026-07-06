@@ -112,6 +112,73 @@ def generate_all(ref_paths: list[Path], out_dir: Path, product_name: str,
     return generate_branded_images(refs_by_theme, themes, out_dir, product_name)
 
 
+# ── v3 開放做法（Edwin 定案）：主圖+細節圖全丟進去，最少限制，讓 GPT 用自己的
+# 電商理解出「女裝販售店會用的圖」，9 張一組，繁體不要簡體。不再框死美學/主題。
+STORE_SYSTEM = (
+    "These reference photos are ONE women's fashion product ({product}). You are an experienced "
+    "e-commerce visual designer for a Taiwanese women's clothing online shop (蝦皮女裝專門店). "
+    "Using your own understanding of what makes a strong fashion listing, create ONE polished, "
+    "attractive, commercial listing image that a real women's-wear shop would actually use. "
+    "Keep the EXACT garment (fabric, cut, color, drape, details). Any text MUST be Traditional "
+    "Chinese (Taiwan wording) — absolutely NO Simplified Chinese and no garbled characters. "
+    "Avoid cheap discount-marketplace clutter (no fake price tags, coupons, arrows, explosions)."
+)
+
+# 9 張的輕度分工（只給拍攝角度/用途建議，不框美學）——湊成一套完整賣場圖
+STORE_ROLES = [
+    "封面主圖：模特兒正面全身穿搭，乾淨吸睛，一眼看懂這件商品。",
+    "情境穿搭：生活或街景實穿，自然有型的日常氛圍。",
+    "側面或背面展示，讓買家看到版型與線條。",
+    "面料質感特寫：帶出材質的垂墜與觸感。",
+    "細節特寫：腰頭抽繩／口袋／車縫等做工。",
+    "整體造型搭配示範：這件怎麼搭一套好看。",
+    "坐姿或動態生活感，展現實穿舒適度。",
+    "賣點說明圖：用簡潔繁體標出這款最強的 1-2 個特色。",
+    "品牌氛圍形象圖：質感情境，提升整體檔次。",
+]
+
+
+def _edit(refs: list[Path], prompt: str, out_path: Path, fidelity: str = "high") -> Path | None:
+    """核心：參考圖 + prompt → 生一張存檔。"""
+    files = [open(p, "rb") for p in refs if Path(p).exists()]
+    if not files:
+        logger.warning("無參考圖，跳過")
+        return None
+    try:
+        kwargs = dict(model=MODEL, image=files, prompt=prompt, size=SIZE, quality=QUALITY)
+        try:
+            resp = _client().images.edit(input_fidelity=fidelity, **kwargs)
+        except TypeError:
+            resp = _client().images.edit(**kwargs)  # 舊 SDK 無 input_fidelity
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(base64.b64decode(resp.data[0].b64_json))
+        return out_path
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"生圖失敗：{e}")
+        return None
+    finally:
+        for f in files:
+            f.close()
+
+
+def generate_store_set(ref_paths: list[Path], out_dir: Path, product_name: str,
+                       category_id: str = "", n: int = 9) -> list[Path]:
+    """開放做法：主圖+細節圖當參考，最少限制出 n 張女裝賣場圖（繁體）。回傳本機路徑。"""
+    refs = [Path(p) for p in ref_paths if Path(p).exists()][:12]
+    if not refs:
+        logger.warning("無參考圖，無法生圖")
+        return []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+    for i, role in enumerate(STORE_ROLES[:n]):
+        prompt = STORE_SYSTEM.format(product=product_name) + f"\n\nTHIS IMAGE ({i+1}/{n}): {role}"
+        out = _edit(refs, prompt, out_dir / f"store_{i+1:02d}.png")
+        if out:
+            results.append(out)
+            logger.info(f"生圖 {i+1}/{n}：{out.name}")
+    return results
+
+
 def _client():
     key = os.environ.get("OPENAI_API_KEY")
     if not key:
