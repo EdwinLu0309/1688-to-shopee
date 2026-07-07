@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-07-07（#S068：公司 Windows 可跑化 + Google 登入解 v20 cookie）
+
+### 新增
+- **`scraper/google_login.py`** — 跨平台 Google 登入：用真實 Chrome（`channel="chrome"`）開瀏覽器登入一次，用 `context.request` 試抓 gviz 偵測成功 → 存 `config/google_cookies.json` session 重複用。跟「🔑 登入 1688」同一套模式。解決 Windows Chrome cookie 無法收割的問題
+- **GUI「🔑 Google 登入」按鈕**（`gui.py`）＋更新名單失敗時自動跳登入提示；CLI 新增 `python main.py google-login`
+- **`chrome_cookies.py` 補 Windows 解密**：`Local State` DPAPI 金鑰 → AES-256-GCM 解 v10/v11 cookie；遇 **v20（App-Bound Encryption）自動跳過**（純 DPAPI 解不開，需 SYSTEM 權限）
+
+### 變更
+- **`sheet_fetcher.py` 改多來源 cookie**（`_cookie_sources`）：依序試「已登入 session（跨平台）→ Chrome 收割（macOS 零點擊）」，全失敗回 `need_login`。原本只支援 macOS 收割
+- **`video_maker.py` ffmpeg 跨平台解析**（`_resolve_ffmpeg`）：環境變數 `FFMPEG_BIN` → PATH → `imageio-ffmpeg` 內建二進位 → mac ffmpeg-static，找不到優雅跳過影片不中斷產出
+- `requirements.txt` 新增 `imageio-ffmpeg`（可攜 ffmpeg）、`openai`（GPT 生圖路線）
+- `.gitignore` 新增 `config/google_cookies.json`、`config/google_profile/`
+
+### 修復
+- **Windows 主控台 cp950 崩潰**：輸出中文 / ✓✗ 觸發 `UnicodeEncodeError` 直接炸（fetch-list 一失敗就崩）→ `config/settings.py` 開頭強制 stdout/stderr `reconfigure(encoding="utf-8")`，main.py 與 gui.py 都早期匯入 settings、任何輸出前生效
+
+### 環境
+- 公司 Windows 機器從零建 `.venv`（Python 3.14，全 requirements wheels 齊備）+ Playwright chromium + imageio-ffmpeg + openai
+- ⚠️ 本機 `.env` 只有 ANTHROPIC/GEMINI key → 預設流程（更新名單→抓取→產 Excel+1688圖+影片）完整可跑；**✨GPT 生圖路線需另補 OPENAI_API_KEY + SUPABASE_URL/SERVICE_KEY/BUCKET**
+
 ## 2026-07-07（#S067：全條龍 App 化 + 顏色政策 + GPT 生圖接回）
 
 ### 新增

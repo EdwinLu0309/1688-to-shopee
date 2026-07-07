@@ -1,7 +1,17 @@
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Windows 主控台預設 cp950（繁中），輸出中文 / ✓✗ 等符號會 UnicodeEncodeError 直接爆掉。
+# 強制 stdout/stderr 走 UTF-8（Py3.7+ reconfigure）。此檔被 main.py 與 gui.py 早期匯入，
+# 在任何輸出之前生效。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
 
 load_dotenv()
 

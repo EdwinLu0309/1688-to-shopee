@@ -101,16 +101,28 @@ python main.py images --ingest-downloads
   分類 ID 是查 `config/shopee_template.xlsx`「較長備貨天數範圍」sheet（2013 個分類）得來的真實 ID：
   長褲 100358 / 牛仔褲 100103 / 短褲 100360 / 褲裙 100361 / 裙裝 100102 / T恤 100352。
 
-## AI 名單怎麼從 Google Sheet 落地成 CSV（私有表，路 B 已自動化）
-名單是**私有** Google Sheet（`AI_LIST_SHEET_ID`，見 settings.py），公開匯出 URL 會 401。
-**路 B（現行，一鍵）＝收割日常 Chrome 的 Google session cookie**（`scraper/chrome_cookies.py`
-+ `sheet_fetcher.py`；GUI「⬇️ 更新名單」/ CLI `python main.py fetch-list`）：
-`chrome_cookies.get_cookies("google.com", profile)` 解密（macOS：`security` 取 "Chrome Safe
-Storage" → PBKDF2-SHA1(saltysalt,1003) → AES-CBC v10）→ httpx 帶 cookie 打
-`/gviz/tq?tqx=out:csv&gid=<gid>` → 存 `input/lady_ai_list.csv`。逐一 Chrome 設定檔試，
-第一個抓到合法 CSV 的就用（自動判斷哪個 profile 登入了名單那個 Google 帳號）。
-不開瀏覽器、不登入、不碰驗證。解密法移植自 listing-optimization-tool 的 `grab_session.py`（#S065）。
-⚠️ cookie 解密**只實作 macOS**；Windows（DPAPI + AES-GCM）待補。
+## AI 名單怎麼從 Google Sheet 落地成 CSV（私有表；兩條 cookie 來源）
+名單是**私有** Google Sheet（`AI_LIST_SHEET_ID`，見 settings.py），公開匯出 URL 會 401，
+只有帶登入 cookie 的 httpx 打 `/gviz/tq?tqx=out:csv&gid=<gid>` 才讀得到 → 存 `input/lady_ai_list.csv`。
+入口：GUI「⬇️ 更新名單」/ CLI `python main.py fetch-list`。`sheet_fetcher._cookie_sources`
+依序試兩條來源，第一個抓到合法 CSV 的就用：
+
+1. **Playwright 登入的 session（跨平台，Windows 主力）**：`scraper/google_login.py`
+   `save_google_session()` 用**真實 Chrome**（`channel="chrome"`，Google 較不擋自動化）開瀏覽器，
+   使用者登入一次 → 拿 context.request 試抓 gviz，抓到合法 CSV 才算登入成功 → 存
+   `config/google_cookies.json`（gitignored）。之後 `load_saved_cookies()` 帶進 httpx 重複用。
+   入口：GUI「🔑 Google 登入」/ CLI `python main.py google-login`。session 過期就再登一次。
+2. **收割日常 Chrome 的 Google cookie（macOS 免登入零點擊）**：`scraper/chrome_cookies.py`
+   `get_cookies("google.com", profile)`。macOS：`security` 取 "Chrome Safe Storage" →
+   PBKDF2-SHA1(saltysalt,1003) → AES-CBC v10。Windows：`Local State` 的 DPAPI 金鑰 →
+   AES-256-GCM 解 v10/v11。逐一 Chrome 設定檔試。移植自 listing-optimization-tool 的
+   `grab_session.py`（#S065）。
+
+⚠️ **Windows Chrome 的 cookie 幾乎全是 App-Bound Encryption（v20）**（Chrome 127+），金鑰再被
+Chrome 服務包一層，純 DPAPI 解不開（要 SYSTEM 權限 / IElevator COM），`chrome_cookies` 遇 v20
+**直接跳過** → Windows 上來源 2 通常收不到料，**一律走來源 1（Google 登入）**。macOS 仍是零點擊。
+⚠️ Windows 主控台預設 cp950，輸出 ✓✗/中文會 UnicodeEncodeError → `config/settings.py` 開頭
+把 stdout/stderr `reconfigure(encoding="utf-8")`（main.py 與 gui.py 都早期匯入 settings）。
 ⚠️ 讀舊本機 CSV = 讀到舊資料：實際踩過本機檔停在 2 商品舊版、線上表其實已 48 商品。
 （備用：路 A＝登入 Chrome 開試算表分頁後同源 fetch gviz → Blob 下載到 ~/Downloads，Chrome MCP
 `javascript_tool` 直接回傳 CSV 會被「Cookie/query string data」安全過濾擋掉，只能走 Blob。）
@@ -121,9 +133,10 @@ Storage" → PBKDF2-SHA1(saltysalt,1003) → AES-CBC v10）→ httpx 帶 cookie 
 流程：⬇️ 更新名單 → 勾選商品 → 🚀 一鍵完成（抓取→產出）→ 📁 素材。字體整體放大（可讀性）。
 主按鈕是 **🚀 一鍵完成**（`_run_all_worker`：scrape_many 抓 → run_batch_two_tier 產，一次到底）；
 下面「分步執行」保留 🔍 只抓取 / 📦 只產出 給需要重跑單一步驟時用。各步驟：
-0. **⬇️ 更新名單** → `sheet_fetcher.fetch_ai_list`（路 B：解密日常 Chrome 的 Google cookie 抓
-   私有 Sheet，免登入）→ 覆蓋 `input/lady_ai_list.csv` → 解析成**逐商品勾選清單**（顯示
-   編號/推斷分類/名稱）。⚠️ cookie 解密目前只實作 macOS。
+0. **⬇️ 更新名單** → `sheet_fetcher.fetch_ai_list`（帶登入 cookie 抓私有 Sheet；Windows 首次
+   先按「🔑 Google 登入」，之後免再登；macOS 免登入自動收割）→ 覆蓋 `input/lady_ai_list.csv`
+   → 解析成**逐商品勾選清單**（顯示
+   編號/推斷分類/名稱）。Windows 首次先「🔑 Google 登入」；macOS 免登入自動收割。
 1. **（勾選）** → 先勾 1-2 筆試跑，確認再「全選」整批（`_selected()`；抓取/產出都只做勾選的）。
 2. **🔑 登入 1688** → `playwright_scraper.save_cookies` 開瀏覽器手動登入 → 存 `config/cookies.json`
    （抄 1688-order launcher 的 `_save_cookies`；偵測跳離 login 頁視為成功，最多等 5 分）。

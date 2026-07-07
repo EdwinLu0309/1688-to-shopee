@@ -9,7 +9,9 @@
 - [x] 2026-07-06 分類 ID 從模板「較長備貨天數範圍」sheet 取真實 ID（長褲/牛仔褲/短褲/褲裙/裙裝/T恤），CATEGORY_MAP + 商品名推斷雙軌
 - [x] 2026-07-06 ★AI 名單 CSV 落地做成一鍵（路 B）：`chrome_cookies.py` 解密日常 Chrome 的 Google cookie + `sheet_fetcher.py` httpx 打 gviz → GUI「⬇️ 更新名單」/ CLI `fetch-list`。免登入、自動掃 profile。實測抓到 live 48 商品名單
 - [x] 2026-07-06 ★GUI 加逐商品勾選清單（可捲動 + 全選/全不選）：抓取/產出都只做勾選的，先勾 1-2 筆試跑再全選
-- [ ] Windows 版 cookie 解密（chrome_cookies 目前只 macOS；Win 用 DPAPI + AES-GCM，要另寫）
+- [x] 2026-07-07 #S068 ★公司 Windows 可跑化：Chrome cookie 全 v20(App-Bound) 解不開 → 改 `scraper/google_login.py`（Playwright 真實 Chrome 登入一次存 session）；`chrome_cookies.py` 補 Windows DPAPI(v10/v11 可解 v20 跳過)；`sheet_fetcher` 多來源；GUI「🔑 Google 登入」+ CLI `google-login`；修 cp950 崩潰(settings.py UTF-8)；ffmpeg 跨平台(imageio-ffmpeg)。建 `.venv`(Py3.14)+全 deps
+- [ ] Edwin 在公司 Windows 實跑驗證：🔑 Google 登入一次 → ⬇️ 更新名單 → 抓取 → 產 Excel 全鏈
+- [ ] 公司 Windows `.env` 若要用 ✨GPT 生圖路線，補 OPENAI_API_KEY + SUPABASE_URL/SERVICE_KEY/BUCKET
 - [x] 2026-07-06 ★顏色/尺寸選項政策（100 SKU 上限）：尺寸+身高款全留、只砍顏色到中性≤5、流行色不進貨、100 保底。兩層：款式備註(Claude style_kept) → 中性色政策。第一軸「顏色×身高款」認底色綁組不拆散。實測 P14AE1 4底色×3身高款×6尺碼=72、P14AE2 24 SKU
 - [ ] 48 商品整批實跑驗證（2 筆已跑通；全選全跑 scrape 48 + 文案 + 影片 ~30-40min）
 - [ ] 分類推斷偶爾要人工覆核（如「花苞短裙…裙裤」歸褲裙 vs 裙裝）；Edwin 填分類欄可覆寫

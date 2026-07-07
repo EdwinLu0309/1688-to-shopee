@@ -10,15 +10,50 @@
     from scraper.video_maker import make_product_video
     make_product_video(Path("output/683456636600"))  # 隨機挑 9 張 → video/683456636600.mp4
 """
+import os
+import platform
 import random
+import shutil
 import subprocess
 from pathlib import Path
 
-# ffmpeg-static（先在 tools/video-maker 跑過 npm install）
-_FFMPEG = (
-    Path.home()
-    / "projects/listing-optimization-tool/tools/video-maker/node_modules/ffmpeg-static/ffmpeg"
-)
+from loguru import logger
+
+_IS_WIN = platform.system() == "Windows"
+_EXE = ".exe" if _IS_WIN else ""
+
+
+def _resolve_ffmpeg() -> Path | None:
+    """跨平台找 ffmpeg，依序：環境變數 → PATH → imageio-ffmpeg 內建 → mac ffmpeg-static。
+
+    找不到回 None（呼叫端會優雅跳過影片，不中斷產出）。
+    """
+    # 1. 明確指定
+    env = os.environ.get("FFMPEG_BIN")
+    if env and Path(env).exists():
+        return Path(env)
+    # 2. 系統 PATH
+    found = shutil.which("ffmpeg")
+    if found:
+        return Path(found)
+    # 3. imageio-ffmpeg 內建二進位（pip 安裝即帶，跨平台，Windows 主力）
+    try:
+        import imageio_ffmpeg
+
+        return Path(imageio_ffmpeg.get_ffmpeg_exe())
+    except Exception:  # noqa: BLE001
+        pass
+    # 4. Edwin Mac 的 ffmpeg-static（既有行為）
+    mac_static = (
+        Path.home()
+        / f"projects/listing-optimization-tool/tools/video-maker/node_modules/ffmpeg-static/ffmpeg{_EXE}"
+    )
+    if mac_static.exists():
+        return mac_static
+    return None
+
+
+_FFMPEG = _resolve_ffmpeg()
 _MUSIC_DIR = Path.home() / "projects/listing-optimization-tool/tools/shopee-video-batch/music"
 
 # 影片參數（對齊蝦皮商品頁影片：1:1、每張 2.5s、淡入淡出、≥11s）
@@ -132,9 +167,10 @@ def make_product_video(
             不傳則從 item_dir 收圖（主圖/SKU 優先、detail 最後），取前 n 張。
     Returns 影片路徑；ffmpeg 不存在或無圖回 None。
     """
-    if not _FFMPEG.exists():
+    if _FFMPEG is None or not Path(_FFMPEG).exists():
         raise FileNotFoundError(
-            f"找不到 ffmpeg：{_FFMPEG}\n   先到 tools/video-maker 跑 `npm install`"
+            "找不到 ffmpeg（影片會跳過，不影響 Excel 產出）。"
+            "裝法擇一：pip install imageio-ffmpeg / 系統裝 ffmpeg 並加入 PATH / 設環境變數 FFMPEG_BIN"
         )
 
     if images:

@@ -338,9 +338,29 @@ def fetch_list(ctx: click.Context, output: str | None, profile: str | None) -> N
 
     res = fetch_ai_list(out_path=Path(output) if output else None, profile=profile)
     if res.get("ok"):
-        click.echo(f"\n  ✓ 名單已更新（設定檔 {res['profile']}，{res['bytes']} bytes）\n")
+        click.echo(f"\n  ✓ 名單已更新（來源 {res['profile']}，{res['bytes']} bytes）\n")
     else:
         click.echo(f"\n  ✗ 抓取失敗：{res.get('error')}\n")
+        if res.get("need_login"):
+            click.echo("  → 執行：python main.py google-login\n")
+        sys.exit(1)
+
+
+@cli.command("google-login")
+@click.pass_context
+def google_login(ctx: click.Context) -> None:
+    """開瀏覽器登入 Google 一次，存 session 供抓私有「AI 上架名單」（跨平台，Windows 必走這條）。"""
+    import asyncio
+
+    from config.settings import AI_LIST_SHEET_GID, AI_LIST_SHEET_ID
+    from scraper.google_login import save_google_session
+
+    res = asyncio.run(save_google_session(AI_LIST_SHEET_ID, str(AI_LIST_SHEET_GID)))
+    if res.get("ok"):
+        click.echo(f"\n  ✓ Google 登入完成（{res['browser']}），存 {res['count']} 個 cookie\n"
+                   "    現在可以 python main.py fetch-list 抓名單了\n")
+    else:
+        click.echo(f"\n  ✗ 登入未完成：{res.get('error')}\n")
         sys.exit(1)
 
 
