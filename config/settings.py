@@ -43,6 +43,18 @@ GOOGLE_SHEET_GID = "823737836"
 AI_LIST_SHEET_ID = "1D7qBDG3WEeUrMPKa2K3yeqmarJ7aKFDThSaWJBk0wcc"
 AI_LIST_SHEET_GID = "0"
 
+# 【Lady】預購商品訂貨表（訂貨系統三分頁：1_訂貨主檔 / 2_每日訂購彙總 / 3_訂單明細）
+# join key = 商品選項貨號（蝦皮 O 欄＝編號_顏色（身高款）_尺碼）
+ORDER_SHEET_ID = "1CJ4u0Nqds0t2_th-Pu97Df4GEJJi9A5AB1edIpIoIyQ"
+ORDER_MASTER_TAB = "1_訂貨主檔"
+ORDER_SUMMARY_TAB = "2_每日訂購彙總"
+ORDER_DETAIL_TAB = "3_訂單明細"
+# 借 inventory-sync 的 SA（需被分享為此表編輯者；SA 無 Drive 容量不能自建檔）
+ORDER_SHEET_SA_JSON = os.environ.get(
+    "ORDER_SHEET_SA_JSON",
+    str(Path.home() / ".config" / "gcloud" / "inventory-sync-493112-6047c28ad2b1.json"),
+)
+
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "

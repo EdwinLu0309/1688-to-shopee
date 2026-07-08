@@ -497,5 +497,26 @@ async def _run(url: str, download_images: bool, save_json: bool) -> None:
     await close_context()
 
 
+@cli.command("order-import")
+@click.argument("export_xlsx", type=click.Path(exists=True))
+@click.option("--date", "-d", "order_date", default=None, help="訂貨日期 YYYY-MM-DD（預設今天）")
+@click.option("--password", "-P", default=None, help="蝦皮匯出檔密碼（有密碼保護時必填）")
+@click.option("--commit", is_flag=True, help="真的寫入 Google Sheet（預設 dry-run 只算不寫）")
+@click.pass_context
+def order_import(ctx: click.Context, export_xlsx: str, order_date: str | None,
+                 password: str | None, commit: bool) -> None:
+    """匯入蝦皮待出貨匯出 → 訂單明細 + 每日彙總 → 顯示今日訂貨總金額。
+
+    預設 dry-run（只算不寫）；確認無誤後加 --commit 寫入 Google Sheet。
+    """
+    from scraper.ordering.pipeline import import_orders, format_report
+
+    the_date = order_date or date.today().isoformat()
+    result = import_orders(export_xlsx, date=the_date, password=password, commit=commit)
+    click.echo("\n" + format_report(result, commit=commit))
+    if not commit and result.summary_rows:
+        click.echo("\n👉 確認無誤後加 --commit 寫入 Google Sheet")
+
+
 if __name__ == "__main__":
     cli()
