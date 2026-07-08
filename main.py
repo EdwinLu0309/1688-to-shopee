@@ -518,5 +518,61 @@ def order_import(ctx: click.Context, export_xlsx: str, order_date: str | None,
         click.echo("\n👉 確認無誤後加 --commit 寫入 Google Sheet")
 
 
+@cli.command("order-place")
+@click.option("--date", "-d", "order_date", default=None, help="訂貨日期 YYYY-MM-DD（預設今天）")
+@click.option("--cookie", default=None, help="1688 cookie 路徑（預設 config/cookies.json）")
+@click.option("--headless", is_flag=True, help="無頭模式（除錯建議關掉以便手動解驗證碼）")
+@click.option("--all", "do_all", is_flag=True, help="含已下單的列一起重跑（預設只跑下單狀態空的）")
+@click.pass_context
+def order_place(ctx: click.Context, order_date: str | None, cookie: str | None,
+                headless: bool, do_all: bool) -> None:
+    """讀某日彙總 → 1688 加購物車 → 回寫下單狀態。需先 order-import --commit。"""
+    from scraper.ordering.cart_order import run_place_orders
+
+    the_date = order_date or date.today().isoformat()
+    cookie_path = cookie or str(Path("config/cookies.json"))
+    result = run_place_orders(
+        the_date, cookie_path=cookie_path, headless=headless,
+        only_unordered=not do_all, callback=lambda m: click.echo(f"  {m}"),
+    )
+    if not result:
+        click.echo("（沒有待下單的項目）")
+        return
+    click.echo(f"\n下單結果（{the_date}）：")
+    for sku, status in result.items():
+        click.echo(f"  {status}  {sku}")
+
+
+@cli.command("order-verify")
+@click.option("--date", "-d", "order_date", default=None, help="訂貨日期 YYYY-MM-DD（預設今天）")
+@click.option("--cookie", default=None, help="1688 cookie 路徑（預設 config/cookies.json）")
+@click.option("--headless", is_flag=True, help="無頭模式")
+@click.pass_context
+def order_verify(ctx: click.Context, order_date: str | None, cookie: str | None,
+                 headless: bool) -> None:
+    """核對購物車：讀某日彙總 → 對 1688 購物車比對商品/規格/數量。"""
+    import asyncio as _asyncio
+
+    from scraper.ordering.cart_order import build_order_items, verify_cart
+    from scraper.ordering.cart_order import _read_summary_rows
+    from scraper.ordering.order_sheet import OrderSheet
+
+    the_date = order_date or date.today().isoformat()
+    cookie_path = cookie or str(Path("config/cookies.json"))
+    sheet = OrderSheet()
+    master = sheet.load_master()
+    summary_rows = _read_summary_rows(sheet, the_date, only_unordered=False)
+    items, _ = build_order_items(summary_rows, master)
+    if not items:
+        click.echo("（該日沒有可核對的項目）")
+        return
+    statuses = _asyncio.run(verify_cart(items, cookie_path, headless,
+                                        callback=lambda m: click.echo(f"  {m}")))
+    idx_to_sku = {it.row_index: it.sku_code for it in items}
+    click.echo(f"\n核對結果（{the_date}）：")
+    for idx, status in statuses.items():
+        click.echo(f"  {status}  {idx_to_sku.get(idx, idx)}")
+
+
 if __name__ == "__main__":
     cli()

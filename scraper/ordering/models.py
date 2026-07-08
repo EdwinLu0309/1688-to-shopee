@@ -36,6 +36,25 @@ class MasterEntry:
 
 
 @dataclass
+class OrderItem:
+    """cart_adder / cart_verifier 用的待加購項目（欄位對齊 1688-order 的 OrderItem）。
+
+    這裡由每日彙總的一列 + 訂貨主檔 join 而來（url/規格取自主檔）。
+    row_index 在本專案是「彙總列的內部索引」，用來把 cart_adder 回傳的狀態對回貨號。
+    """
+
+    row_index: int         # 內部索引（回寫狀態用；非 sheet 列號）
+    product_code: str      # 編號（除錯/日誌）
+    quantity: int          # 訂貨數量
+    spec1: str             # 1688 規格一（簡體，如「（升级面料）-黑色-常规款」）
+    spec2: str             # 1688 規格二（尺碼，可為空）
+    url_1688: str          # 1688 商品 URL
+    sku_name: str = ""     # 商品簡稱（除錯用）
+    tag: str = ""          # 保留欄（對齊 1688-order；本專案未用）
+    sku_code: str = ""     # 商品選項貨號（回寫彙總狀態用）
+
+
+@dataclass
 class SummaryRow:
     """每日訂購彙總（分頁2）的一列：某日某 SKU 的訂貨總量與成本。"""
 

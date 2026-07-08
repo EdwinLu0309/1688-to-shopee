@@ -19,9 +19,12 @@
 ## 檔案結構
 ```
 ├── gui.py                     # ★桌面 GUI（tkinter，四步：登入→抓取→產Excel→素材夾）
+├── order_gui.py               # ★每日訂貨 GUI（獨立，不動 gui.py）：匯入蝦皮匯出→彙總→下單→核對
 ├── run_mac.command            # Mac 啟動 GUI（優先 .venv/bin/python，Tk 9.0 深色正常）
 ├── run_windows.bat            # Windows 啟動 GUI
-├── main.py                    # CLI 入口（login/scrape/generate/batch）
+├── run_order_mac.command      # Mac 啟動訂貨 GUI（order_gui.py）
+├── run_order_windows.bat      # Windows 啟動訂貨 GUI
+├── main.py                    # CLI 入口（login/scrape/generate/batch/order-import/order-place/order-verify）
 ├── config/
 │   ├── settings.py            # 全域設定（含 Gemini、Google Sheet）
 │   ├── shopee_template.xlsx   # 蝦皮批次上架模板
@@ -45,7 +48,15 @@
 │   ├── copywriter.py          # ★文案引擎：Claude + SOP 生標題/詳情/簡稱/變體命名（build_variants）
 │   ├── video_maker.py         # 蝦皮短影片合成（本機圖→1:1 mp4，ffmpeg）
 │   ├── pipeline.py            # 單商品全流程串接
-│   └── batch_pipeline.py      # 批次處理（採購表→逐一處理→合併 Excel）
+│   ├── batch_pipeline.py      # 批次處理（採購表→逐一處理→合併 Excel）
+│   └── ordering/              # ★每日訂貨系統套件
+│       ├── models.py          # OrderLine/MasterEntry/SummaryRow/OrderItem
+│       ├── shopee_export.py   # 解密+讀蝦皮 toship 匯出 → OrderLine
+│       ├── order_sheet.py     # gspread 三分頁讀寫（主檔/明細/彙總 + SA）
+│       ├── pipeline.py        # 匯入→join→明細+彙總→今日總金額（dry-run 預設）
+│       ├── cart_order.py      # 彙總→OrderItem→cart_adder 加購/cart_verifier 核對
+│       ├── cart_adder.py      # vendored 自 1688-order（1688 改版兩邊同步）
+│       └── cart_verifier.py   # vendored 自 1688-order
 ├── output/                    # 產出目錄（gitignored）
 │   └── {item_id}/
 │       ├── ai_content.json
@@ -206,7 +217,7 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
 - **✅ Supabase URL 塞蝦皮已實測可行**（HTTP 200 公開可讀，蝦皮抓得到）。轉換圖上圖床 → URL 覆蓋進 Excel 商品圖片欄（S 封面 + T~AA）：把 `batch_pipeline2._gpt_images_for` monkeypatch 成「上傳既有轉換圖」+ 各商品 `route='gpt'`、`reuse_content=True` 即可重建 Excel。
 - **影片**：`video_maker.make_product_video` 合成轉換圖幻燈片；**1688 原始影片**＝抓 `<video>` 元素 src（`playwright_scraper`/`extract_1688.js` 已補 `video_url` 抽取）→ 下載 `cloud.video.taobao.com` mp4 ⚠️**不能帶 `Referer:1688` header**（CDN 回 0 byte），只帶 User-Agent。
 
-## ★訂貨系統（3 分頁 Google Sheet + 下單工具規劃，2026-07-09 #S070）
+## ★訂貨系統（3 分頁 Google Sheet + 獨立下單 GUI，2026-07-09 #S070／Phase A+B 已建）
 每天 200-300 預購商品要下單，用一張 Google Sheet（SA `inventory-sync@inventory-sync-493112.iam.gserviceaccount.com` 需被分享為編輯者；SA 無 Drive 容量不能自建檔，要 Edwin 建空白表再分享）。**三分頁**：
 1. **`1_訂貨主檔`**（靜態、隨上架累加）：`商品選項貨號 | 編號 | 商品簡稱 | 1688網址 | 規格一(1688原色) | 規格二(1688尺碼) | 進貨¥`。
    - **join key＝商品選項貨號**（= 蝦皮 O 欄 `編號_顏色（身高款）_尺碼`，如 `P14AE1_黑色（常規款）_S`；已實測蝦皮會吃、匯出欄33 對得上）。
@@ -216,7 +227,17 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
 - **蝦皮匯出**：`Order.toship.YYYYMMDD_*.xlsx` 有密碼（msoffcrypto 解），關鍵欄：欄33 商品選項貨號、欄34 數量、欄0 訂單編號、欄5 買家帳號、欄27 商品選項名稱。
 - **資料流**：蝦皮匯出 → append 分頁3（原始明細）→ 同 SKU 聚合寫分頁2（總量+成本）→ 按下單 cart_adder 跑 → 回寫分頁2 狀態。
 - **下單顆粒度待驗**：分頁2 記到 SKU（色×尺碼）；若 1688 是單軸（只有色-款式無尺碼軸，本商品尺碼列靜態探測不到、待實測）→ 餵 cart_adder 前要再聚合到「色-款式」層。
-- **下單工具規劃（獨立簡易版，Edwin 上架完後做）**：GUI 匯入蝦皮 Excel → 建當日分頁明細+彙總 → 顯示今日預計總金額 → 帶 1688 cookie → 點「下單」呼叫 1688-order 的 `cart_adder`（現成：選規格一 `text-is` + 填數量 + 加采购车，雙規格切色後逐尺碼）→ 回寫狀態 → 點「核對」跑 `cart_verifier`。
+- **下單工具（獨立簡易版，已建於 `scraper/ordering/`）**：資料骨幹（Phase A）+ 下單整合（Phase B）都已寫好、Sheet 讀寫實測過；只差**首次實跑下單驗規格二尺碼格式**（要真的有預購訂單 + Edwin 開瀏覽器）。
+  - **套件 `scraper/ordering/`**：
+    - `shopee_export.py`：msoffcrypto 解密 toship 匯出 + calamine 讀，抽欄 0/5/25/27/33/34（訂單編號/買家/商品名/選項名/貨號/數量），含表頭校驗防跑位。
+    - `order_sheet.py`：gspread + inventory-sync SA。`load_master`（分頁1）/`append_details`（分頁3，去重 by 訂單編號+貨號）/`upsert_summary`（分頁2，clear+rewrite 某日 idempotent）/`update_order_status`（回寫分頁2）。
+    - `pipeline.py`：`import_orders`（匯出→join 主檔過濾預購品→建明細→聚合彙總→算今日總金額）。**預設 dry-run，`commit=True` 才寫 live sheet**。純函式 `build_import` 好測。
+    - `cart_order.py`：`build_order_items`（彙總 join 主檔補 1688 網址）→ `place_orders`（驅動 vendored `cart_adder`，按 url 分組加購）→ 回寫狀態；`verify_cart` 驅動 `cart_verifier`。`run_place_orders` 只跑「下單狀態空」的列（防重複下單）。
+    - `cart_adder.py`/`cart_verifier.py`：**vendored 自 `~/projects/1688-order/order/`**（只改 `OrderItem` import 來源）。⚠️ 1688 改版時兩專案的選擇器都要同步。
+  - **CLI**：`python main.py order-import <toship.xlsx> -P <密碼> [-d 日期] [--commit]` / `order-place [-d 日期]` / `order-verify [-d 日期]`。
+  - **GUI**：`order_gui.py`（獨立，不動主 `gui.py`）＝選匯出檔+密碼+日期 → 📥匯入預覽(dry-run 顯示彙總+總金額) → ✅寫入Sheet → 🛒下單 → 🔍核對。啟動：`run_order_mac.command` / `run_order_windows.bat`。
+  - **下單 cookie**：用主 gui.py 的「🔑 登入 1688」產生的 `config/cookies.json`（cart_adder 直接吃）。
+  - 進貨¥ 目前多數主檔列未填 → 成本小計顯示「無進貨¥」，Edwin 補 `1_訂貨主檔` G 欄即計入總金額。
 
 ## 環境變數
 - `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py 用，標題+詳情）
