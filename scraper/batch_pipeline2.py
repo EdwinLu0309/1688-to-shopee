@@ -58,7 +58,7 @@ def _gpt_images_for(product_data: dict, code: str, category: str,
 
     圖床未設定 / 無參考圖 / 生圖失敗 → 回 []（呼叫端會退回 1688 原圖）。
     """
-    from scraper.gpt_image_generator import generate_store_set
+    from scraper.gpt_image_generator import generate_cover
     from scraper.image_host import is_configured, upload_images
 
     if not is_configured():
@@ -69,14 +69,16 @@ def _gpt_images_for(product_data: dict, code: str, category: str,
     if not (main_dir.exists() and any(main_dir.glob("*.*"))):
         logger.info(f"[{code}] 下載 1688 圖當 GPT 參考…")
         asyncio.run(download_product_images_from_json(product_data, item_dir / "images"))
-    # 開放做法：主圖 + 細節圖一起餵（細節圖含賣點/材質，GPT 會轉繁體理解）
-    refs = (sorted(main_dir.glob("*.*"))[:8] if main_dir.exists() else []) + \
-           (sorted(detail_dir.glob("*.*"))[:6] if detail_dir.exists() else [])
-    if not refs:
+    # 依 JoysLu AI Design Engine：主圖＝商品圖（以此為準）、細節圖＝1688 參考（不照抄）
+    main_imgs = sorted(main_dir.glob("*.*"))[:8] if main_dir.exists() else []
+    detail_imgs = sorted(detail_dir.glob("*.*"))[:6] if detail_dir.exists() else []
+    if not (main_imgs or detail_imgs):
         logger.warning(f"[{code}] 無圖可當參考，GPT 路線退回 1688 圖")
         return []
-    logger.info(f"[{code}] ✨ GPT 生圖中（{len(refs)} 張參考 → 9 張賣場圖）…")
-    gen = generate_store_set(refs, item_dir / "images" / "generated", product_name, category)
+    logger.info(f"[{code}] ✨ GPT 生封面（依 design_engine 規範）…")
+    cover = generate_cover(main_imgs, detail_imgs,
+                           item_dir / "images" / "generated" / "cover.png")
+    gen = [cover] if cover else []
     if not gen:
         logger.warning(f"[{code}] GPT 沒生出圖，退回 1688 圖")
         return []

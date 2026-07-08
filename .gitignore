@@ -14,3 +14,9 @@ AI-Memory/
 
 # AI 上架名單 CSV（商業資料，Chrome 同源下載到本機）
 input/
+
+# GPT 生圖：個人照片(板娘)+對手截圖不進版控(隱私+repo 肥大)，只留 md 規範與 .txt 說明
+config/design_engine/persona/*
+!config/design_engine/persona/*.txt
+config/design_engine/reference/*
+!config/design_engine/reference/*.txt

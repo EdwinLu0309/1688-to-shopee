@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-07-08（#S069：GPT 生圖引擎轉向 Responses API + Design Engine V1.0）
+
+### 新增
+- **設計規範 `config/design_engine/`**：單一宣告式 `JOYSLU_LADY_DESIGN_ENGINE.md`（V1.0）——叫 GPT 先做電商分析、依商品自己規劃整套、只用真實賣點、不逐張腳本。`persona/`（板娘）+ `reference/`（對手場景）圖片資料夾
+- **`gpt_image_generator` 改「讀 md + 組圖 + 呼叫 API」**：`load_design_spec()` 讀規範、`generate_cover()` 組圖生圖、`_normalize()` 轉 RGB PNG（避免舊照片 CMYK 被 API 擋）。模型改 `gpt-image-1`（Edwin 指定）
+- **Responses API 對話串接原型**（`scratch_listing.py` 等）：GPT-5.5 導演 + image_generation 工具 + `previous_response_id` 串接 → 自主規劃整套、逐張連貫生成。實測完勝 images.edit（文字全繁體零錯字、風格穩）
+
+### 變更
+- `batch_pipeline2._gpt_images_for` 改走 design_engine 規範（main=商品圖、detail=1688 參考）
+
+### 待辦（下個 session）
+- ★把 Responses API 串接 + V1.0 正式接進 `gpt_image_generator`（取代 images.edit）、清 `scratch_*.py`
+- 跑一次帶 usage 記錄拿真實 token 成本 → 省錢（參考圖 15→6-8、品質分段）
+- Edwin 續調 V1.0 spec + persona（板娘臉一致性）
+
 ## 2026-07-07（#S068：公司 Windows 可跑化 + Google 登入解 v20 cookie）
 
 ### 新增

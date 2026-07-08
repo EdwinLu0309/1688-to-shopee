@@ -53,11 +53,11 @@
 - [x] 2026-04-10 蝦皮批次上架 Excel 自動產生
 - [x] 2026-04-10 完整 pipeline 跑通（651869906762 甲油膠）
 
-## GPT 生圖路線（2026-07-06～07）
-- [x] ✨GPT 支線接回：`image_host.py`（Supabase 圖床）+ batch route 串接 + GUI 每支「✨GPT」勾選 + 成本確認。全鏈實測通（生圖→上傳→公開 URL 200）
-- [x] 2026-07-07 改「開放做法」`generate_store_set`：主圖+細節圖全丟、最少限制、出 9 張女裝賣場圖（取代寫死主題 `generate_all`）
-- [x] 2026-07-07 GPT 圖策略定調：實拍（學對手乾淨現貨、無字）+ AI 賣點排版（補對手沒有的解說）拉差距
-- [ ] ★賣點圖 prompt（零錯字版，Edwin 調）貼回 → 接進 `generate_store_set`；實拍×6-7 + 賣點×2-3 配比
+## GPT 生圖路線（2026-07-06～08）
+- [x] ✨GPT 支線接回：`image_host.py`（Supabase 圖床）+ batch route + GUI 每支勾選 + 成本確認。全鏈實測通
+- [x] 2026-07-08 ★引擎轉向：設計規範改單一宣告式 `design_engine/JOYSLU_LADY_DESIGN_ENGINE.md` V1.0；`gpt_image_generator` 改「讀 md + 組圖 + 呼叫 API」；模型 gpt-image-1
+- [x] 2026-07-08 ★Sprint B 驗證：Responses API（gpt-5.5 導演 + image_generation + previous_response_id 串接）完勝 images.edit（文字全繁體、GPT 自主規劃整套 9 張）。原型在 `scratch_listing.py`
+- [ ] ★把 Responses API 串接 + V1.0 正式接進 `gpt_image_generator`（取代 images.edit）、清 `scratch_*.py`
+- [ ] ★跑一次帶 usage 記錄拿真實 token 成本 → 省錢（參考圖 15→6-8、品質分段 medium 草稿→high 定稿）
+- [ ] Edwin 續調 V1.0 spec + persona（板娘臉一致性：目前是自然模特兒臉、未必本人）
 - [ ] ★用 Supabase URL 塞蝦皮 Excel 上傳測 1 張，確認蝦皮抓得到公開圖不被擋，再全量
-- [ ] GPT 中文字多會錯字（顯瘦→顯庚等）→ 短字/無字才穩；賣點圖要嘛 prompt 指定確切字串、要嘛後製疊字
-- [ ] 非褲類主題微調（目前褲類 PANTS_THEMES、其餘 GENERIC_THEMES 通用；開放做法用 STORE_ROLES）
