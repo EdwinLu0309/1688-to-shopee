@@ -196,7 +196,27 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
   （`previous_response_id`）——實測完勝 images.edit（文字全繁體、GPT 自主規劃整套）。原型在
   `scratch_listing.py`（+ `scratch_pure9/responses9.py`），尚未接進 `gpt_image_generator`。詳見全域踩坑筆記。
 - **GPT 圖策略**（Edwin 定案）：實拍（學對手乾淨現貨、無字→零錯字）+ AI 賣點排版（補對手沒有的解說）拉差距。
-  ⚠️ Supabase URL 塞蝦皮沒實測過 → 先測 1 張確認蝦皮抓得到再全量。
+
+## ★圖片正線：1688 圖轉蝦皮 1:1 繁體版（2026-07-09 #S070 定案，取代「AI 重畫」）
+不讓 AI 重生成商品（會失真、布料變絲滑），改「**拿 1688 真實細節圖 → 逐張轉成蝦皮 1:1 繁體版**」＝最不失真。
+原型 `scratch_transform.py`（per-image：`instructions`=保留原圖的英文 system prompt + md spec + 單張圖 → Responses API `image_generation` 工具）。**尚未接進 pipeline**（`scratch_transform_batch.py` 是多商品批次原型）。
+- **定案配置**：畫圖模型 `gpt-image-1.5`、品質 `low`、設計規範 `JOYSLU_LADY_DESIGN_ENGINE.md`＝「轉蝦皮版 V2」（保留原圖、smart-crop 裁背景+outpaint 延伸讓人物填滿 82-88%、禁止整張縮小加白邊、簡轉繁、刪英文）。
+- **只轉「全身乾淨模特圖」**（人工看 contact sheet 分類 detail 檔挑全身★★★★+）；純文字/尺碼/面料面板**別餵 AI**（會爛字）→ 尺碼表用 `size_chart_maker.make_size_chart` 程式做繁體版（數據從該商品尺碼細節圖人工讀）。
+- **成本**：gpt-image-1.5 low 每張 ~$0.009、每商品 ~$0.10（含 gpt-5.5 導演）。**費率校正**：每張 = 固定 token(1024²：low272/med1056/high4160) × 模型 output 費率（img-1 $40 / img-1.5 $32 / mini $8 每 1M）。mini-low 便宜但保真差（灰變藍、改姿勢）→ 不用。詳見全域踩坑 #S070。
+- **✅ Supabase URL 塞蝦皮已實測可行**（HTTP 200 公開可讀，蝦皮抓得到）。轉換圖上圖床 → URL 覆蓋進 Excel 商品圖片欄（S 封面 + T~AA）：把 `batch_pipeline2._gpt_images_for` monkeypatch 成「上傳既有轉換圖」+ 各商品 `route='gpt'`、`reuse_content=True` 即可重建 Excel。
+- **影片**：`video_maker.make_product_video` 合成轉換圖幻燈片；**1688 原始影片**＝抓 `<video>` 元素 src（`playwright_scraper`/`extract_1688.js` 已補 `video_url` 抽取）→ 下載 `cloud.video.taobao.com` mp4 ⚠️**不能帶 `Referer:1688` header**（CDN 回 0 byte），只帶 User-Agent。
+
+## ★訂貨系統（3 分頁 Google Sheet + 下單工具規劃，2026-07-09 #S070）
+每天 200-300 預購商品要下單，用一張 Google Sheet（SA `inventory-sync@inventory-sync-493112.iam.gserviceaccount.com` 需被分享為編輯者；SA 無 Drive 容量不能自建檔，要 Edwin 建空白表再分享）。**三分頁**：
+1. **`1_訂貨主檔`**（靜態、隨上架累加）：`商品選項貨號 | 編號 | 商品簡稱 | 1688網址 | 規格一(1688原色) | 規格二(1688尺碼) | 進貨¥`。
+   - **join key＝商品選項貨號**（= 蝦皮 O 欄 `編號_顏色（身高款）_尺碼`，如 `P14AE1_黑色（常規款）_S`；已實測蝦皮會吃、匯出欄33 對得上）。
+   - **規格一/二 = 1688 原始規格**（cart_adder 選規格用）：規格一取 `build_variants` 的 `src_1688`（如 `（升级面料）-黑色-常规款`，**實測與 1688 頁面 `.sku-filter-button .label-name` 逐字相同**）；規格二取 1688 原尺碼字串（如 `S（80~95斤）`，**格式是否與頁面尺碼列逐字相同待 cart_adder 首次實跑驗**）。
+2. **`2_每日訂購彙總`**（訂貨依據，餵 cart_adder）：`日期 | 商品選項貨號 | … | 總數量 | 進貨¥ | 成本小計 | 下單狀態 | 下單時間`。**由分頁3 程式自動聚合，不手填。**
+3. **`3_訂單明細`**（出貨依據，按訂單編號）：`日期 | 訂單編號 | 買家帳號 | 商品選項貨號 | 編號 | 數量 | 出貨狀態`。一列一張蝦皮訂單明細（解「同 SKU 多買家」的一對多：留成多列不塞一格）。到貨後篩 SKU → 知道寄給哪幾張單。
+- **蝦皮匯出**：`Order.toship.YYYYMMDD_*.xlsx` 有密碼（msoffcrypto 解），關鍵欄：欄33 商品選項貨號、欄34 數量、欄0 訂單編號、欄5 買家帳號、欄27 商品選項名稱。
+- **資料流**：蝦皮匯出 → append 分頁3（原始明細）→ 同 SKU 聚合寫分頁2（總量+成本）→ 按下單 cart_adder 跑 → 回寫分頁2 狀態。
+- **下單顆粒度待驗**：分頁2 記到 SKU（色×尺碼）；若 1688 是單軸（只有色-款式無尺碼軸，本商品尺碼列靜態探測不到、待實測）→ 餵 cart_adder 前要再聚合到「色-款式」層。
+- **下單工具規劃（獨立簡易版，Edwin 上架完後做）**：GUI 匯入蝦皮 Excel → 建當日分頁明細+彙總 → 顯示今日預計總金額 → 帶 1688 cookie → 點「下單」呼叫 1688-order 的 `cart_adder`（現成：選規格一 `text-is` + 填數量 + 加采购车，雙規格切色後逐尺碼）→ 回寫狀態 → 點「核對」跑 `cart_verifier`。
 
 ## 環境變數
 - `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py 用，標題+詳情）

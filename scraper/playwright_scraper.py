@@ -109,7 +109,8 @@ EXTRACT_JS = r"""() => {
     title:(document.title||"").replace(/ - 阿里巴巴$/,"").trim(),
     description:"", categories:[], shop_name:"", shop_url:"", shop_location:"",
     shop_ratings:{}, min_order:0, origin_price:price_cny, price_ranges:[],
-    attributes, main_images:main, detail_images:uniq(detail), video_url:"",
+    attributes, main_images:main, detail_images:uniq(detail),
+    video_url:(function(){var v=document.querySelector("video");return v&&v.src?v.src:"";})(),
     sku_images, skus, sizes, size_stock, price_cny,
     _blocked: /验证|滑动|安全验证|robot|captcha/i.test(document.body?document.body.innerText.slice(0,500):""),
   };

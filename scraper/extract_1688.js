@@ -148,7 +148,7 @@
     attributes,
     main_images: main,
     detail_images: uniq(detail),
-    video_url: "",
+    video_url: (function(){var v=document.querySelector("video");return v&&v.src?v.src:"";})(),
     sku_images,        // 第一軸（顏色/款式）name -> 圖
     skus,              // 第一軸清單
     sizes,             // 第二軸（尺碼）

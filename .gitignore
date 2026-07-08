@@ -20,3 +20,9 @@ config/design_engine/persona/*
 !config/design_engine/persona/*.txt
 config/design_engine/reference/*
 !config/design_engine/reference/*.txt
+
+# 暫存/實驗輸出（#S070）
+.DS_Store
+**/.DS_Store
+scratchpad/
+scratchpad_*.log

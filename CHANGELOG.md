@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-07-09（#S070：圖片正線轉向「1688 圖轉蝦皮 1:1 繁體」+ 每日訂貨系統設計）
+
+### 新增
+- **`scratch_transform.py`**：1688 細節圖 → 蝦皮 1:1 繁體版逐張轉換原型（per-image：保留原圖 system prompt + 「轉蝦皮版 V2」md + 單張圖 → Responses API `image_generation`）。可帶參數選模型/品質
+- **`scratch_transform_batch.py`**：多商品批次轉換（讀人工分類的「全身乾淨模特圖」detail 檔清單）
+- **`scraper/{playwright_scraper,extract_1688}.js/py` 補 `video_url` 抽取**：從 `<video>` 元素 src 抓 1688 原始影片網址（`cloud.video.taobao.com`），以後抓取自動帶影片
+- **CLAUDE.md 新增「圖片正線」+「訂貨系統」兩段**：定案配置、Supabase 塞蝦皮實測、3 分頁 Google Sheet 架構、下單工具規劃
+
+### 變更
+- **設計規範 `JOYSLU_LADY_DESIGN_ENGINE.md`：V1.0（宣告式生圖）→「轉蝦皮版 V2」**（保留原圖 100%、smart-crop 裁背景+outpaint 延伸讓人物填滿 82-88%、簡轉繁、刪英文、禁止整張縮小加白邊）
+- **`scratch_listing.py` 加 usage/成本計量**：per-turn input/cached/output token 拆解 + 費率校正表 + 計時；支援切模型（gpt-image-1/1.5/mini）與品質（low/med/high）
+
+### 定案 / 實測
+- **圖片正線改「轉換真實照片」而非「AI 重畫」**（最不失真）：`gpt-image-1.5 + low + V2`，每商品 ~$0.10；mini-low 保真差（灰變藍/改姿勢）淘汰；low 僅用於無文字圖
+- **Supabase public URL 塞蝦皮 Excel 圖片欄實測可行**（HTTP 200，蝦皮抓得到）；monkeypatch `_gpt_images_for` 上傳轉換圖 + `reuse_content` 重建 Excel
+- **費率校正**：每張 = 固定 token(low272/med1056/high4160) × output 費率(img-1 $40/1.5 $32/mini $8 每 1M)；快取確實生效、模型選擇是最大槓桿
+- **踩坑**：下載 `cloud.video.taobao.com` 影片不能帶 `Referer` header（回 0 byte）；蝦皮訂單匯出 xlsx 有密碼（msoffcrypto 解）；SA 無 Drive 容量不能自建 Sheet
+
+### 待辦（下個 session）
+- 做獨立簡易版下單工具（匯入蝦皮 Excel → 建當日分頁 → 總金額 → cart_adder 下單 → cart_verifier 核對）
+- 「1688 圖轉換正線」正式接進 pipeline/GUI 取代 `generate_cover`（含尺碼表數據自動辨識）
+- 規格二尺碼格式待 cart_adder 首跑驗；補 P14AE4/5 進貨¥（現 ¥0）
+
 ## 2026-07-08（#S069：GPT 生圖引擎轉向 Responses API + Design Engine V1.0）
 
 ### 新增
