@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-07-10（#S071：每日訂貨系統落地 — Phase A 資料骨幹 + Phase B 下單/GUI）
+
+### 新增
+- **`scraper/ordering/` 套件**（每日訂貨系統，#S070 三分頁設計落地成 code）：
+  - `shopee_export.py`：msoffcrypto 解密蝦皮 toship 匯出 + calamine 讀，抽欄 0/5/25/27/33/34（訂單編號/買家/商品名/選項名/貨號/數量），含表頭校驗防跑位
+  - `order_sheet.py`：gspread + inventory-sync SA 讀寫三分頁。`load_master`（分頁1）/`append_details`（分頁3，去重 by 訂單編號+貨號）/`upsert_summary`（分頁2，clear+rewrite 某日 idempotent）/`update_order_status`（回寫）
+  - `pipeline.py`：`import_orders`（匯出→join 主檔過濾預購品→建明細→聚合彙總→算今日總金額）。**預設 dry-run，`--commit` 才寫 live sheet**；純函式 `build_import` 好測
+  - `cart_order.py`：彙總 join 主檔補 1688 網址 → `build_order_items` → `place_orders`（驅動 cart_adder 按 url 分組加購）→ 回寫狀態；`verify_cart` 驅動 cart_verifier。`run_place_orders` 只跑「下單狀態空」的列防重複
+  - `cart_adder.py`/`cart_verifier.py`：**vendored 自 `~/projects/1688-order/order/`**（只改 OrderItem import；1688 改版兩專案選擇器要同步）
+- **CLI 三指令**：`order-import <toship.xlsx> -P <密碼> [-d 日期] [--commit]` / `order-place` / `order-verify`
+- **`order_gui.py` 獨立訂貨 GUI**（不動主 gui.py）：選匯出檔+密碼+日期 → 📥匯入預覽(dry-run) → ✅寫入Sheet → 🛒下單 → 🔍核對。啟動器 `run_order_mac.command` / `run_order_windows.bat`
+- **`config/settings.py`**：`ORDER_SHEET_ID` 三分頁常數 + `ORDER_SHEET_SA_JSON`（inventory-sync SA）
+- **requirements.txt**：加 `gspread` / `google-auth` / `msoffcrypto-tool`
+
+### 實測
+- 真檔 `Order.toship.20260708`（131 列，舊 BH ERP 碼）dry-run + commit 都正確寫 0 列（不在預購主檔＝正確跳過整店非預購品）
+- 合成訂單（取真實主檔 P14AE 貨號）驗聚合：同 SKU 兩買家 2+1→3、同單多 SKU 拆列、非主檔跳過
+- live Google Sheet 寫入 + 回寫下單狀態 + 清理回 header-only 全通過
+- **未驗**：首次實跑下單驗規格二尺碼格式（`S（80~95斤）`）與 1688 頁面是否逐字對得上（要真實預購訂單 + 開瀏覽器）
+
 ## 2026-07-09 下午（#S070 續：走 A 全自動化 + 56 支實跑 + 尺碼公斤根治）
 
 ### 新增
