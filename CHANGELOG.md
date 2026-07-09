@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-07-09 下午（#S070 續：走 A 全自動化 + 56 支實跑 + 尺碼公斤根治）
+
+### 新增
+- **`scraper/auto_classify.py`**：gpt-5.5 vision 自動分類細節圖——`classify_details()` 讀 contact sheet 挑全身乾淨模特圖 + 找尺碼表；`read_size_chart()` 讀尺碼數據（headers/rows/weight_jin）。取代人工挑圖+人工讀尺碼
+- **`scratch_auto_pipeline.py`**：全自動 pipeline（分類→轉換→尺碼表，`AILIST`/`IDSFILE` 環境變數指定名單，3 緒+429 退避）
+- **`scratch_transform_rerun.py`**：轉換補跑（讀 `_auto_classify.json`，每支上限、退避重試、跳過已完成）
+
+### 修復
+- **尺碼「公斤 vs 斤」三軌分離**（Edwin 確認）：買家選項=公斤 / 商品選項貨號=純字母 / 訂貨表規格二=1688 原始斤。三層源頭修：
+  - `copywriter` prompt 規定「體重一律 kg、斤÷2、絕不出現斤」
+  - `copywriter.build_variants._clean_size_key`：尺碼 key 清成純字母（`M【80-100斤】`→`M`），`_label_kg`：選項標籤統一 kg
+  - `copywriter.scrub_jin`：詳情內文自動掃斤→kg（接進 `generate_listing`）
+  - ⚠️ 訂貨表規格二用 JSON 原始 `sizes`（斤）不受影響——買家 kg、1688 對照斤分開
+
+### 實跑
+- **分頁014（P14AE6-48=43 支）+ 分頁15（P15=13 支）全自動跑通**：抓取→下載→分類→轉換→尺碼表→Excel（全公斤）→打包。兩批 Excel 驗證非模板斤=0
+- **踩坑**：轉換 6 併發→OpenAI 429（改 3 緒+退避）；分頁 gid 用 `/export?gid=`（gviz 不吃）；3 支無細節圖退 main 圖；Anthropic 額度用完 batch2 靜默跳過
+
 ## 2026-07-09（#S070：圖片正線轉向「1688 圖轉蝦皮 1:1 繁體」+ 每日訂貨系統設計）
 
 ### 新增

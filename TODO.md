@@ -20,7 +20,10 @@
 - [x] 2026-07-09 #S070 ★訂貨表結構建好（Google Sheet 3 分頁：`1_訂貨主檔` SKU↔1688 對照 / `2_每日訂購彙總` 訂貨依據 / `3_訂單明細` 按訂單編號出貨依據）。join key=商品選項貨號（實測蝦皮吃）、規格一實測逐字對上 1688。SA `inventory-sync@…` 寫入
 - [ ] #S070 ★做獨立簡易版下單工具：匯入蝦皮 Excel（msoffcrypto 解密）→ 建當日分頁明細+彙總 → 顯示今日總金額 → 帶 1688 cookie 點下單呼叫 1688-order `cart_adder` → 回寫狀態 → 點核對跑 `cart_verifier`
 - [ ] #S070 規格二尺碼格式（`S（80~95斤）`）待 cart_adder 首次實跑驗；確認 1688 單軸(色-款式)或雙軸(含尺碼)決定下單聚合顆粒度
-- [ ] #S070 ★圖片正線「1688 圖轉蝦皮 1:1 繁體」（`scratch_transform*.py`）正式接進 pipeline/GUI 取代 `generate_cover`（含尺碼表數據自動辨識、全身圖自動挑選）
+- [x] 2026-07-09 #S070 ★走 A 全自動圖片 pipeline：`auto_classify.py`（vision 自動挑全身圖+讀尺碼表）+ `scratch_auto_pipeline.py`（分類→轉換→尺碼表，3緒+退避）→ 分頁014(43支)+分頁15(13支)實跑通
+- [x] 2026-07-09 #S070 ★尺碼公斤三層源頭修（copywriter prompt + build_variants clean key/kg label + scrub_jin 掃詳情）；買家kg／貨號純字母／訂貨表規格二用 JSON 原始斤 分離
+- [ ] #S070 訂貨表產生器：規格二務必用 JSON 原始 `sizes`（斤）對回，不可用清過的 size key（P14AE12「M【80-100斤】」會對不到）
+- [ ] #S070 走 A 正式接進 `gpt_image_generator`/GUI（現為 scratch）；改善主圖類簡體側欄翻繁（P14AE28/29/41）；分類器對安全裤類全身圖少的調整
 - [ ] #S070 補 P14AE4/P14AE5 的 1688 進貨單價（現 ¥0，影響訂貨成本計算）
 - [ ] #S070 Edwin 上架商品時驗證「商品選項貨號」蝦皮完整吃下（訂貨 join 地基）；上架用轉換圖 Excel（`測試5_shopee_轉換圖.xlsx` 這類）+ 素材包
 - [ ] 選項勾選表（兩軸 → 人工勾選上架哪些 + 訂貨數量）

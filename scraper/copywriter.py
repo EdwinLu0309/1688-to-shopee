@@ -64,7 +64,9 @@ _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文
 3. 蝦皮標題：依 SOP §11 / 標題規則，含【JoysLu Lady】+ 核心關鍵字 +「女裝」+ 編號，57-60 字寬內
 4. 完整詳情頁（通用 8 區塊全文，套母規範固定文案：賣場介紹/退換貨/推薦三款）
 5. 顏色簡繁對照：把每個第一軸顏色轉成繁體乾淨名（去掉廠商括號贅字，如「米白色【长裤】」→「米白色」；款式差異若需保留另說）
-6. 尺碼標籤：每個尺碼配廠商有給的數據（體重/身高/三圍）；廠商沒給就只放尺碼字母，不硬湊
+6. 尺碼標籤：每個尺碼配廠商有給的數據（體重/身高/三圍）；廠商沒給就只放尺碼字母，不硬湊。
+   ★體重單位一律用「公斤(kg)」：廠商標「斤」時務必 ÷2 換算（1斤=0.5kg，如 80-95斤→40-47.5kg）。
+   標籤只寫 kg、**絕對不可出現「斤」字**，也不要「斤 ‧ kg」並列。格式範例：「S（40-47.5kg）」
 7. flags：字典待擴充的新顏色/材質詞、廠商備註、疑似違規詞、子品類不確定、尺碼數據缺漏
 
 【只回傳這個 JSON，不要任何其他文字】
@@ -75,7 +77,7 @@ _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文
   "description": "完整 8 區塊詳情頁文案（含換行）",
   "style_kept": ["依款式備註保留的第一軸原始選項名（簡體照原文）"],
   "color_map": {{"1688簡體顏色": "繁體乾淨顏色"}},
-  "size_labels": {{"尺碼": "尺碼+數據或純尺碼"}},
+  "size_labels": {{"尺碼": "尺碼+公斤數據或純尺碼，如 S（40-47.5kg）；體重一律 kg 不可用斤"}},
   "flags": ["..."]
 }}"""
 
@@ -138,6 +140,8 @@ def generate_listing(product_data: dict, sheet_ctx: dict) -> dict:
             if text.startswith("json"):
                 text = text[4:]
         result = json.loads(text)
+        if result.get("description"):
+            result["description"] = scrub_jin(result["description"])
         logger.info(f"[{sheet_ctx.get('code')}] 標題：{result.get('title','')[:40]}")
         if result.get("flags"):
             for fl in result["flags"]:
@@ -149,6 +153,39 @@ def generate_listing(product_data: dict, sheet_ctx: dict) -> dict:
     except Exception as e:
         logger.error(f"Claude API 錯誤：{e}")
         return {"error": str(e), "flags": [f"API 錯誤：{e}"]}
+
+
+def scrub_jin(text: str) -> str:
+    """把文案內文的體重「斤」統一成公斤：斤‧kg 並列→只留 kg；單獨斤範圍→÷2 換算。"""
+    import re
+    # 「80-100斤 ‧ 約40-50 kg」→「40-50 kg」
+    text = re.sub(r"[\d.]+\s*[-–~]\s*[\d.]+\s*斤\s*[‧·/、,，]?\s*約?\s*([\d.]+\s*[-–~]\s*[\d.]+\s*kg)",
+                  r"\1", text)
+    # 單獨「80-95 斤」→「40-47.5 kg」
+
+    def _c(m):
+        return f"{float(m.group(1)) / 2:g}-{float(m.group(2)) / 2:g} kg"
+    text = re.sub(r"([\d.]+)\s*[-–~]\s*([\d.]+)\s*斤", _c, text)
+    return text
+
+
+def _clean_size_key(s: str) -> str:
+    """尺碼 key 只留字母/數字（S/M/L/XL/2XL…），砍掉【…】(…)（…）斤 等體重括號（供貨號用）。"""
+    import re
+    k = re.split(r"[（(【\[]", str(s))[0].strip()
+    return k or str(s).strip()
+
+
+def _label_kg(label: str, size: str) -> str:
+    """尺碼選項標籤體重統一成公斤：優先抽 kg 範圍；沒 kg 就斤÷2；都沒有則砍斤字殘留。"""
+    import re
+    m = re.search(r"([\d.]+)\s*[-–~]\s*([\d.]+)\s*kg", str(label))
+    if m:
+        return f"{size}（{m.group(1)}-{m.group(2)}kg）"
+    m2 = re.search(r"([\d.]+)\s*[-–~]\s*([\d.]+)\s*斤", str(label))
+    if m2:
+        return f"{size}（{float(m2.group(1)) / 2:g}-{float(m2.group(2)) / 2:g}kg）"
+    return re.sub(r"\s*[【\[]?[\d.]*[-–~]?[\d.]*\s*斤[^）)】\]]*[】\]]?", "", str(label)).strip()
 
 
 def build_variants(code: str, short_name: str, color_map: dict,
@@ -167,6 +204,9 @@ def build_variants(code: str, short_name: str, color_map: dict,
         zh = color_map.get(c, c)
         buyer = f"{short_name}_{zh}" if short_name else zh
         tier1.append({"src_1688": c, "color": zh, "option_name": buyer})
-    tier2 = [{"size": s, "option_name": size_labels.get(s, s)} for s in selected_sizes]
+    tier2 = []
+    for s in selected_sizes:
+        key = _clean_size_key(s)
+        tier2.append({"size": key, "option_name": _label_kg(size_labels.get(s, s), key)})
     return {"規格1_顏色": tier1, "規格2_尺碼": tier2,
             "sku_count": len(tier1) * len(tier2)}

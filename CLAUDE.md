@@ -217,6 +217,19 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
 - **✅ Supabase URL 塞蝦皮已實測可行**（HTTP 200 公開可讀，蝦皮抓得到）。轉換圖上圖床 → URL 覆蓋進 Excel 商品圖片欄（S 封面 + T~AA）：把 `batch_pipeline2._gpt_images_for` monkeypatch 成「上傳既有轉換圖」+ 各商品 `route='gpt'`、`reuse_content=True` 即可重建 Excel。
 - **影片**：`video_maker.make_product_video` 合成轉換圖幻燈片；**1688 原始影片**＝抓 `<video>` 元素 src（`playwright_scraper`/`extract_1688.js` 已補 `video_url` 抽取）→ 下載 `cloud.video.taobao.com` mp4 ⚠️**不能帶 `Referer:1688` header**（CDN 回 0 byte），只帶 User-Agent。
 
+## ★走 A：全自動圖片 pipeline（視覺分類，2026-07-09 #S070，43+13 支實跑）
+取代「人工看 contact sheet 挑圖 + 人工讀尺碼表」。兩支：
+- **`scraper/auto_classify.py`**：`classify_details(item, subdir='detail')` 把細節圖做成 contact sheet → 一次 gpt-5.5 vision 呼叫 → `{fullbody:[stem], sizechart:stem}`（挑全身乾淨模特圖 + 找尺碼表）；`read_size_chart(item,stem)` 讀尺碼表 → `{headers,rows,weight_jin}`。分類器偏保守（寧缺）；體重(斤)常讀不到→尺碼表體重註記可選。
+- **`scratch_auto_pipeline.py`**（`AILIST`/`IDSFILE` 環境變數指定名單）：分類→轉換(3緒+429退避)→尺碼表(斤÷2→kg)。**轉換務必 ≤3 併發+退避**（OpenAI 圖生 6 併發會 429）。存 `output/_auto_classify.json`。
+- **全批流程**：抓取 → 下載圖(`download_product_images_from_json` dest_dir=`output/{item}/images` 要含 /images！) → auto_pipeline → batch2(monkeypatch `_gpt_images_for` 上傳轉換圖) → 影片+打包。
+- **踩坑**：① 分頁 gid 要用 `/export?format=csv&gid=` 端點（gviz 不吃 gid、回預設頁）；② 少數商品 1688 無細節圖(detail=0)→退用 main 圖(帶簡體側欄，AI 常沒翻繁)；③ 安全裤/鲨鱼裤類全身模特圖少、分類器挑得少；④ Anthropic 額度用完 batch2 會「文案失敗」靜默跳過→ console.anthropic.com 儲值(API≠claude.ai 訂閱)。
+
+## ★尺碼「公斤 vs 斤」三軌分離（2026-07-09 #S070，血淚，務必分清）
+**買家看公斤、1688 對照用斤、貨號用純字母**，三者不同用途不可混：
+1. **買家選項（規格選項2 L欄）＝公斤**：copywriter 源頭修（prompt 規定「體重一律 kg、斤÷2、絕不出現斤」）+ `build_variants._label_kg`（抽 kg 或斤÷2）+ `copywriter.scrub_jin`（詳情內文掃斤）三層都改。
+2. **商品選項貨號尺碼（O欄 join key）＝純字母**：`build_variants._clean_size_key` 把「M【80-100斤】」清成「M」（貨號只是識別碼、不需含斤；蝦皮匯出欄33 ↔ 訂貨表兩邊一致即可）。
+3. **⚠️ 訂貨表「規格二」(給 cart_adder 在 1688 選規格)＝斤，必須是 1688 原文**（如 `M【80-100斤】`/`S（80~95斤）`）：**來自抓取 JSON 的原始 `sizes`，公斤修正完全沒動它**。建訂貨表時規格二**務必用 JSON 原始 sizes 對回**（別用清過的 key 硬湊，否則像 P14AE12「M【80-100斤】」對不到）。
+
 ## ★訂貨系統（3 分頁 Google Sheet + 獨立下單 GUI，2026-07-09 #S070／Phase A+B 已建）
 每天 200-300 預購商品要下單，用一張 Google Sheet（SA `inventory-sync@inventory-sync-493112.iam.gserviceaccount.com` 需被分享為編輯者；SA 無 Drive 容量不能自建檔，要 Edwin 建空白表再分享）。**三分頁**：
 1. **`1_訂貨主檔`**（靜態、隨上架累加）：`商品選項貨號 | 編號 | 商品簡稱 | 1688網址 | 規格一(1688原色) | 規格二(1688尺碼) | 進貨¥`。
