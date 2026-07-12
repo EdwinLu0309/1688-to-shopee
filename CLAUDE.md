@@ -20,11 +20,14 @@
 ```
 ├── gui.py                     # ★桌面 GUI（tkinter，四步：登入→抓取→產Excel→素材夾）
 ├── order_gui.py               # ★每日訂貨 GUI（獨立，不動 gui.py）：匯入蝦皮匯出→彙總→下單→核對
+├── reconcile_gui.py           # ★1688 訂單刷新 GUI（獨立）：抓 1688 待付款訂單→覆蓋金流核對表 1688_DB
 ├── run_mac.command            # Mac 啟動 GUI（優先 .venv/bin/python，Tk 9.0 深色正常）
 ├── run_windows.bat            # Windows 啟動 GUI
 ├── run_order_mac.command      # Mac 啟動訂貨 GUI（order_gui.py）
 ├── run_order_windows.bat      # Windows 啟動訂貨 GUI
-├── main.py                    # CLI 入口（login/scrape/generate/batch/order-import/order-place/order-verify）
+├── run_reconcile_mac.command  # Mac 啟動金流核對 GUI（reconcile_gui.py）
+├── run_reconcile_windows.bat  # Windows 啟動金流核對 GUI
+├── main.py                    # CLI 入口（login/scrape/generate/batch/order-import/order-place/order-verify/reconcile-refresh）
 ├── config/
 │   ├── settings.py            # 全域設定（含 Gemini、Google Sheet）
 │   ├── shopee_template.xlsx   # 蝦皮批次上架模板
@@ -56,7 +59,10 @@
 │       ├── pipeline.py        # 匯入→join→明細+彙總→今日總金額（dry-run 預設）
 │       ├── cart_order.py      # 彙總→OrderItem→cart_adder 加購/cart_verifier 核對
 │       ├── cart_adder.py      # vendored 自 1688-order（1688 改版兩邊同步）
-│       └── cart_verifier.py   # vendored 自 1688-order
+│       ├── cart_verifier.py   # vendored 自 1688-order
+│       ├── pending_scraper.py # ★金流核對：頁內 mtop 抓 1688 待付款訂單 → OrderRecord/1688_DB 26欄
+│       ├── reconcile_db.py    # ★覆蓋金流核對表 1688_DB 分頁（gspread SA）
+│       └── reconcile_pipeline.py # ★刷新流程：抓訂單→(可選)覆蓋 1688_DB（dry-run 預設）
 ├── output/                    # 產出目錄（gitignored）
 │   └── {item_id}/
 │       ├── ai_content.json
@@ -252,12 +258,38 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
   - **下單 cookie**：用主 gui.py 的「🔑 登入 1688」產生的 `config/cookies.json`（cart_adder 直接吃）。
   - 進貨¥ 目前多數主檔列未填 → 成本小計顯示「無進貨¥」，Edwin 補 `1_訂貨主檔` G 欄即計入總金額。
 
+## ★金流核對刷新（1688 訂單→1688_DB，2026-07-13 #S072，取代手動匯出報表）
+解決「每次要用電腦開 1688 待付款→勾選→匯出訂單報表→丟資料夾→匯入 DB」太繁瑣、手機做不到、
+且**廠商偷改價看不出來**的痛點。按一顆按鈕就把當下 1688 訂單撈進金流核對表。
+- **目標表**：`【Nail】2-1. 進貨金額記錄_2026`（`RECONCILE_SHEET_ID`，settings.py；SA=inventory-sync 已有編輯權）。
+  分頁 `1688_DB`（26 欄，＝1688 官方「訂單報表」匯出 xlsx 原樣）存訂單原始資料；各日期核對分頁
+  （`0713` 等）靠 **`卖家公司名`（廠商）** VLOOKUP 帶入 `付款平台訂單編號/訂單費用/總金額/運費`。刷新只動
+  `1688_DB`、不碰核對分頁。
+- **抓取法（去風險定案）**：不刮脆弱的 shadow DOM（air.1688 訂單頁是 Lit q-table 虛擬滾動）、也不打
+  簽章混淆的 mtop——而是 **Playwright 進頁後，在頁內用該站自己的 `lib.mtop` JS 呼叫訂單清單 API**（自動簽章、
+  可翻頁）：`mtop.1688.trading.dataline.service` + `serviceId=OrderListDataLineService.buyerOrderList`，
+  `param={"tradeStatus":"waitbuyerpay","page":N,"pageSize":100}` → `res.data.data.result`(JSON字串)
+  → `{data:{data:[...訂單...],total,pages}}`。改版時改 `pending_scraper.py` 的 `CALL_JS`。
+- **欄位對應**（⚠️ 金額單位是「分」÷100）：`idStr`→訂單編號、`sellerInfo.companyName`→卖家公司名（核對 key）、
+  `sumProductPayment`→货品总价、`carriage`→运费、`sumPayment`→实付款、`gmtCreate`→订单创建时间（格式化 `Y/M/D`）、
+  `orderEntries[]`→品項（productName/price/quantity/productNumber/sourceId=Offer ID/skuId）。折扣＝货总−实付。
+  一訂單多列（首列填訂單級欄+首品項，後續列只填品項欄），比照官方報表格式。清單 API 的收貨地址/電話被遮罩→留空（核對用不到）。
+- **日期篩選**：只留 `gmtCreate >= 核對日期`（預設今天）——今天下的訂貨表就核對今天(含)之後的訂單，不對到舊批。
+- **覆蓋語義**：重抓待付款訂單**覆蓋** `1688_DB` 資料區 + 更新頂端「最後更新時間」。⚠️**0 筆時防呆略過覆蓋**
+  （避免清空整張 DB）。廠商改價→實付款會一起被覆蓋更新，這就是「看得出廠商改價」的關鍵。
+- **入口**：GUI `reconcile_gui.py`（獨立，不動 gui.py/order_gui.py）＝設核對日期→🔄刷新預覽(dry-run 顯示筆數/實付合計/廠商)
+  →✅寫入 1688_DB。啟動 `run_reconcile_mac.command` / `run_reconcile_windows.bat`。
+  CLI `python main.py reconcile-refresh [-d 日期] [-s 狀態] [--commit]`。cookie 用主 gui.py 的「🔑 登入 1688」產生的 `config/cookies.json`。
+- **待驗**：首次實跑「有真的待付款訂單時 --commit 覆蓋」（目前帳號待付款=0，已用臨時分頁驗過寫入格式與 SA 權限、
+  用待收貨驗過抓取解析）。⚠️ 折扣欄語義與 1688 原匯出可能略不同，但**实付款＝sumPayment 是權威值**、核對看它。
+
 ## 環境變數
 - `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py 用，標題+詳情）
 - `OPENAI_API_KEY` — GPT 生圖（gpt-image-1.5）
 - `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`（`sb_secret_…`）/ `SUPABASE_BUCKET`（預設 `joyslu-images`）
   — GPT 生圖圖床（Supabase Storage public bucket；只 GPT 路線用）。service key 是機密，勿 commit。
 - `GEMINI_API_KEY` — Google Gemini API key（舊文案/生圖，保留備用）
+- `RECONCILE_SHEET_ID` — 金流核對表（【Nail】進貨金額記錄）ID，reconcile-refresh 覆蓋其 `1688_DB` 分頁（預設已寫死；SA 同 inventory-sync）
 
 ## 顏色/尺寸選項政策（color_policy.py + batch 兩層篩選）
 蝦皮單商品上限 **100 SKU**。SKU = 第一軸 × 尺碼。原則（Edwin 拍板）：

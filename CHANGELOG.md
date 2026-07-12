@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-07-13（#S084：金流核對「一鍵刷新」— 抓 1688 待付款訂單覆蓋 1688_DB）
+
+### 新增
+- **`scraper/ordering/pending_scraper.py`**：抓 1688 訂單 → 結構化 `OrderRecord` / 1688_DB 26 欄。
+  去風險定案＝**Playwright 進頁後在頁內用該站自己的 `lib.mtop` JS 呼叫 `OrderListDataLineService.buyerOrderList`**
+  （自動簽章、可翻頁），不刮脆弱的 Lit shadow-DOM 虛擬 q-table、也不外部打簽章 API。⚠️金額單位「分」÷100；
+  一訂單多列（首列訂單級欄+首品項，後列只品項）比照官方報表格式；清單 API 收貨地址被遮罩→留空。
+- **`scraper/ordering/reconcile_db.py`**：gspread SA 覆蓋金流核對表 `1688_DB` 分頁（第1列來源檔名/第2列最後更新時間/第3列表頭/第4列起資料）。
+- **`scraper/ordering/reconcile_pipeline.py`**：`refresh()` 抓訂單→(可選)覆蓋，dry-run 預設；**0 筆防呆略過覆蓋（避免清空 DB）**；`format_preview` 顯示筆數/實付合計/廠商。
+- **`reconcile_gui.py` 獨立 GUI**（不動 gui.py/order_gui.py）：設核對日期 → 🔄 刷新預覽 → ✅ 寫入 1688_DB。啟動器 `run_reconcile_mac.command` / `run_reconcile_windows.bat`。
+- **CLI**：`reconcile-refresh [-d 日期] [-s 狀態] [--commit]`。
+- **`config/settings.py`**：`RECONCILE_SHEET_ID`（【Nail】進貨金額記錄）+ `RECONCILE_DB_TAB=1688_DB`。
+
+### 設計
+- 只抓「下單日 >= 核對日期」的**待付款**訂單（不對到舊批；待付款才看得到廠商改價，付款後鎖定）。
+- 核對表各日期分頁靠 `卖家公司名`（廠商）VLOOKUP 帶入 `付款平台訂單編號/訂單費用/總金額/運費`；刷新只動 1688_DB。
+- 覆蓋語義比照 Edwin 手動「匯出→貼進 DB」；廠商改價→實付款一起覆蓋更新＝「看得出廠商改價」。
+
+### 實測
+- 待收貨 22 筆解析全對（廠商/金額/日期/品項；金額正確 ÷100）
+- 臨時分頁驗寫入格式與 SA 編輯權（格式與真 1688_DB 逐欄一致），驗完刪除，真 DB 未動
+- 待付款目前 0 筆 → 防呆拒覆蓋、CLI/GUI dry-run 全通過
+
+### 待驗
+- 首次實跑 `--commit`（要有真實待付款訂單）；確認 cookie 帳號＝實際下美甲訂單的 1688 帳號
+
 ## 2026-07-10（#S071：每日訂貨系統落地 — Phase A 資料骨幹 + Phase B 下單/GUI）
 
 ### 新增

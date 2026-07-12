@@ -55,6 +55,14 @@ ORDER_SHEET_SA_JSON = os.environ.get(
     str(Path.home() / ".config" / "gcloud" / "inventory-sync-493112-6047c28ad2b1.json"),
 )
 
+# 【Nail】進貨金額核對表（金流核對）。分頁 1688_DB 存 1688 訂單報表原始資料，
+# 各日期核對分頁靠「卖家公司名（廠商）」VLOOKUP 進來。刷新＝重抓 1688 待付款訂單覆蓋 1688_DB。
+# SA（同 inventory-sync）需被分享為此表編輯者（已確認有權）。
+RECONCILE_SHEET_ID = os.environ.get(
+    "RECONCILE_SHEET_ID", "1ctZ4tvp6MpW5VXTODwtzAMjjTWD3nqGlyZGbISoTkNE"
+)
+RECONCILE_DB_TAB = "1688_DB"
+
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "

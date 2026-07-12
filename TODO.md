@@ -1,6 +1,10 @@
 # TODO
 
 ## 高優先
+- [x] 2026-07-13 #S084 ★金流核對「一鍵刷新」：`pending_scraper`（頁內 mtop `buyerOrderList` 抓 1688 待付款訂單）+ `reconcile_db`（覆蓋 1688_DB）+ `reconcile_pipeline`（dry-run/0筆防呆）+ `reconcile_gui.py` + CLI `reconcile-refresh`。待收貨 22 筆解析+臨時分頁寫入實測過
+- [ ] #S084 首次實跑 `reconcile-refresh --commit`：等 Edwin 下了當日批、有真待付款訂單時，眼睛核對覆蓋結果（目前帳號待付款=0）
+- [ ] #S084 確認 cookie 帳號（現 joyslunailshop 近期都服飾/內衣廠商）＝實際下美甲訂單的 1688 帳號；若不同帳號要重登 config/cookies.json
+- [ ] #S084（可選）折扣欄語義與 1688 原匯出對齊（現用「货总−实付」推算）；实付款＝sumPayment 是權威值不影響核對
 - [x] 2026-07-05 ★桌面 GUI（`gui.py`，tkinter Win/Mac）：🔑登入 → 🔍抓取（Playwright+cookie）→ ▶產Excel（batch2）→ 📁素材夾。`scraper/playwright_scraper.py` 正式化去風險腳本；`run_mac.command`/`run_windows.bat` 啟動
 - [x] 2026-07-05 ⚠️→✅ 測試版 `parent_sku` 填回編號**實測失敗**（新模板：上傳成功但資料整片不進）→ 已改回**留空**（黃金規則 #9 第二次血淚確認）；型號 `option_sku` 每 SKU 唯一保留（庫存用，非元兇）
 - [ ] GUI 用 Edwin 實機驗證（登入→抓取→產Excel→補素材）

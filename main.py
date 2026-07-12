@@ -574,5 +574,36 @@ def order_verify(ctx: click.Context, order_date: str | None, cookie: str | None,
         click.echo(f"  {status}  {idx_to_sku.get(idx, idx)}")
 
 
+@cli.command("reconcile-refresh")
+@click.option("--date", "-d", "since_date", default=None,
+              help="核對日期 YYYY-MM-DD（只抓下單日 >= 此日的訂單；預設今天）")
+@click.option("--status", "-s", default="waitbuyerpay",
+              help="訂單狀態（預設 waitbuyerpay 待付款；空字串=全部）")
+@click.option("--cookie", default=None, help="1688 cookie 路徑（預設 config/cookies.json）")
+@click.option("--headless", is_flag=True, help="無頭模式（除錯建議關掉以便手動解驗證碼）")
+@click.option("--commit", is_flag=True, help="真的覆蓋寫入 1688_DB（預設 dry-run 只抓不寫）")
+@click.pass_context
+def reconcile_refresh(ctx: click.Context, since_date: str | None, status: str,
+                      cookie: str | None, headless: bool, commit: bool) -> None:
+    """抓 1688 待付款訂單 → 覆蓋金流核對表 1688_DB（廠商改價一起更新）。
+
+    預設 dry-run（只抓不寫）；確認無誤後加 --commit 覆蓋 1688_DB。
+    """
+    from scraper.ordering.reconcile_pipeline import format_preview, refresh
+
+    the_date = since_date if since_date is not None else date.today().isoformat()
+    cookie_path = cookie or str(Path("config/cookies.json"))
+    result = refresh(since_date=the_date, status=status, commit=commit,
+                     cookie_path=cookie_path, headless=headless,
+                     callback=lambda m: click.echo(f"  {m}"))
+    click.echo("\n" + format_preview(result))
+    if commit:
+        click.echo(f"\n✅ 已覆蓋 1688_DB：{result.order_count} 訂單／{result.rows_written} 列（{result.updated_time}）")
+    elif result.order_count:
+        click.echo("\n👉 確認無誤後加 --commit 覆蓋 1688_DB")
+    else:
+        click.echo("\n（0 筆訂單；--commit 也不會清空 DB）")
+
+
 if __name__ == "__main__":
     cli()
