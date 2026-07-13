@@ -51,18 +51,23 @@ LABELS = [
     ["訂單狀態（waitbuyerpay/all）", "waitbuyerpay"],
 ]
 
-# ── Jobs：一個 job = 一個帳號 + 一個中央檔 + 多個觸發口 ──
+# ── Jobs：一個 job = 一個帳號 + 一個抓取狀態 + 寫進哪張表的 1688_DB + 觸發口 ──
+# 直接寫消費表自己的 1688_DB（日期分頁活公式 XLOOKUP 它，即時生效、免 IMPORTRANGE 授權）。
+# 金額核對＝抓待付款；到貨＝抓待收貨（不同表、不同狀態、不同資料，各寫各的，不共用中央檔）。
 JOBS = [
     {
-        "name": "nail",
+        "name": "nail-金額核對",
         "cookie": str(settings.COOKIE_PATH_NAIL),
-        "central_sheet_id": settings.CENTRAL_SHEET_ID,
-        "central_tab": settings.CENTRAL_TAB,
+        "target_sheet_id": settings.RECONCILE_SHEET_ID,   # ① 金額核對表
+        "target_tab": settings.RECONCILE_DB_TAB,          # 1688_DB
         "triggers": [
-            # 金額核對表的口（已 ready）。到貨表的口等金額表調整好再加一列即可。
             {"sheet_id": settings.RECONCILE_SHEET_ID, "label": "金額核對表"},
         ],
     },
+    # 到貨表的 job（等金額表調好 + 運單號抓法確定再啟用）：
+    # {"name":"nail-到貨", "cookie":COOKIE_PATH_NAIL, "target_sheet_id":<到貨表id>,
+    #  "target_tab":"1688_DB", "default_status":"waitbuyerreceive",
+    #  "triggers":[{"sheet_id":<到貨表id>,"label":"到貨表"}]},
 ]
 
 
@@ -113,8 +118,8 @@ def _run_job(job: dict, since_date: str, order_status: str) -> str:
         since_date=since_date or None, headless=True,
     ))
     if not records:
-        return f"⚠️ 0 筆（{order_status}，下單日>={since_date or '全部'}）→ 未更新中央檔（避免清空）"
-    db = ReconcileDB(sheet_id=job["central_sheet_id"], tab=job["central_tab"])
+        return f"⚠️ 0 筆（{order_status}，下單日>={since_date or '全部'}）→ 未更新（避免清空 1688_DB）"
+    db = ReconcileDB(sheet_id=job["target_sheet_id"], tab=job["target_tab"])
     info = db.overwrite(records, source_name=f"daemon {job['name']} {order_status}")
     total = round(sum(r.actual_pay for r in records), 2)
     return f"✅ {info['orders']} 筆訂單／實付¥{total:,.2f}（{info['updated_time']}）"

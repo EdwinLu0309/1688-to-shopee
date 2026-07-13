@@ -280,8 +280,28 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
 - **入口**：GUI `reconcile_gui.py`（獨立，不動 gui.py/order_gui.py）＝設核對日期→🔄刷新預覽(dry-run 顯示筆數/實付合計/廠商)
   →✅寫入 1688_DB。啟動 `run_reconcile_mac.command` / `run_reconcile_windows.bat`。
   CLI `python main.py reconcile-refresh [-d 日期] [-s 狀態] [--commit]`。cookie 用主 gui.py 的「🔑 登入 1688」產生的 `config/cookies.json`。
-- **待驗**：首次實跑「有真的待付款訂單時 --commit 覆蓋」（目前帳號待付款=0，已用臨時分頁驗過寫入格式與 SA 權限、
-  用待收貨驗過抓取解析）。⚠️ 折扣欄語義與 1688 原匯出可能略不同，但**实付款＝sumPayment 是權威值**、核對看它。
+- **✅ 已實跑驗證**（#S084）：美甲帳號＝`jiaorong0826`（**非** joyslunailshop，那是服飾帳號）。抓 31 筆 7/13 真待付款、
+  直接覆蓋 ① 的 `1688_DB`，0713 分頁活公式（`=XLOOKUP(廠商, '1688_DB'!D:D…)`）即時對上（阳东星慕 ¥579.31 與 1688 頁一致）。
+  ⚠️ 折扣欄語義與 1688 原匯出可能略不同，但**实付款＝sumPayment 是權威值**、核對看它。
+
+## ★ERP 式常駐監聽自動化（打勾→Mac 常駐→自動更新，2026-07-14 #S084）
+Edwin 要「在雲端頁面點一下就自動更新」的 ERP 體驗（他 Mac 永遠開機，見全域記憶 [[mac-always-on-host]]）。
+- **架構（去風險定案）＝輪詢式監聽 + 各表直寫**：`reconcile_daemon.py` 常駐輪詢各消費表的「🔄刷新控制」分頁勾選格
+  （SA 每 20s 讀），看到打勾 → 抓 1688 → **直接覆蓋那張表自己的 `1688_DB`** → 清勾 + 回寫「狀態/最後更新」。
+  日期分頁本來就活公式 XLOOKUP 本地 `1688_DB`，故直寫即時生效、**免 IMPORTRANGE 授權、免中央檔**。
+  （原本規劃中央檔 ③【全】1688訂單資料 + IMPORTRANGE，但實測發現：① 各表 SA 都寫得進、② 金額/到貨抓不同狀態沒共用資料
+  → 直寫各表更簡單，中央檔+IMPORTRANGE 棄用；IMPORTRANGE 首連需人工點「允許存取」是它的痛點。）
+- **config 驅動多口去重**：`JOBS`＝帳號 cookie + 抓取 + 寫哪張表 1688_DB + 觸發口清單。多口同 job（金額表+到貨表都要更新）
+  任一打勾只跑一次。新增賣場＝加一列 JOB + 那張表加控制分頁（`setup` 自動建勾選框），不改邏輯、不多開 daemon。
+- **多帳號 cookie 分離**：金流核對＝美甲帳號 `config/cookies_nail.json`（reconcile_gui「🔑登入美甲帳號」按鈕產）；
+  Lady 上架/訂貨仍用 `config/cookies.json`。兩邊不再互相蓋掉。⚠️ 踩坑：Edwin 以為登入美甲了，但 gui.py 登入存到
+  cookies.json 而非 cookies_nail.json，且首次登入沒存成功（mtime 沒變）→ 一直抓到服飾帳號 0 筆。
+- **常駐＝LaunchAgent**：`config/com.joyslu.reconcile-daemon.plist`（開機自啟、KeepAlive、免終端機），
+  雙擊 `run_daemon_install.command` 安裝/重載。日誌 `logs/reconcile_daemon.log`。
+- **入口**：`python -m scraper.ordering.reconcile_daemon setup|once|run`。setup 在各口建控制分頁+勾選框；
+  once 跑一輪（測試）；run 常駐（LaunchAgent 跑這個）。
+- **待接**：到貨表（`【Nail】2-2.商品到貨記錄`）的口——抓**待收貨**訂單 + **運單號**（清單 API 遮罩地址/單號，
+  可能要多打物流 API）→ 寫到貨表 50 欄 `1688_DB`。等 Edwin 金額表調好再啟用（JOBS 加一列即可）。還有其他 3 個賣場同模式。
 
 ## 環境變數
 - `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py 用，標題+詳情）
