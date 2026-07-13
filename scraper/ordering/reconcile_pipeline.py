@@ -60,7 +60,8 @@ def refresh(
     """
     if since_date is None:
         since_date = _dt.date.today().isoformat()
-    cookie_path = cookie_path or str(settings.COOKIE_PATH)
+    # 金流核對＝美甲業務 → 預設用美甲專屬 cookie（與 Lady 的 cookies.json 分開）
+    cookie_path = cookie_path or str(settings.COOKIE_PATH_NAIL)
     if headless is None:
         headless = settings.HEADLESS
 

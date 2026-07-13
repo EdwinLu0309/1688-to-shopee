@@ -76,6 +76,8 @@ class ReconcileApp:
 
         btns = tk.Frame(root, bg=BG)
         btns.pack(fill="x", padx=16, pady=(10, 4))
+        self.btn_login = tk.Button(btns, text="🔑 登入美甲帳號", font=F_BTN, command=self._on_login)
+        self.btn_login.pack(side="left", padx=4)
         self.btn_preview = tk.Button(btns, text="🔄 刷新預覽", font=F_BTN, bg="#1a7f37", fg="#ffffff",
                                      command=self._on_preview)
         self.btn_preview.pack(side="left", padx=4)
@@ -102,11 +104,34 @@ class ReconcileApp:
 
     def _set_busy(self, busy: bool):
         self._busy = busy
-        self.btn_preview.config(state="disabled" if busy else "normal")
+        state = "disabled" if busy else "normal"
+        self.btn_preview.config(state=state)
+        self.btn_login.config(state=state)
         if busy:
             self.btn_commit.config(state="disabled")
         elif self._last is not None and self._last.order_count > 0:
             self.btn_commit.config(state="normal")
+
+    # ── 登入美甲帳號（存 cookies_nail.json）──
+    def _on_login(self):
+        if not self._guard():
+            return
+        self._set_busy(True)
+        self.status_lbl.set("開瀏覽器登入美甲 1688 帳號…（登完會自動存檔）")
+        threading.Thread(target=self._login_worker, daemon=True).start()
+
+    def _login_worker(self):
+        try:
+            import asyncio
+            from scraper.playwright_scraper import save_cookies
+            n = asyncio.run(save_cookies(settings.COOKIE_PATH_NAIL))
+            self.root.after(0, self._log, f"✅ 美甲帳號已登入，存 {n} 個 cookie → cookies_nail.json")
+            self.root.after(0, self._status_msg, "美甲帳號登入完成 → 可按「🔄 刷新預覽」")
+        except Exception as e:
+            self.root.after(0, self._log, f"❌ 登入失敗：{e}")
+            self.root.after(0, self._status_msg, "登入失敗")
+        finally:
+            self.root.after(0, self._set_busy, False)
 
     def _guard(self) -> bool:
         if self._busy:
@@ -118,8 +143,8 @@ class ReconcileApp:
     def _on_preview(self):
         if not self._guard():
             return
-        if not Path(settings.COOKIE_PATH).exists():
-            messagebox.showwarning("缺 cookie", "找不到 config/cookies.json\n請先用主程式（gui.py）的「🔑 登入 1688」登入")
+        if not Path(settings.COOKIE_PATH_NAIL).exists():
+            messagebox.showwarning("缺 cookie", "找不到 cookies_nail.json\n請先按左邊「🔑 登入美甲帳號」")
             return
         self._set_busy(True)
         self._last = None

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 1688 金流/到貨核對常駐監聽 daemon。開機/登入自啟、當掉自動重開、免終端機。
+     安裝：雙擊 run_daemon_install.command（會把此檔連結到 ~/Library/LaunchAgents 並載入）。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.joyslu.reconcile-daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/weilu/projects/1688-to-shopee/.venv/bin/python</string>
+        <string>-m</string>
+        <string>scraper.ordering.reconcile_daemon</string>
+        <string>run</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/weilu/projects/1688-to-shopee</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/weilu/projects/1688-to-shopee/logs/reconcile_daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/weilu/projects/1688-to-shopee/logs/reconcile_daemon.log</string>
+</dict>
+</plist>

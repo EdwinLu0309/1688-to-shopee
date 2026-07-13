@@ -26,3 +26,4 @@ config/design_engine/reference/*
 **/.DS_Store
 scratchpad/
 scratchpad_*.log
+config/cookies_nail.json

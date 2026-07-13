@@ -589,10 +589,11 @@ def reconcile_refresh(ctx: click.Context, since_date: str | None, status: str,
 
     預設 dry-run（只抓不寫）；確認無誤後加 --commit 覆蓋 1688_DB。
     """
+    from config import settings
     from scraper.ordering.reconcile_pipeline import format_preview, refresh
 
     the_date = since_date if since_date is not None else date.today().isoformat()
-    cookie_path = cookie or str(Path("config/cookies.json"))
+    cookie_path = cookie or str(settings.COOKIE_PATH_NAIL)
     result = refresh(since_date=the_date, status=status, commit=commit,
                      cookie_path=cookie_path, headless=headless,
                      callback=lambda m: click.echo(f"  {m}"))
