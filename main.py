@@ -578,7 +578,7 @@ def order_verify(ctx: click.Context, order_date: str | None, cookie: str | None,
 @click.option("--date", "-d", "since_date", default=None,
               help="核對日期 YYYY-MM-DD（只抓下單日 >= 此日的訂單；預設今天）")
 @click.option("--status", "-s", default="waitbuyerpay",
-              help="訂單狀態（預設 waitbuyerpay 待付款；空字串=全部）")
+              help="訂單狀態（預設 waitbuyerpay 待付款；all=近期全部 待付款+待發貨+待收貨 合併）")
 @click.option("--cookie", default=None, help="1688 cookie 路徑（預設 config/cookies.json）")
 @click.option("--headless", is_flag=True, help="無頭模式（除錯建議關掉以便手動解驗證碼）")
 @click.option("--commit", is_flag=True, help="真的覆蓋寫入 1688_DB（預設 dry-run 只抓不寫）")

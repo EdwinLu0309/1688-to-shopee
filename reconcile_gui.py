@@ -28,9 +28,9 @@ from scraper.ordering.reconcile_pipeline import (  # noqa: E402
 
 STATUS_OPTIONS = {
     "待付款（代付款，預設）": "waitbuyerpay",
-    "全部狀態": "",
-    "待收貨": "waitbuyerreceive",
+    "近期全部（待付款+待發貨+待收貨）": "all",
     "待發貨": "waitsellersend",
+    "待收貨": "waitbuyerreceive",
 }
 
 

@@ -55,11 +55,23 @@ async ({status, page, pageSize}) => {
       data: { serviceId: 'OrderListDataLineService.buyerOrderList', param: param },
       dataType: 'json',
       type: 'POST',
+      timeout: 20000,
     });
     return {ok: true, res: res};
-  } catch (e) { return {err: String(e)}; }
+  } catch (e) {
+    // mtop 失敗時 e 常是 {ret:[...]} 物件 → 抽 ret 才看得懂（無效狀態 vs 風控）
+    let msg = '';
+    try { msg = (e && e.ret) ? JSON.stringify(e.ret) : String(e); } catch (_) { msg = String(e); }
+    let raw = ''; try { raw = JSON.stringify(e).slice(0, 300); } catch (_) {}
+    return {err: msg || 'unknown', raw: raw};
+  }
 }
 """
+
+# status 群組：GUI/CLI 傳 "all" → 掃這些真實狀態再合併去重（tradeStatus="" 會被 API 拒）
+STATUS_GROUPS = {
+    "all": ["waitbuyerpay", "waitsellersend", "waitbuyerreceive"],
+}
 
 
 @dataclass
@@ -251,21 +263,50 @@ async def scrape_pending_orders(
                     break
                 await asyncio.sleep(0.5)
 
-            total = None
-            for p in range(1, max_pages + 1):
-                r = await _evaluate_retry(page, CALL_JS,
-                                          {"status": status, "page": p, "pageSize": page_size})
-                if r.get("err"):
-                    raise RuntimeError(f"訂單 API 呼叫失敗：{r['err']}")
-                rows, total = _unwrap(r["res"])
-                if not rows:
-                    break
-                for o in rows:
-                    records.append(_parse_order(o))
-                notify(f"已抓第 {p} 頁：{len(rows)} 筆（累計 {len(records)}／共 {total}）")
-                if len(records) >= total or len(rows) < page_size:
-                    break
-                await asyncio.sleep(0.8)
+            # "all" → 掃多個真實狀態合併（tradeStatus="" 會被 API 拒）
+            statuses = STATUS_GROUPS.get(status, [status])
+            seen: set[str] = set()
+            for si, st in enumerate(statuses):
+                if si:
+                    await asyncio.sleep(1.2)  # 換狀態間隔，避免 1688 風控
+                st_zh = {"waitbuyerpay": "待付款", "waitsellersend": "待發貨",
+                         "waitbuyerreceive": "待收貨"}.get(st, st)
+                total = None
+                for p in range(1, max_pages + 1):
+                    # 逾時/限流（TIMEOUT/FLOW/限流）→ 退避重試，非該類才拋
+                    r = None
+                    for attempt in range(4):
+                        r = await _evaluate_retry(page, CALL_JS,
+                                                  {"status": st, "page": p, "pageSize": page_size})
+                        if not r.get("err"):
+                            break
+                        err = str(r.get("err"))
+                        transient = any(k in err for k in ("TIMEOUT", "接口超时", "FLOW", "限流", "RGV", "FAIL_SYS_TRAFFIC"))
+                        if not transient:
+                            break
+                        wait = 2 * (attempt + 1)
+                        notify(f"[{st_zh}] 逾時/限流，{wait}s 後重試（{attempt+1}/4）")
+                        await asyncio.sleep(wait)
+                    if r.get("err"):
+                        detail = r.get("err")
+                        if r.get("raw"):
+                            detail += f" | {r['raw']}"
+                        raise RuntimeError(f"訂單 API 呼叫失敗（{st}）：{detail}")
+                    rows, total = _unwrap(r["res"])
+                    if not rows:
+                        break
+                    new_this = 0
+                    for o in rows:
+                        rec = _parse_order(o)
+                        if rec.order_no and rec.order_no in seen:
+                            continue
+                        seen.add(rec.order_no)
+                        records.append(rec)
+                        new_this += 1
+                    notify(f"[{st_zh}] 第 {p} 頁 {len(rows)} 筆（累計 {len(records)}／此狀態共 {total}）")
+                    if new_this == 0 or len(rows) < page_size:
+                        break
+                    await asyncio.sleep(0.8)
         finally:
             await browser.close()
 
