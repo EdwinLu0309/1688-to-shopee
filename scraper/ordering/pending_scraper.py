@@ -100,6 +100,7 @@ class OrderRecord:
     status_label: str = ""      # 订单状态（等待买家付款…）
     create_time: str = ""       # 订单创建时间（原始 'YYYY-MM-DD HH:MM:SS'）
     pay_time: str = ""          # 订单付款时间
+    tracking_no: str = ""       # 运单号（到貨核對用；orderEntries[].entryExtension.trackingNo）
     entries: list[OrderEntry] = field(default_factory=list)
 
     @property
@@ -167,6 +168,11 @@ def _parse_order(o: dict) -> OrderRecord:
             offer_id=str(e.get("sourceId") or ""),
             sku_id=str(e.get("skuId") or ""),
         ))
+        # 运单号在品項的 entryExtension.trackingNo（同訂單通常一致）→ 取第一個非空當訂單級運單號
+        if not rec.tracking_no:
+            tn = ((e.get("entryExtension") or {}).get("trackingNo") or "").strip()
+            if tn:
+                rec.tracking_no = tn
     return rec
 
 
@@ -349,4 +355,43 @@ def to_db_grid(records: list[OrderRecord]) -> list[list]:
             item = [e.title, e.unit_price, e.qty, e.unit,
                     e.product_number, "", e.offer_id, e.sku_id]
             grid.append(head + item)
+    return grid
+
+
+# 到貨表 1688_DB 表頭（50 欄，＝1688 官方訂單報表完整格式；運單號在第32欄 AF）
+ARRIVAL_HEADERS = DB_HEADERS + [
+    "物料编号", "单品货号", "货品种类", "买家留言", "物流公司", "运单号",
+    "发票：购货单位名称", "发票：纳税人识别号", "发票：地址、电话", "发票：开户行及账号",
+    "发票收取地址", "关联编号", "代理商姓名", "代理商联系方式", "是否代发订单",
+    "代发服务商id", "微商订单号", "下单批次号", "下游渠道", "下游订单号",
+    "下单公司主体", "发起人登录名", "是否发起免密支付(1:淘货源诚e赊免密支付2:批量下单免密支付)", "订单备注",
+]
+# 運單號在整列的 0-based 索引（第32欄 AF = index 31）
+_TRACKING_IDX = 31
+
+
+def to_arrival_grid(records: list[OrderRecord]) -> list[list]:
+    """OrderRecord list → 到貨表 1688_DB 資料列（50 欄，含運單號在 AF）。
+
+    比照金額版一訂單多列；運單號填在訂單級（首列）的 AF 欄，供到貨表
+    `=XLOOKUP(訂單編號,'1688_DB'!A:A,'1688_DB'!AF:AF)` 帶出。其餘擴充欄留空。
+    """
+    grid: list[list] = []
+    for r in records:
+        entries = r.entries or [OrderEntry()]
+        for i, e in enumerate(entries):
+            if i == 0:
+                head = [
+                    r.order_no, "", r.buyer_login, r.seller_company, r.seller_login,
+                    r.goods_total, r.freight, r.discount, r.actual_pay, r.status_label,
+                    _fmt_date_slash(r.create_time), r.pay_time, "", "", "", "", "", "",
+                ]
+            else:
+                head = [""] * 18
+            item = [e.title, e.unit_price, e.qty, e.unit,
+                    e.product_number, "", e.offer_id, e.sku_id]
+            row = head + item + [""] * (len(ARRIVAL_HEADERS) - 26)  # 補到 50 欄
+            if i == 0 and r.tracking_no:
+                row[_TRACKING_IDX] = r.tracking_no                  # AF=運單號（訂單級首列）
+            grid.append(row)
     return grid

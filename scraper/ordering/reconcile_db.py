@@ -15,7 +15,9 @@ from loguru import logger
 
 from config import settings
 
-from .pending_scraper import DB_HEADERS, OrderRecord, to_db_grid
+from .pending_scraper import (
+    ARRIVAL_HEADERS, DB_HEADERS, OrderRecord, to_arrival_grid, to_db_grid,
+)
 
 _SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -37,17 +39,19 @@ class ReconcileDB:
         logger.debug(f"已開啟金流核對表：{self._sh.title}")
 
     def overwrite(self, records: list[OrderRecord], source_name: str = "1688 刷新",
-                  updated_time: str | None = None) -> dict:
+                  updated_time: str | None = None, arrival: bool = False) -> dict:
         """用抓到的訂單覆蓋 1688_DB 資料區。回傳 {orders, rows, updated_time}。
 
         版面：第1列「來源檔案名稱：」、第2列「最後更新時間：」、第3列表頭、第4列起資料。
+        arrival=True → 到貨版 50 欄格式（含運單號在 AF）；否則金額版 26 欄。
         """
         updated_time = updated_time or _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        grid = to_db_grid(records)
+        headers = ARRIVAL_HEADERS if arrival else DB_HEADERS
+        grid = to_arrival_grid(records) if arrival else to_db_grid(records)
 
         top1 = ["來源檔案名稱：", source_name]
         top2 = ["最後更新時間：", updated_time]
-        values = [top1, top2, list(DB_HEADERS)] + grid
+        values = [top1, top2, list(headers)] + grid
 
         ws = self._sh.worksheet(self.tab)
         ws.clear()

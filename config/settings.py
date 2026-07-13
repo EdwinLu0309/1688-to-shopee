@@ -63,13 +63,8 @@ RECONCILE_SHEET_ID = os.environ.get(
 )
 RECONCILE_DB_TAB = "1688_DB"
 
-# ★中央「1688 訂單資料」檔（Edwin 個人碟，SA 可寫）＝單一資料來源。
-# daemon 只寫這一個檔；金額核對表/到貨表等消費表用 IMPORTRANGE 唯讀引用，
-# 避免各檔重複、也繞過共用雲端硬碟不能對外的限制。
-CENTRAL_SHEET_ID = os.environ.get(
-    "CENTRAL_SHEET_ID", "1frgVglkx3WsKbNEo2dKET5BA6K1HhAU33ZqePRbxvMM"
-)
-CENTRAL_TAB = "工作表1"
+# （中央「1688 訂單資料」檔的做法已棄用：daemon 改直寫各消費表自己的 1688_DB，
+#  日期分頁活公式 XLOOKUP 本地 1688_DB，即時生效、免 IMPORTRANGE 授權、免中央檔。）
 
 # 美甲帳號專屬 cookie（與 Lady 的 config/cookies.json 分開，免每次切換帳號重登）
 COOKIE_PATH_NAIL = BASE_DIR / "config" / "cookies_nail.json"

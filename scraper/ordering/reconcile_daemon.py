@@ -54,20 +54,31 @@ LABELS = [
 # ── Jobs：一個 job = 一個帳號 + 一個抓取狀態 + 寫進哪張表的 1688_DB + 觸發口 ──
 # 直接寫消費表自己的 1688_DB（日期分頁活公式 XLOOKUP 它，即時生效、免 IMPORTRANGE 授權）。
 # 金額核對＝抓待付款；到貨＝抓待收貨（不同表、不同狀態、不同資料，各寫各的，不共用中央檔）。
+ARRIVAL_SHEET_ID = "1Ojmd8-2VtX1qloCP5xmrncNRlQajhHuMgtXO-VffQ_A"  # 【Nail】2-2 商品到貨記錄
+
 JOBS = [
     {
         "name": "nail-金額核對",
         "cookie": str(settings.COOKIE_PATH_NAIL),
         "target_sheet_id": settings.RECONCILE_SHEET_ID,   # ① 金額核對表
         "target_tab": settings.RECONCILE_DB_TAB,          # 1688_DB
+        "default_status": "waitbuyerpay",                 # 待付款
+        "arrival": False,                                 # 26 欄金額版
         "triggers": [
             {"sheet_id": settings.RECONCILE_SHEET_ID, "label": "金額核對表"},
         ],
     },
-    # 到貨表的 job（等金額表調好 + 運單號抓法確定再啟用）：
-    # {"name":"nail-到貨", "cookie":COOKIE_PATH_NAIL, "target_sheet_id":<到貨表id>,
-    #  "target_tab":"1688_DB", "default_status":"waitbuyerreceive",
-    #  "triggers":[{"sheet_id":<到貨表id>,"label":"到貨表"}]},
+    {
+        "name": "nail-到貨核對",
+        "cookie": str(settings.COOKIE_PATH_NAIL),
+        "target_sheet_id": ARRIVAL_SHEET_ID,              # ② 到貨表
+        "target_tab": "1688_DB",
+        "default_status": "waitbuyerreceive",             # 待收貨（才有運單號）
+        "arrival": True,                                  # 50 欄到貨版（運單號在 AF）
+        "triggers": [
+            {"sheet_id": ARRIVAL_SHEET_ID, "label": "到貨表"},
+        ],
+    },
 ]
 
 
@@ -95,8 +106,10 @@ def setup(gc=None) -> None:
             except gspread.WorksheetNotFound:
                 ws = sh.add_worksheet(title=CONTROL_TAB, rows=10, cols=3)
                 logger.info(f"[{trig['label']}] 已建控制分頁")
-            # 寫標籤 + 預設值（只動 A1:B5，不碰其他分頁）
-            ws.update([[lab, val] for lab, val in LABELS], "A1:B5",
+            # 寫標籤 + 預設值（只動 A1:B5，不碰其他分頁）；訂單狀態用該 job 的預設
+            labels = [list(x) for x in LABELS]
+            labels[4][1] = job.get("default_status", "waitbuyerpay")   # B5 訂單狀態
+            ws.update([[lab, val] for lab, val in labels], "A1:B5",
                       value_input_option="USER_ENTERED")
             ws.format("A1:A5", {"textFormat": {"bold": True}})
             # B1 設成勾選框
@@ -119,8 +132,12 @@ def _run_job(job: dict, since_date: str, order_status: str) -> str:
     ))
     if not records:
         return f"⚠️ 0 筆（{order_status}，下單日>={since_date or '全部'}）→ 未更新（避免清空 1688_DB）"
+    arrival = job.get("arrival", False)
     db = ReconcileDB(sheet_id=job["target_sheet_id"], tab=job["target_tab"])
-    info = db.overwrite(records, source_name=f"daemon {job['name']} {order_status}")
+    info = db.overwrite(records, source_name=f"daemon {job['name']} {order_status}", arrival=arrival)
+    if arrival:
+        n_track = sum(1 for r in records if r.tracking_no)
+        return f"✅ {info['orders']} 筆訂單／{n_track} 筆有運單號（{info['updated_time']}）"
     total = round(sum(r.actual_pay for r in records), 2)
     return f"✅ {info['orders']} 筆訂單／實付¥{total:,.2f}（{info['updated_time']}）"
 
@@ -146,7 +163,8 @@ def run_once(gc=None) -> int:
         # 去重：同 job 只跑一次，用第一個口的參數
         _, _, ws0 = triggered[0]
         since_date = (ws0.acell(CELL_DATE).value or "").strip()
-        order_status = (ws0.acell(CELL_ORDERSTATUS).value or "waitbuyerpay").strip()
+        order_status = (ws0.acell(CELL_ORDERSTATUS).value or "").strip() \
+            or job.get("default_status", "waitbuyerpay")
         # 先把所有觸發口標「執行中」並清旗標（避免重複觸發）
         now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for _, _, ws in triggered:
