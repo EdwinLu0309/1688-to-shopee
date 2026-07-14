@@ -144,7 +144,7 @@ def _run_job(job: dict, since_date: str, order_status: str) -> str:
             try:
                 from .kkren_pipeline import refresh as kkren_refresh
                 kr = kkren_refresh(since_days=30, commit=True)
-                msg += f"；Kkren +{kr.appended} 新包裹"
+                msg += f"；Kkren 新{kr.appended}/更新{kr.updated}"
             except Exception as e:
                 msg += f"；⚠️Kkren 失敗：{str(e)[:40]}"
         return f"{msg}（{info['updated_time']}）"
