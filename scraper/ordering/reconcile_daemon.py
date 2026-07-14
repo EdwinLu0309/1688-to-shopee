@@ -75,6 +75,7 @@ JOBS = [
         "target_tab": "1688_DB",
         "default_status": "waitbuyerreceive",             # 待收貨（才有運單號）
         "arrival": True,                                  # 50 欄到貨版（運單號在 AF）
+        "also_kkren": True,                               # 同時刷 Kkren 已出貨 → Kkren_Data
         "triggers": [
             {"sheet_id": ARRIVAL_SHEET_ID, "label": "到貨表"},
         ],
@@ -137,7 +138,16 @@ def _run_job(job: dict, since_date: str, order_status: str) -> str:
     info = db.overwrite(records, source_name=f"daemon {job['name']} {order_status}", arrival=arrival)
     if arrival:
         n_track = sum(1 for r in records if r.tracking_no)
-        return f"✅ {info['orders']} 筆訂單／{n_track} 筆有運單號（{info['updated_time']}）"
+        msg = f"✅ {info['orders']} 訂單／{n_track} 有運單號"
+        # 到貨口同時刷 Kkren 已出貨 → Kkren_Data（去重 append）
+        if job.get("also_kkren"):
+            try:
+                from .kkren_pipeline import refresh as kkren_refresh
+                kr = kkren_refresh(since_days=30, commit=True)
+                msg += f"；Kkren +{kr.appended} 新包裹"
+            except Exception as e:
+                msg += f"；⚠️Kkren 失敗：{str(e)[:40]}"
+        return f"{msg}（{info['updated_time']}）"
     total = round(sum(r.actual_pay for r in records), 2)
     return f"✅ {info['orders']} 筆訂單／實付¥{total:,.2f}（{info['updated_time']}）"
 

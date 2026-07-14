@@ -606,5 +606,25 @@ def reconcile_refresh(ctx: click.Context, since_date: str | None, status: str,
         click.echo("\n（0 筆訂單；--commit 也不會清空 DB）")
 
 
+@cli.command("kkren-refresh")
+@click.option("--days", "-d", "since_days", default=30, help="抓近 N 天的已出貨（預設 30）")
+@click.option("--commit", is_flag=True, help="真的 append 新包裹到 Kkren_Data（預設 dry-run）")
+@click.pass_context
+def kkren_refresh(ctx: click.Context, since_days: int, commit: bool) -> None:
+    """抓 Kkren（巧巧郎）已出貨包裹 → 去重 append 到中繼表 Kkren_Data（供到貨核對）。
+
+    需先登入 Kkren（存 config/kkren_state.json）。預設 dry-run；--commit 才寫。
+    """
+    from scraper.ordering.kkren_pipeline import format_preview, refresh
+
+    result = refresh(since_days=since_days, commit=commit,
+                     callback=lambda m: click.echo(f"  {m}"))
+    click.echo("\n" + format_preview(result))
+    if commit:
+        click.echo(f"\n✅ 已 append {result.appended} 筆新包裹到 Kkren_Data")
+    elif result.new_count:
+        click.echo("\n👉 確認無誤後加 --commit 寫入 Kkren_Data")
+
+
 if __name__ == "__main__":
     cli()

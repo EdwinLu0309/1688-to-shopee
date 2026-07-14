@@ -27,3 +27,5 @@ config/design_engine/reference/*
 scratchpad/
 scratchpad_*.log
 config/cookies_nail.json
+config/kkren_state.json
+config/cookies_kkren.json
