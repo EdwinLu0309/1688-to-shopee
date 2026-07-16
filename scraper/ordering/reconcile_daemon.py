@@ -114,6 +114,38 @@ if LADY_ARRIVAL_SHEET_ID:
         ],
     })
 
+# ── Baby 賣場（帳號 luwei03090826 = cookies_baby.json；到貨走 Kkren 但不同帳號，先不接）──
+# cookies_baby.json 由 Edwin 之後登入 luwei03090826 產生（先建 job/打勾格，登入後即生效）。
+BABY_RECONCILE_SHEET_ID = "1Agsc87285Epdnr4rInaF6eafvtn8ewEFrQr_zdodt48"   # 【Baby】2-1 進貨金額記錄
+BABY_ARRIVAL_SHEET_ID = "18goabC7RiKPMRDcRmCO1X_8pI_Kh5WUASdHoictvONs"     # 【Baby】2-2 商品到貨記錄
+COOKIE_PATH_BABY = settings.COOKIE_PATH.parent / "cookies_baby.json"
+
+if BABY_RECONCILE_SHEET_ID:
+    JOBS.append({
+        "name": "baby-金額核對",
+        "cookie": str(COOKIE_PATH_BABY),                  # luwei03090826
+        "target_sheet_id": BABY_RECONCILE_SHEET_ID,
+        "target_tab": "1688_DB",
+        "default_status": "waitbuyerpay",
+        "arrival": False,
+        "triggers": [
+            {"sheet_id": BABY_RECONCILE_SHEET_ID, "label": "Baby金額核對表"},
+        ],
+    })
+if BABY_ARRIVAL_SHEET_ID:
+    JOBS.append({
+        "name": "baby-到貨核對",
+        "cookie": str(COOKIE_PATH_BABY),                  # luwei03090826
+        "target_sheet_id": BABY_ARRIVAL_SHEET_ID,
+        "target_tab": "1688_DB",
+        "default_status": "waitbuyerreceive",
+        "arrival": True,
+        "also_kkren": False,   # ★Baby 的 Kkren 是「不同帳號」→ 暫不刷共用中繼，待另接 Baby Kkren
+        "triggers": [
+            {"sheet_id": BABY_ARRIVAL_SHEET_ID, "label": "Baby到貨表"},
+        ],
+    })
+
 
 def _client():
     creds = Credentials.from_service_account_file(settings.ORDER_SHEET_SA_JSON, scopes=_SCOPES)
