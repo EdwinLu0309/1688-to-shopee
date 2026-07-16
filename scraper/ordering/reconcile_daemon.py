@@ -82,6 +82,38 @@ JOBS = [
     },
 ]
 
+# ── Lady 賣場（帳號 joyslunailshop = cookies.json；到貨同 Kkren 中繼 181lP）──
+# 先由 Edwin 複製 Nail 的 2-1 進貨金額 / 2-2 到貨記錄 → Lady 版並分享 SA，
+# 把副本 ID 填進下面兩個常數即自動掛上（空字串＝略過，不影響現行 daemon）。
+LADY_RECONCILE_SHEET_ID = "1B2WwAhJb84Ykc5tKIIYHr419HAd66ZSSA5dQBQJsDGo"  # 【Lady】2-1 進貨金額記錄
+LADY_ARRIVAL_SHEET_ID = "1befHjwN434vLtjJplqGSxOBT-7D6IVJqfgZUK1N1Rww"    # 【Lady】2-2 商品到貨記錄
+
+if LADY_RECONCILE_SHEET_ID:
+    JOBS.append({
+        "name": "lady-金額核對",
+        "cookie": str(settings.COOKIE_PATH),              # 服飾 joyslunailshop
+        "target_sheet_id": LADY_RECONCILE_SHEET_ID,
+        "target_tab": "1688_DB",
+        "default_status": "waitbuyerpay",
+        "arrival": False,
+        "triggers": [
+            {"sheet_id": LADY_RECONCILE_SHEET_ID, "label": "Lady金額核對表"},
+        ],
+    })
+if LADY_ARRIVAL_SHEET_ID:
+    JOBS.append({
+        "name": "lady-到貨核對",
+        "cookie": str(settings.COOKIE_PATH),              # 服飾 joyslunailshop
+        "target_sheet_id": LADY_ARRIVAL_SHEET_ID,
+        "target_tab": "1688_DB",
+        "default_status": "waitbuyerreceive",
+        "arrival": True,
+        "also_kkren": True,                               # 同 Kkren 中繼（共用）
+        "triggers": [
+            {"sheet_id": LADY_ARRIVAL_SHEET_ID, "label": "Lady到貨表"},
+        ],
+    })
+
 
 def _client():
     creds = Credentials.from_service_account_file(settings.ORDER_SHEET_SA_JSON, scopes=_SCOPES)
