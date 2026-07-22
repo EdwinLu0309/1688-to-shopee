@@ -36,12 +36,13 @@ POLL_SEC = 20          # 輪詢間隔（秒）
 CONTROL_TAB = "🔄刷新控制"
 
 # ── 控制分頁格位（1-index 給 gspread；0-index 給 API）──
-# B1 旗標(checkbox) / B2 核對日期 / B3 狀態(回寫) / B4 最後更新(回寫) / B5 訂單狀態
+# B1 旗標(checkbox) / B2 核對日期 / B3 狀態(回寫) / B4 最後更新(回寫) / B5 訂單狀態 / B6 cookie 狀態(回寫)
 CELL_FLAG = "B1"
 CELL_DATE = "B2"
 CELL_STATUS = "B3"
 CELL_TIME = "B4"
 CELL_ORDERSTATUS = "B5"
+CELL_COOKIE = "B6"
 
 LABELS = [
     ["刷新開關（打勾觸發）", False],
@@ -49,7 +50,11 @@ LABELS = [
     ["狀態（系統回寫）", ""],
     ["最後更新（系統回寫）", ""],
     ["訂單狀態（waitbuyerpay/all）", "waitbuyerpay"],
+    ["🔑 Cookie 狀態（系統回寫）", ""],
 ]
+
+# cookie 健康檢查排程（見 cookie_health.py）：每次都實打探測（探測才是權威，讀檔案會誤報）
+COOKIE_CHECK_SEC = 6 * 3600      # 每 6h 探測各 cookie 一次（page=1 極輕量）→ 寫狀態格
 
 # ── Jobs：一個 job = 一個帳號 + 一個抓取狀態 + 寫進哪張表的 1688_DB + 觸發口 ──
 # 直接寫消費表自己的 1688_DB（日期分頁活公式 XLOOKUP 它，即時生效、免 IMPORTRANGE 授權）。
@@ -171,12 +176,12 @@ def setup(gc=None) -> None:
             except gspread.WorksheetNotFound:
                 ws = sh.add_worksheet(title=CONTROL_TAB, rows=10, cols=3)
                 logger.info(f"[{trig['label']}] 已建控制分頁")
-            # 寫標籤 + 預設值（只動 A1:B5，不碰其他分頁）；訂單狀態用該 job 的預設
+            # 寫標籤 + 預設值（只動 A1:B6，不碰其他分頁）；訂單狀態用該 job 的預設
             labels = [list(x) for x in LABELS]
             labels[4][1] = job.get("default_status", "waitbuyerpay")   # B5 訂單狀態
-            ws.update([[lab, val] for lab, val in labels], "A1:B5",
+            ws.update([[lab, val] for lab, val in labels], "A1:B6",
                       value_input_option="USER_ENTERED")
-            ws.format("A1:A5", {"textFormat": {"bold": True}})
+            ws.format("A1:A6", {"textFormat": {"bold": True}})
             # B1 設成勾選框
             r, c = _a1_rc(CELL_FLAG)
             sh.batch_update({"requests": [{
@@ -250,20 +255,65 @@ def run_once(gc=None) -> int:
         except Exception as e:
             msg = f"❌ 失敗：{e}"
             logger.exception(f"[{job['name']}] job 失敗")
+        # session 過期是最常見的失敗 → 順手把 cookie 狀態格標紅（含重登提示），一眼可見
+        cookie_expired = any(k in msg for k in ("SESSION_EXPIRED", "Session过期", "失效", "登入頁"))
         for _, _, ws in triggered:
             ws.update_acell(CELL_STATUS, msg)
             ws.update_acell(CELL_TIME, now)
+            if cookie_expired:
+                try:
+                    from .cookie_health import status_line
+                    ws.update_acell(CELL_COOKIE, status_line(job["cookie"], probe_dead=True))
+                except Exception:
+                    pass
         fired += 1
         logger.info(f"[{job['name']}] 完成：{msg}")
     return fired
 
 
+# ── cookie 健康檢查：讀到期日（+ 可選探測）→ 寫各控制分頁的「🔑 Cookie 狀態」──
+def check_cookies(gc=None, probe: bool = False) -> None:
+    gc = gc or _client()
+    from collections import defaultdict
+    from .cookie_health import probe_alive, status_line
+    # 同一 cookie 被多口共用 → 只探測一次，寫進所有用它的控制分頁
+    cookie_to_ws: dict[str, list] = defaultdict(list)
+    for job in JOBS:
+        for trig in job["triggers"]:
+            try:
+                ws = gc.open_by_key(trig["sheet_id"]).worksheet(CONTROL_TAB)
+            except Exception:
+                continue  # 控制分頁還沒建
+            cookie_to_ws[job["cookie"]].append(ws)
+    for cookie_path, wss in cookie_to_ws.items():
+        dead = None
+        if probe and __import__("pathlib").Path(cookie_path).exists():
+            try:
+                alive, _ = asyncio.run(probe_alive(cookie_path))
+                dead = (alive is False)
+            except Exception as e:
+                logger.warning(f"cookie 探測失敗（不判死）：{cookie_path} {e}")
+        line = status_line(cookie_path, probe_dead=dead)
+        for ws in wss:
+            try:
+                ws.update([["🔑 Cookie 狀態（系統回寫）", line]], "A6:B6",
+                          value_input_option="USER_ENTERED")
+            except Exception as e:
+                logger.warning(f"寫 cookie 狀態失敗：{e}")
+        logger.info(f"[cookie] {cookie_path} → {line}")
+
+
 def run_forever() -> None:
     logger.info(f"daemon 啟動，每 {POLL_SEC}s 輪詢 {sum(len(j['triggers']) for j in JOBS)} 個口")
     gc = _client()
+    last_cookie = 0.0    # 上次探測+寫 cookie 狀態格（0＝啟動即先做一次）
     while True:
         try:
             run_once(gc)
+            now = time.time()
+            if now - last_cookie >= COOKIE_CHECK_SEC:
+                check_cookies(gc, probe=True)
+                last_cookie = now
         except Exception as e:
             logger.exception(f"輪詢例外（續跑）：{e}")
         time.sleep(POLL_SEC)
@@ -276,10 +326,14 @@ def main() -> None:
     elif cmd == "once":
         n = run_once()
         print(f"本輪觸發 {n} 個 job")
+    elif cmd == "cookies":
+        # 立即檢查並寫各控制分頁的 cookie 狀態（帶 probe 參數＝連 1688 探測）
+        probe = len(sys.argv) > 2 and sys.argv[2] == "probe"
+        check_cookies(probe=probe)
     elif cmd == "run":
         run_forever()
     else:
-        print("用法：setup | once | run")
+        print("用法：setup | once | cookies [probe] | run")
         sys.exit(1)
 
 
