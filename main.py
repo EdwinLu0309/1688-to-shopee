@@ -497,5 +497,64 @@ async def _run(url: str, download_images: bool, save_json: bool) -> None:
     await close_context()
 
 
+# ── 蝦皮數據中心每日抓取（scraper/shopee_analytics/，詳見 docs/shopee_analytics_api.md）──
+
+@cli.command("shopee-login")
+@click.option("--shop", default="nail", help="賣場代號（nail/lady/baby），cookie 各存一份")
+def shopee_login_cmd(shop: str) -> None:
+    """開瀏覽器登入蝦皮賣家中心，儲存該賣場的 cookie。"""
+    from scraper.shopee_analytics.shopee_login import save_shopee_session
+
+    result = asyncio.run(save_shopee_session(shop))
+    if result["ok"]:
+        click.echo(f"\n  ✓ 蝦皮登入完成（{shop}），存了 {result['count']} 個 cookie。")
+    else:
+        click.echo(f"\n  ✗ 登入失敗：{result['error']}")
+        sys.exit(1)
+
+
+@cli.command("shopee-collect")
+@click.option("--shop", default="nail", help="賣場代號（nail/lady/baby）")
+@click.option("--date", "date_str", default=None, help="要抓的日期 YYYY-MM-DD（預設昨天）")
+@click.option("--sheet-id", default=None, help="Google Sheet ID（不給則只存 raw + SQLite）")
+@click.option("--data-dir", default="data/shopee_analytics", help="raw 快照與 SQLite 根目錄")
+def shopee_collect_cmd(shop: str, date_str: str | None, sheet_id: str | None, data_dir: str) -> None:
+    """抓一天份蝦皮數據（商品明細 + 每日大盤 + 來源拆分）→ raw 快照 + SQLite（+ Google Sheet）。"""
+    from datetime import date as _date
+
+    from scraper.shopee_analytics import storage_sqlite
+    from scraper.shopee_analytics.client import ShopeeAPIError, ShopeeDataClient
+    from scraper.shopee_analytics.collector import collect_day, save_raw_snapshot, yesterday
+    from scraper.shopee_analytics.shopee_login import cookie_path_for
+
+    day = _date.fromisoformat(date_str) if date_str else yesterday()
+    cookie_path = cookie_path_for(shop)
+    if not cookie_path.exists():
+        click.echo(f"  ✗ 找不到 {cookie_path}，請先跑 python main.py shopee-login --shop {shop}")
+        sys.exit(1)
+
+    try:
+        with ShopeeDataClient(cookie_path) as client:
+            data = collect_day(client, shop, day)
+    except ShopeeAPIError as e:
+        if e.is_session_expired:
+            click.echo(f"  ✗ 蝦皮 session 過期，請重跑 python main.py shopee-login --shop {shop}")
+        else:
+            click.echo(f"  ✗ API 錯誤：{e}")
+        sys.exit(1)
+
+    save_raw_snapshot(data, data_dir)
+    storage_sqlite.save(data, Path(data_dir) / "shopee_analytics.db")
+    if sheet_id:
+        from scraper.shopee_analytics import storage_sheet
+
+        storage_sheet.save(data, sheet_id)
+    click.echo(
+        f"\n  ✓ {shop} {day} 抓取完成：商品 {len(data.products)} 筆 / "
+        f"規格 {len(data.models)} 筆 / 大盤 1 列"
+        + ("（已寫入 Google Sheet）" if sheet_id else "（未寫 Sheet，只存本機）")
+    )
+
+
 if __name__ == "__main__":
     cli()

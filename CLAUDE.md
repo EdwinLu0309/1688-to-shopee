@@ -218,6 +218,20 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
 - **下單顆粒度待驗**：分頁2 記到 SKU（色×尺碼）；若 1688 是單軸（只有色-款式無尺碼軸，本商品尺碼列靜態探測不到、待實測）→ 餵 cart_adder 前要再聚合到「色-款式」層。
 - **下單工具規劃（獨立簡易版，Edwin 上架完後做）**：GUI 匯入蝦皮 Excel → 建當日分頁明細+彙總 → 顯示今日預計總金額 → 帶 1688 cookie → 點「下單」呼叫 1688-order 的 `cart_adder`（現成：選規格一 `text-is` + 填數量 + 加采购车，雙規格切色後逐尺碼）→ 回寫狀態 → 點「核對」跑 `cart_verifier`。
 
+## ★蝦皮數據中心每日抓取（scraper/shopee_analytics/，2026-07-22 #S098）
+每天抓三張表存起來給 Claude 分析「哪些商品發展順、哪些落差」（承 #S097 設計：
+**真相來源 = Google Sheet（Edwin 打得開可核對）、SQLite 只是加速副本、raw JSON = 原封快照**）。
+API 規格（端點/參數/欄位/已知缺口）全在 **`docs/shopee_analytics_api.md`**，動這個模組前先讀它。
+- 三張表：商品明細 `v4/product/performance/`（每商品 49 欄 + models 規格層 inline，分頁抓全店）
+  / 每日大盤 `v3/sales/overview/funnel/` / 來源拆分 `v1/dashboard/traffic-sources/` + `key-metrics`
+- 認證：登入 cookie（`SPC_CDS` 同時帶 query）。`shopee-login --shop {nail|lady|baby}` 開瀏覽器
+  登入一次存 `config/shopee_cookies_{shop}.json`（gitignored；實打 API 驗證才算成功）。多賣場同套程式換 cookie
+- 抓取：`shopee-collect --shop nail [--date YYYY-MM-DD] [--sheet-id <ID>]`（預設抓昨天，
+  `period=yesterday` 已實測；任意歷史日期的 period 值未探）。落地順序 raw 快照 → SQLite → Sheet（有給 sheet-id 才寫）
+- Sheet 分頁：`商品日報_YYYYMM`（按月、~437列/天）+ `大盤日報_YYYY`（一天一列）；同日重跑冪等（先刪舊列）。
+  SA 憑證沿用 inventory-sync 慣例（env `GOOGLE_SERVICE_ACCOUNT_JSON`，SA 要被分享 Sheet 編輯權）
+- 正線排程：Mac daemon 每天 10:30 抓前一天（蝦皮前一天資料 10 點後才穩）— 待接
+
 ## 環境變數
 - `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py 用，標題+詳情）
 - `OPENAI_API_KEY` — GPT 生圖（gpt-image-1.5）

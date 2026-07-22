@@ -1,6 +1,10 @@
 # TODO
 
 ## 高優先
+- [ ] #S098 ★蝦皮數據抓取首跑（Mac）：`python main.py shopee-login --shop nail` 登入美甲帳號（Windows 兩次逾時未完成）→ `python main.py shopee-collect --shop nail` 驗證三張表落地（raw + SQLite）
+- [ ] #S098 Edwin 建「蝦皮數據中心」Google Sheet 分享 SA（`inventory-sync@inventory-sync-493112.iam.gserviceaccount.com` 編輯權）→ `shopee-collect --sheet-id <ID>` 驗證 Sheet 落地
+- [ ] #S098 接 Mac daemon / cron 每天 10:30 自動 `shopee-collect`（抓前一天；Lady/Baby 之後各登入一份 cookie 同套程式）
+- [ ] #S098 model_id ↔ 商品選項貨號 對照（models 沒帶貨號，跟訂貨/庫存 join 需要）；歷史回填可先用 Downloads 的 parentskudetail/shop-stats 逐月匯出檔
 - [x] 2026-07-05 ★桌面 GUI（`gui.py`，tkinter Win/Mac）：🔑登入 → 🔍抓取（Playwright+cookie）→ ▶產Excel（batch2）→ 📁素材夾。`scraper/playwright_scraper.py` 正式化去風險腳本；`run_mac.command`/`run_windows.bat` 啟動
 - [x] 2026-07-05 ⚠️→✅ 測試版 `parent_sku` 填回編號**實測失敗**（新模板：上傳成功但資料整片不進）→ 已改回**留空**（黃金規則 #9 第二次血淚確認）；型號 `option_sku` 每 SKU 唯一保留（庫存用，非元兇）
 - [ ] GUI 用 Edwin 實機驗證（登入→抓取→產Excel→補素材）

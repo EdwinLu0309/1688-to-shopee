@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-07-22（#S098：蝦皮數據中心每日抓取系統 — API 探勘 + 抓取套件落地）
+
+### 新增
+- **`docs/shopee_analytics_api.md`**：賣家中心「數據中心」API 完整規格（Windows 公司機用 Claude in Chrome 實測 Lady 店驗證）。三組核心端點：商品明細 `v4/product/performance/`（49 欄 + models 規格層 inline）、每日大盤 `v3/sales/overview/funnel/`、來源拆分 `v1/dashboard/traffic-sources/`（need_paid_ads_data=true）+ `v3/dashboard/key-metrics/`。共通：`SPC_CDS` cookie+query、`{code:0,result}`、`period=yesterday`+epoch 秒
+- **`scraper/shopee_analytics/` 抓取套件**（承 #S097 設計：Sheet 真相 + SQLite 副本 + raw 快照）：
+  - `client.py`：mydata API client（cookie 認證、code≠0 拋錯、session 過期偵測）
+  - `collector.py`：一天份三張表（商品 page_size=100 分頁抓全店 + 規格層 + 大盤一列）+ raw JSON 原封快照（`data/shopee_analytics/raw/{shop}/{日期}/`）
+  - `storage_sqlite.py`：`product_daily` / `model_daily` / `shop_daily` 三表冪等 upsert
+  - `storage_sheet.py`：Google Sheet 落地（`商品日報_YYYYMM` 按月分頁 + `大盤日報_YYYY`；同日重跑先刪舊列冪等；SA 憑證沿用 inventory-sync 的 `GOOGLE_SERVICE_ACCOUNT_JSON` 慣例）
+  - `shopee_login.py`：Playwright 登入存 `config/shopee_cookies_{shop}.json`（實打 key-metrics API 驗證才算成功，同 google_login 模式；多賣場各存一份）
+- **main.py 新指令**：`shopee-login --shop nail`、`shopee-collect --shop nail [--date] [--sheet-id]`
+
+### 定案 / 實測
+- 三組端點皆以瀏覽器 session 實打驗證 `code:0`（Lady 店 total=437 商品；昨日銷售 49,820 其中廣告 45,697 = 91.7%）
+- `category_type=shopee`、`category_id=-1`、`order_type=confirmed` 為必要參數（空值回 10006）
+- 已知缺口：models 沒帶「商品選項貨號」（跟訂貨/庫存 join 需另建 model_id 對照）；任意歷史日期的 `period` 值未探（正線抓昨天用 `yesterday` 已驗證）
+
+### 待辦（下個 session）
+- Mac 跑 `shopee-login --shop nail` 拿美甲 cookie（Windows 端兩次逾時未完成登入）→ `shopee-collect --shop nail` 首跑
+- Edwin 建 Google Sheet（分享 SA 編輯權）→ 接 `--sheet-id`；接 Mac daemon 每天 10:30 抓前一天
+- 第二階段：訂單 `/portal/sale/order`、廣告 `/portal/marketing/pas/index` 端點探勘
+
 ## 2026-07-09（#S070：圖片正線轉向「1688 圖轉蝦皮 1:1 繁體」+ 每日訂貨系統設計）
 
 ### 新增

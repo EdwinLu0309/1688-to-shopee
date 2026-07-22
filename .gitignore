@@ -1,6 +1,8 @@
 .env
 config/cookies.json
 config/google_cookies.json
+config/shopee_cookies_*.json
+data/
 config/browser_profile/
 config/google_profile/
 output/
