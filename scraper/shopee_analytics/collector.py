@@ -63,7 +63,14 @@ AD_REPORT_FIELDS = [
 AD_MONEY_FIELDS = {
     "cost", "cpc", "cpm", "broad_gmv", "direct_gmv", "daily_budget", "total_budget",
 }
-AD_CAMPAIGN_TYPE = "cpc_homepage_v3"  # 首頁聚合視圖，一次涵蓋 product/shop 全 CPC 類型
+# 廣告要打兩種 campaign_type 才完整（#S100 Edwin 對帳發現總額差 3,680=自動選品）：
+# - cpc_homepage_v3 = 「廣告群組與個別廣告」清單（商品手動/自動加碼 + 賣場廣告）
+# - product_gms     = 「自動選品廣告（全賣場推廣）」獨立一塊（total=1 的聚合條目）
+# 兩者相加 = 廣告頁「所有廣告成效」總花費（實測 9,447.07+3,680.84=13,128 分毫不差）
+AD_CAMPAIGN_TYPES = ["cpc_homepage_v3", "product_gms"]
+
+# 大盤日報的廣告合計欄（由 ads 明細加總；跟當天營收同一列看「花多少賺多少」）
+AD_TOTAL_FIELDS = ["ad_cost", "ad_gmv", "ad_roi"]
 
 
 @dataclass
@@ -156,6 +163,14 @@ def collect_day(client: ShopeeDataClient, shop: str, day: date, throttle: float 
     time.sleep(throttle)
     data.ads, data.raw["ads_homepage"] = _collect_ads(client, day, throttle)
 
+    # 廣告合計進大盤列（= 廣告頁「所有廣告成效」總卡；含自動選品）
+    ad_cost = sum(a.get("cost") or 0 for a in data.ads)
+    ad_gmv = sum(a.get("broad_gmv") or 0 for a in data.ads)
+    row["ad_cost"] = round(ad_cost, 2)
+    row["ad_gmv"] = round(ad_gmv, 2)
+    row["ad_roi"] = round(ad_gmv / ad_cost, 2) if ad_cost else None
+    data.shop_daily = row
+
     logger.info(
         f"[{shop}] {day} 完成：商品 {len(data.products)} 筆 / 規格 {len(data.models)} 筆 / "
         f"大盤 1 列 / 廣告 {len(data.ads)} 筆"
@@ -170,20 +185,22 @@ def _collect_ads(client: ShopeeDataClient, day: date, throttle: float) -> tuple[
     """
     start, end = _day_range_epoch(day)
     rows: list[dict] = []
-    offset, limit, total = 0, 100, None
     raw_entries: list[dict] = []
-    while True:
-        data = client.post("/api/pas/v1/homepage/query/", {
-            "start_time": start, "end_time": end, "offset": offset, "limit": limit,
-            "filter": {"campaign_type": AD_CAMPAIGN_TYPE},
-        })
-        entries = data.get("entry_list") or []
-        raw_entries.extend(entries)
-        if total is None:
-            total = data.get("total", len(entries))
-        offset += limit
-        if offset >= total or not entries:
-            break
+    for ctype in AD_CAMPAIGN_TYPES:
+        offset, limit, total = 0, 100, None
+        while True:
+            data = client.post("/api/pas/v1/homepage/query/", {
+                "start_time": start, "end_time": end, "offset": offset, "limit": limit,
+                "filter": {"campaign_type": ctype},
+            })
+            entries = data.get("entry_list") or []
+            raw_entries.extend(entries)
+            if total is None:
+                total = data.get("total", len(entries))
+            offset += limit
+            if offset >= total or not entries:
+                break
+            time.sleep(throttle)
         time.sleep(throttle)
 
     for e in raw_entries:

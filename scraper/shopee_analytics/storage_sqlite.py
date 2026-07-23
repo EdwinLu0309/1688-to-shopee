@@ -10,6 +10,7 @@ from loguru import logger
 from .collector import (
     AD_META_FIELDS,
     AD_REPORT_FIELDS,
+    AD_TOTAL_FIELDS,
     DayData,
     FUNNEL_FIELDS,
     MODEL_FIELDS,
@@ -24,6 +25,7 @@ _SHOP_DAILY_COLS = (
     + [f"src_{f}" for f in SOURCE_FIELDS]
     + [f"src_{f}_ratio" for f in SOURCE_FIELDS]
     + ["shop_pv"]
+    + AD_TOTAL_FIELDS
 )
 
 
@@ -65,6 +67,12 @@ def save(data: DayData, db_path: str | Path) -> None:
     con = sqlite3.connect(db_path)
     try:
         con.executescript(SCHEMA)
+        # 舊 DB 補新欄（如 shop_daily 的廣告合計欄）；已存在就略過
+        for col in _SHOP_DAILY_COLS:
+            try:
+                con.execute(f"ALTER TABLE shop_daily ADD COLUMN {col} REAL")
+            except sqlite3.OperationalError:
+                pass
         dt = data.dt.isoformat()
 
         def upsert(table: str, cols: list[str], rows: list[dict]):

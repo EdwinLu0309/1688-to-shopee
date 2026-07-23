@@ -25,6 +25,7 @@ from loguru import logger
 from .collector import (
     AD_META_FIELDS,
     AD_REPORT_FIELDS,
+    AD_TOTAL_FIELDS,
     DayData,
     FUNNEL_FIELDS,
     MODEL_FIELDS,
@@ -41,6 +42,7 @@ _SHOP_DAILY_COLS = (
     + [f"src_{f}" for f in SOURCE_FIELDS]
     + [f"src_{f}_ratio" for f in SOURCE_FIELDS]
     + ["shop_pv"]
+    + AD_TOTAL_FIELDS
 )
 
 # ── 中文表頭（Edwin 看得懂＝真相來源的基本要求；英文 key 只留在 code/SQLite）──
@@ -72,6 +74,8 @@ _CN = {
     "broad_cir": "廣義投產比", "direct_order": "直接訂單數", "direct_gmv": "直接成交額",
     "direct_roi": "直接ROAS", "direct_cir": "直接投產比",
     "page_views": "頁面瀏覽", "unique_visitors": "不重複訪客", "avg_rank": "平均排名",
+    # 大盤的廣告合計（明細加總；含自動選品全賣場推廣）
+    "ad_cost": "廣告總花費", "ad_gmv": "廣告成交額", "ad_roi": "廣告ROAS",
 }
 _SRC_CN = {
     "total_sales": "總銷售額", "product_card": "商品卡片", "live": "直播",
