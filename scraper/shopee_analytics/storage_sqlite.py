@@ -17,6 +17,7 @@ from .collector import (
     PRODUCT_FIELDS,
     SOURCE_FIELDS,
 )
+from .gms_detail import GMS_FIELDS as _GMS_FIELDS
 
 _AD_COLS = AD_META_FIELDS + AD_REPORT_FIELDS
 
@@ -59,6 +60,12 @@ CREATE TABLE IF NOT EXISTS ad_daily (
     {", ".join(c + " REAL" for c in _AD_COLS if c not in ("campaign_id", "title", "type", "state"))},
     PRIMARY KEY (shop, dt, campaign_id)
 );
+CREATE TABLE IF NOT EXISTS gms_product_daily (
+    shop TEXT NOT NULL, dt TEXT NOT NULL,
+    product_id TEXT, name TEXT,
+    {", ".join(c + " REAL" for c in _GMS_FIELDS if c not in ("product_id", "name"))},
+    PRIMARY KEY (shop, dt, product_id)
+);
 """
 
 
@@ -91,10 +98,11 @@ def save(data: DayData, db_path: str | Path) -> None:
         upsert("model_daily", ["product_id"] + MODEL_FIELDS, data.models)
         upsert("shop_daily", _SHOP_DAILY_COLS, [data.shop_daily])
         upsert("ad_daily", _AD_COLS, data.ads)
+        upsert("gms_product_daily", _GMS_FIELDS, data.gms)
         con.commit()
         logger.info(
             f"SQLite 已寫入 {db_path}：product {len(data.products)} / "
-            f"model {len(data.models)} / shop_daily 1 / ad {len(data.ads)}"
+            f"model {len(data.models)} / shop_daily 1 / ad {len(data.ads)} / gms {len(data.gms)}"
         )
     finally:
         con.close()

@@ -94,3 +94,23 @@ body：`{"start_time": <epoch秒>, "end_time": <epoch秒>, "offset": 0, "limit":
 
 同一套端點，換 cookie 即換店：`config/shopee_cookies_{shop}.json`（nail / lady / baby）。
 第一階段先做 nail（美甲）。
+
+## 5. 自動選品廣告逐商品明細（GMV MAX detail，#S100 攔真實匯出得出）
+
+自動選品（全賣場推廣）UI 只顯示活動層一列（演算法黑箱），但「匯出數據→自動選品廣告詳情數據」
+拆得出逐商品。佔整體廣告 ~3 成金額（實測 3,680/13,128），必須拆解才不是半盲飛。
+匯出背後是 export_job API（**全部 POST**，SPC_CDS 走 query），可全自動：
+
+1. `POST /api/pas/v1/report/export_job/trigger/`
+   body `{"language":"zh-Hant","report_type":"product_gms__homepage","start_time":<epoch秒>,"end_time":<epoch秒>}`
+   → `{export_id}`
+2. `POST /api/pas/v1/report/export_job/get_single_result/` body `{export_id}`
+   → 輪詢 `{status:"processing|success|fail", progress}`（實測 ~3-6 秒 success）
+3. `POST /api/pas/v1/report/export_job/download/` body `{export_id}`
+   → `{file_name, content}`，content 是 CSV 全文（前 7 列 metadata、第 8 列表頭、
+     第 9 列起資料；首筆是 Shop GMV Max 聚合列 product_id='-' 要排除）
+
+- 其他 report_type（同機制可撈）：`總體廣告數據`/`關鍵字-版位層級` 等匯出檔也走這條 export_job flow。
+- CSV 金額欄已是「元」不用換算；逐商品加總 = 聚合列（實測 74 商品加總 3,680.85 = Shop GMV Max 花費）。
+- 用途：挑「自動試出的高 ROAS 商品 → 轉手動加碼」（如 AS 質感方瓶基礎膠 ROAS 16.2）。
+- 落地：SQLite `gms_product_daily` + Sheet「自動選品商品_YYYYMM」分頁。

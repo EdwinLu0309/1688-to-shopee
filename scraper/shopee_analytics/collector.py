@@ -81,6 +81,7 @@ class DayData:
     models: list[dict] = field(default_factory=list)     # 規格層列
     shop_daily: dict = field(default_factory=dict)       # 大盤一列
     ads: list[dict] = field(default_factory=list)        # 廣告活動層列
+    gms: list[dict] = field(default_factory=list)        # 自動選品逐商品列
     raw: dict = field(default_factory=dict)              # 原始 JSON 快照
 
 
@@ -171,9 +172,18 @@ def collect_day(client: ShopeeDataClient, shop: str, day: date, throttle: float 
     row["ad_roi"] = round(ad_gmv / ad_cost, 2) if ad_cost else None
     data.shop_daily = row
 
+    # 5) 自動選品逐商品明細（export_job trigger→poll→download CSV；黑箱拆解，佔 ~3 成廣告費）
+    time.sleep(throttle)
+    try:
+        from .gms_detail import collect_gms_detail
+
+        data.gms = collect_gms_detail(client, day)
+    except Exception as e:  # noqa: BLE001 匯出較慢/易失敗，不擋其他資料
+        logger.warning(f"[{shop}] {day} 自動選品明細抓取失敗（不影響其他）：{e}")
+
     logger.info(
         f"[{shop}] {day} 完成：商品 {len(data.products)} 筆 / 規格 {len(data.models)} 筆 / "
-        f"大盤 1 列 / 廣告 {len(data.ads)} 筆"
+        f"大盤 1 列 / 廣告 {len(data.ads)} 筆 / 自動選品商品 {len(data.gms)} 筆"
     )
     return data
 

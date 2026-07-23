@@ -32,6 +32,7 @@ from .collector import (
     PRODUCT_FIELDS,
     SOURCE_FIELDS,
 )
+from .gms_detail import GMS_FIELDS as _GMS_FIELDS
 
 _AD_COLS = AD_META_FIELDS + AD_REPORT_FIELDS
 
@@ -76,6 +77,10 @@ _CN = {
     "page_views": "頁面瀏覽", "unique_visitors": "不重複訪客", "avg_rank": "平均排名",
     # 大盤的廣告合計（明細加總；含自動選品全賣場推廣）
     "ad_cost": "廣告總花費", "ad_gmv": "廣告成交額", "ad_roi": "廣告ROAS",
+    # 自動選品逐商品（GMV MAX detail）
+    "product_id": "商品ID", "conversions": "轉換數", "units": "銷售數",
+    "gmv": "銷售金額", "roas": "投入產出比", "cost_per_conv": "每轉換成本",
+    "cir": "成本收入比", "voucher_amount": "優惠券金額", "voucher_sales": "優惠券銷售額",
 }
 _SRC_CN = {
     "total_sales": "總銷售額", "product_card": "商品卡片", "live": "直播",
@@ -99,6 +104,7 @@ MODEL_HEADER = (
 )
 SHOP_HEADER = ["日期", "賣場"] + [_cn(f) for f in _SHOP_DAILY_COLS]
 AD_HEADER = ["日期", "賣場"] + [_cn(f) for f in _AD_COLS]
+GMS_HEADER = ["日期", "賣場"] + [_cn(f) for f in _GMS_FIELDS]
 
 
 def _get_client():
@@ -217,7 +223,18 @@ def save(data: DayData, sheet_id: str) -> None:
     if arows:
         wsa.append_rows(arows, value_input_option="RAW")
 
+    # 自動選品逐商品（按月分頁；挑高 ROAS 商品轉手動的依據）
+    if data.gms:
+        wsg = _ensure_ws(sh, f"自動選品商品_{data.dt:%Y%m}", GMS_HEADER, rows=10000)
+        deleted = _delete_day_rows(sh, wsg, dt, data.shop)
+        if deleted:
+            logger.info(f"自動選品商品 冪等清除舊列 {deleted} 筆")
+        grows = [[dt, data.shop] + [g.get(c, "") for c in _GMS_FIELDS] for g in data.gms]
+        wsg.append_rows(grows, value_input_option="RAW")
+    else:
+        grows = []
+
     logger.info(
         f"Google Sheet 已寫入：商品 {len(rows)} 列 + 規格 {len(mrows)} 列 + "
-        f"大盤 1 列 + 廣告 {len(arows)} 列（{dt} {data.shop}）"
+        f"大盤 1 列 + 廣告 {len(arows)} 列 + 自動選品商品 {len(grows)} 列（{dt} {data.shop}）"
     )
