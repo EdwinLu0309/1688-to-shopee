@@ -83,7 +83,7 @@ def check_shopee(day: date) -> list[CheckResult]:
                 "SELECT COUNT(*) FROM shop_daily WHERE shop=? AND dt=?", (shop, dt)
             ).fetchone()[0]
             ok = n_prod > 0 and has_shop > 0
-            detail = f"商品{n_prod}/廣告{n_ad}/大盤{'有' if has_shop else '缺'}"
+            detail = f"{day:%-m/%-d}份 商品{n_prod}/廣告{n_ad}/大盤{'有' if has_shop else '缺'}"
             results.append(CheckResult(f"蝦皮數據({shop})", ok, detail))
     finally:
         con.close()
@@ -119,10 +119,12 @@ def run(day: date | None = None) -> bool:
     all_ok = all(c.ok for c in checks)
     lines = [f"{'✅' if c.ok else '❌'} {c.name}：{c.detail}" for c in checks]
     summary = "\n".join(lines)
-    logger.info(f"健康點名 {day}：{'；'.join(lines)}")
+    logger.info(f"健康點名（{date.today()}）：{'；'.join(lines)}")
 
     # 1) 對話框視窗（停在螢幕直到點掉——不會像橫幅幾秒就消失）
-    title = f"📊 今日數據正常（{day:%m/%d}）" if all_ok else f"⚠️ 數據異常（{day:%m/%d}）"
+    #    標題日期＝「點名當天」；各行 detail 自帶各自的資料日期（蝦皮=昨天份、ERP=今日欄）
+    today = date.today()
+    title = f"📊 數據點名 {today:%-m/%-d}：全部正常" if all_ok else f"⚠️ 數據點名 {today:%-m/%-d}：有異常"
     alert_mac(title, summary)
     if not all_ok:
         notify_mac(title, "；".join(lines), sound=True)  # 異常再補一聲提示音
