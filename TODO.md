@@ -2,7 +2,7 @@
 
 ## 高優先
 - [x] 2026-07-23 #S098 ★蝦皮數據抓取首跑（Mac）：`shopee-login --shop nail` 登入成功（45 cookie）→ `shopee-collect --shop nail` 抓 7/22 全綠：商品 423/規格 994/大盤 1 列（confirmed $63,591、廣告佔 91.4%）→ raw + SQLite 落地驗證過
-- [ ] #S098 Edwin 建「蝦皮數據中心」Google Sheet 分享 SA（`inventory-sync@inventory-sync-493112.iam.gserviceaccount.com` 編輯權）→ `shopee-collect --sheet-id <ID>` 驗證 Sheet 落地
+- [x] 2026-07-23 #S100 「【Nail】蝦皮數據中心」Sheet 落地驗證：SA 已有編輯權、`商品日報_202607`(423列)+`大盤日報_2026`(1列) 寫入+冪等重跑乾淨；Sheet ID 進 settings 預設（`SHOPEE_ANALYTICS_SHEET_IDS`）；冪等刪舊列改 batch（逐列 423 次會炸 429）
 - [ ] #S098 接 Mac daemon / cron 每天 10:30 自動 `shopee-collect`（抓前一天；Lady/Baby 之後各登入一份 cookie 同套程式）
 - [ ] #S098 model_id ↔ 商品選項貨號 對照（models 沒帶貨號，跟訂貨/庫存 join 需要）；歷史回填可先用 Downloads 的 parentskudetail/shop-stats 逐月匯出檔
 - [x] 2026-07-13 #S084 ★金流核對「一鍵刷新」：`pending_scraper`（頁內 mtop `buyerOrderList` 抓 1688 待付款訂單）+ `reconcile_db`（覆蓋 1688_DB）+ `reconcile_pipeline`（dry-run/0筆防呆）+ `reconcile_gui.py` + CLI `reconcile-refresh`。待收貨 22 筆解析+臨時分頁寫入實測過

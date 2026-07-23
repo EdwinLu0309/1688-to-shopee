@@ -2,7 +2,11 @@
 
 分頁規劃（承 #S097：一年一檔可再拆，量大按月分頁、原始分頁純值零公式）：
 - `商品日報_YYYYMM`：逐商品 × 每日（Lady 店約 437 列/天 → ~1.3 萬列/月）
+- `規格日報_YYYYMM`：逐規格 × 每日（994 列/天 → ~3 萬列/月）。「規格名稱」
+  就是 Edwin 成本/毛利對帳用的 key（對成本表算當時匯率+運費 → 月獲利表）
 - `大盤日報_YYYY`：一天一列（funnel + 來源拆分 + key metrics）
+
+表頭一律中文（`_CN`/`_cn()` 對照；英文 key 只留在 code/SQLite/raw）。
 
 憑證沿用 inventory-sync 慣例：環境變數 GOOGLE_SERVICE_ACCOUNT_JSON
 （JSON 字串或檔案路徑皆可）。sheet_id 由 config/shopee_analytics.json 指定。
@@ -18,7 +22,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from .collector import DayData, FUNNEL_FIELDS, PRODUCT_FIELDS, SOURCE_FIELDS
+from .collector import DayData, FUNNEL_FIELDS, MODEL_FIELDS, PRODUCT_FIELDS, SOURCE_FIELDS
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -29,8 +33,47 @@ _SHOP_DAILY_COLS = (
     + ["shop_pv"]
 )
 
-PRODUCT_HEADER = ["日期", "賣場"] + PRODUCT_FIELDS
-SHOP_HEADER = ["日期", "賣場"] + _SHOP_DAILY_COLS
+# ── 中文表頭（Edwin 看得懂＝真相來源的基本要求；英文 key 只留在 code/SQLite）──
+_CN = {
+    "id": "商品ID", "name": "商品名稱", "status": "狀態",
+    "product_card_impressions": "商品卡曝光數", "product_card_clicks": "商品卡點擊數",
+    "ctr": "點擊率", "search_clicks": "搜尋點擊數",
+    "uv": "商品訪客數", "pv": "商品瀏覽數", "bounce_rate": "跳出率", "likes": "按讚數",
+    "add_to_cart_units": "加購件數", "add_to_cart_buyers": "加購人數",
+    "placed_sales": "下單金額", "placed_units": "下單件數",
+    "placed_buyers": "下單買家數", "placed_orders": "下單訂單數",
+    "paid_sales": "付款金額", "paid_units": "付款件數",
+    "paid_buyers": "付款買家數", "paid_orders": "付款訂單數",
+    "confirmed_sales": "確認銷售額", "confirmed_units": "確認銷售件數",
+    "confirmed_buyers": "確認買家數", "confirmed_orders": "確認訂單數",
+    "placed_order_conversion_rate": "下單轉換率",
+    "confirmed_order_conversion_rate": "確認轉換率",
+    "uv_to_add_to_cart_rate": "訪客加購率", "uv_to_placed_buyers_rate": "訪客下單率",
+    # 大盤 funnel
+    "shop_uv": "商店訪客數", "hybrid_uv": "不重複訪客數",
+    "confirmed_sales_per_buyer": "客單價(確認)", "shop_pv": "商店瀏覽數",
+}
+_SRC_CN = {
+    "total_sales": "總銷售額", "product_card": "商品卡片", "live": "直播",
+    "video": "影片", "affiliate": "聯盟行銷", "paid_ads": "廣告",
+}
+
+
+def _cn(field: str) -> str:
+    if field.startswith("src_"):
+        key = field[4:]
+        if key.endswith("_ratio"):
+            return f"來源佔比｜{_SRC_CN.get(key[:-6], key)}"
+        return f"來源銷售額｜{_SRC_CN.get(key, key)}"
+    return _CN.get(field, field)
+
+
+PRODUCT_HEADER = ["日期", "賣場"] + [_cn(f) for f in PRODUCT_FIELDS]
+MODEL_HEADER = (
+    ["日期", "賣場", "商品ID", "商品名稱", "規格ID", "規格名稱", "狀態"]
+    + [_cn(f) for f in MODEL_FIELDS if f not in ("id", "name", "status")]
+)
+SHOP_HEADER = ["日期", "賣場"] + [_cn(f) for f in _SHOP_DAILY_COLS]
 
 
 def _get_client():
@@ -53,10 +96,15 @@ def _get_client():
 def _ensure_ws(sh, title: str, header: list[str], rows: int = 2000):
     try:
         ws = sh.worksheet(title)
-    except Exception:
+    except Exception:  # WorksheetNotFound
         ws = sh.add_worksheet(title=title, rows=rows, cols=len(header) + 2)
         ws.append_row(header, value_input_option="RAW")
         logger.info(f"建立分頁 {title}")
+        return ws
+    # 表頭跟預期不同（如舊版英文表頭）→ 就地換掉第 1 列
+    if ws.row_values(1) != header:
+        ws.update(values=[header], range_name="A1", raw=True)
+        logger.info(f"分頁 {title} 表頭已更新（{len(header)} 欄）")
     return ws
 
 
@@ -109,6 +157,22 @@ def save(data: DayData, sheet_id: str) -> None:
     if rows:
         ws.append_rows(rows, value_input_option="RAW")
 
+    # 規格日報（按月分頁；成本/毛利對帳的主角——「規格名稱」對成本表）
+    wsm = _ensure_ws(sh, f"規格日報_{data.dt:%Y%m}", MODEL_HEADER, rows=35000)
+    deleted = _delete_day_rows(sh, wsm, dt, data.shop)
+    if deleted:
+        logger.info(f"規格日報 冪等清除舊列 {deleted} 筆")
+    pname = {p.get("id"): p.get("name", "") for p in data.products}
+    metric_fields = [f for f in MODEL_FIELDS if f not in ("id", "name", "status")]
+    mrows = [
+        [dt, data.shop, m.get("product_id", ""), pname.get(m.get("product_id"), ""),
+         m.get("id", ""), m.get("name", ""), m.get("status", "")]
+        + [m.get(f, "") for f in metric_fields]
+        for m in data.models
+    ]
+    if mrows:
+        wsm.append_rows(mrows, value_input_option="RAW")
+
     # 大盤日報（按年分頁）
     ws2 = _ensure_ws(sh, f"大盤日報_{data.dt:%Y}", SHOP_HEADER, rows=400)
     deleted = _delete_day_rows(sh, ws2, dt, data.shop)
@@ -118,4 +182,6 @@ def save(data: DayData, sheet_id: str) -> None:
         [[dt, data.shop] + [data.shop_daily.get(c, "") for c in _SHOP_DAILY_COLS]],
         value_input_option="RAW",
     )
-    logger.info(f"Google Sheet 已寫入：商品 {len(rows)} 列 + 大盤 1 列（{dt} {data.shop}）")
+    logger.info(
+        f"Google Sheet 已寫入：商品 {len(rows)} 列 + 規格 {len(mrows)} 列 + 大盤 1 列（{dt} {data.shop}）"
+    )
