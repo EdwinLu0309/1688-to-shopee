@@ -737,8 +737,17 @@ def shopee_collect_daily_cmd(date_str: str | None, data_dir: str) -> None:
             failed.append(shop)
 
     click.echo(f"\n  ✓ {day} 每日抓取：成功 {ran or '—'} / 略過 {skipped or '—'} / 失敗 {failed or '—'}")
+
+    # 跑完即時通知（macOS 通知中心）；11:00 健康點名另有獨立保險網
+    from scraper.shopee_analytics.health_check import notify_mac
+
     if failed:
+        notify_mac(f"⚠️ 蝦皮數據抓取有失敗（{day:%m/%d}）",
+                   f"失敗：{', '.join(failed)}；成功：{', '.join(ran) or '無'}")
         sys.exit(1)
+    notify_mac(f"📊 蝦皮數據抓取完成（{day:%m/%d}）",
+               f"成功：{', '.join(ran) or '無'}" + (f"；未登入略過：{', '.join(skipped)}" if skipped else ""),
+               sound=False)
 
 
 if __name__ == "__main__":

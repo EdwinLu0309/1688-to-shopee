@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 每日數據健康點名（11:00）：驗昨天的資料真的進來了沒（點名制，不聽作業自己回報——
+     排程根本沒跑時連失敗通知都不會有，所以要獨立驗資料本身）。
+     結果跳 macOS 通知：全綠=「今日數據正常」、有缺=「數據異常」+ 哪個缺。
+     安裝：雙擊 run_shopee_analytics_install.command（會一起裝這支）。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.joyslu.data-health</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/weilu/projects/1688-to-shopee/.venv/bin/python</string>
+        <string>-m</string>
+        <string>scraper.shopee_analytics.health_check</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/weilu/projects/1688-to-shopee</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>11</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/weilu/projects/1688-to-shopee/logs/data_health.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/weilu/projects/1688-to-shopee/logs/data_health.log</string>
+</dict>
+</plist>
