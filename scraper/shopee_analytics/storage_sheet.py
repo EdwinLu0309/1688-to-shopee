@@ -22,7 +22,17 @@ from pathlib import Path
 
 from loguru import logger
 
-from .collector import DayData, FUNNEL_FIELDS, MODEL_FIELDS, PRODUCT_FIELDS, SOURCE_FIELDS
+from .collector import (
+    AD_META_FIELDS,
+    AD_REPORT_FIELDS,
+    DayData,
+    FUNNEL_FIELDS,
+    MODEL_FIELDS,
+    PRODUCT_FIELDS,
+    SOURCE_FIELDS,
+)
+
+_AD_COLS = AD_META_FIELDS + AD_REPORT_FIELDS
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -52,6 +62,16 @@ _CN = {
     # 大盤 funnel
     "shop_uv": "商店訪客數", "hybrid_uv": "不重複訪客數",
     "confirmed_sales_per_buyer": "客單價(確認)", "shop_pv": "商店瀏覽數",
+    # 廣告
+    "campaign_id": "活動ID", "title": "活動名稱", "type": "活動類型", "state": "狀態",
+    "daily_budget": "日預算", "total_budget": "總預算",
+    "cost": "花費", "impression": "曝光數", "click": "點擊數", "ctr": "點擊率",
+    "cpc": "每次點擊成本", "cpm": "每千次曝光成本",
+    "atc": "加購數", "atc_rate": "加購率", "checkout": "結帳數", "cr": "轉換率",
+    "broad_order": "廣義訂單數", "broad_gmv": "廣義成交額", "broad_roi": "廣義ROAS",
+    "broad_cir": "廣義投產比", "direct_order": "直接訂單數", "direct_gmv": "直接成交額",
+    "direct_roi": "直接ROAS", "direct_cir": "直接投產比",
+    "page_views": "頁面瀏覽", "unique_visitors": "不重複訪客", "avg_rank": "平均排名",
 }
 _SRC_CN = {
     "total_sales": "總銷售額", "product_card": "商品卡片", "live": "直播",
@@ -74,6 +94,7 @@ MODEL_HEADER = (
     + [_cn(f) for f in MODEL_FIELDS if f not in ("id", "name", "status")]
 )
 SHOP_HEADER = ["日期", "賣場"] + [_cn(f) for f in _SHOP_DAILY_COLS]
+AD_HEADER = ["日期", "賣場"] + [_cn(f) for f in _AD_COLS]
 
 
 def _get_client():
@@ -182,6 +203,17 @@ def save(data: DayData, sheet_id: str) -> None:
         [[dt, data.shop] + [data.shop_daily.get(c, "") for c in _SHOP_DAILY_COLS]],
         value_input_option="RAW",
     )
+
+    # 廣告日報（按月分頁；一活動一列，只含當天有跑的）
+    wsa = _ensure_ws(sh, f"廣告日報_{data.dt:%Y%m}", AD_HEADER, rows=10000)
+    deleted = _delete_day_rows(sh, wsa, dt, data.shop)
+    if deleted:
+        logger.info(f"廣告日報 冪等清除舊列 {deleted} 筆")
+    arows = [[dt, data.shop] + [a.get(c, "") for c in _AD_COLS] for a in data.ads]
+    if arows:
+        wsa.append_rows(arows, value_input_option="RAW")
+
     logger.info(
-        f"Google Sheet 已寫入：商品 {len(rows)} 列 + 規格 {len(mrows)} 列 + 大盤 1 列（{dt} {data.shop}）"
+        f"Google Sheet 已寫入：商品 {len(rows)} 列 + 規格 {len(mrows)} 列 + "
+        f"大盤 1 列 + 廣告 {len(arows)} 列（{dt} {data.shop}）"
     )

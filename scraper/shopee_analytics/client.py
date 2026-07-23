@@ -64,19 +64,28 @@ class ShopeeDataClient:
             return {c["name"]: c["value"] for c in data}
         return dict(data)
 
-    def get(self, path: str, params: dict | None = None) -> dict:
-        """GET mydata 端點，自動帶 SPC_CDS；code != 0 丟 ShopeeAPIError。"""
-        q = {"SPC_CDS": self.spc_cds, "SPC_CDS_VER": "2"}
-        q.update(params or {})
-        resp = self._http.get(path, params=q)
-        resp.raise_for_status()
-        body = resp.json()
+    def _check(self, body: dict, path: str) -> dict:
         code = body.get("code", -1)
         if code != 0:
             err = ShopeeAPIError(code, body.get("msg") or body.get("message", ""), path)
             logger.error(str(err))
             raise err
         return body.get("result") or body.get("data") or {}
+
+    def get(self, path: str, params: dict | None = None) -> dict:
+        """GET mydata 端點，自動帶 SPC_CDS；code != 0 丟 ShopeeAPIError。"""
+        q = {"SPC_CDS": self.spc_cds, "SPC_CDS_VER": "2"}
+        q.update(params or {})
+        resp = self._http.get(path, params=q)
+        resp.raise_for_status()
+        return self._check(resp.json(), path)
+
+    def post(self, path: str, json_body: dict) -> dict:
+        """POST 端點（廣告 pas 用），自動帶 SPC_CDS query；code != 0 丟 ShopeeAPIError。"""
+        q = {"SPC_CDS": self.spc_cds, "SPC_CDS_VER": "2"}
+        resp = self._http.post(path, params=q, json=json_body)
+        resp.raise_for_status()
+        return self._check(resp.json(), path)
 
     def close(self) -> None:
         self._http.close()

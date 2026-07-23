@@ -687,7 +687,7 @@ def shopee_collect_cmd(shop: str, date_str: str | None, sheet_id: str | None,
         storage_sheet.save(data, sheet_id)
     click.echo(
         f"\n  ✓ {shop} {day} 抓取完成：商品 {len(data.products)} 筆 / "
-        f"規格 {len(data.models)} 筆 / 大盤 1 列"
+        f"規格 {len(data.models)} 筆 / 大盤 1 列 / 廣告 {len(data.ads)} 筆"
         + ("（已寫入 Google Sheet）" if sheet_id else "（未寫 Sheet，只存本機）")
     )
 

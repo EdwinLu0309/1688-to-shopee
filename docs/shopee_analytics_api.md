@@ -64,6 +64,24 @@
 
 回傳：`shop_pv, shop_uv, product_clicks, hybrid_uv, place/paid/confirmed_gmv, *_orders, *_sales_per_order, shop_uv_to_*_buyers_rate` 等（各為 `{value, ratio}`）。
 
+## 4. 廣告活動報表（#S100 探勘定案）
+
+`POST /api/pas/v1/homepage/query/`（**注意是 POST + JSON body，不是 GET**；SPC_CDS 仍走 query）
+body：`{"start_time": <epoch秒>, "end_time": <epoch秒>, "offset": 0, "limit": 100, "filter": {"campaign_type": "cpc_homepage_v3"}}`
+
+- `campaign_type` **必填**，錯值時 API 會吐出完整枚舉表。`cpc_homepage_v3` = 首頁聚合視圖，**一次涵蓋 product/shop 全部 CPC 類型**（product_manual/product_mpd/shop_auto/shop_manual…）。
+- 回 `data.entry_list`（每活動一筆）+ `data.total`（含歷史所有活動，nail=1882）。**翻頁用 offset/limit**。
+- 每筆 entry：`title`(活動名) / `type` / `state`(ongoing/paused) / `campaign.{campaign_id,daily_budget,total_budget,start_time}` / `report`(36 指標)。
+- `report` 核心：`cost`(花費) `impression` `click` `ctr` `cpc` `cpm` `atc`(加購) `checkout` `cr`(轉換率) + 廣義/直接兩套歸因 `broad_/direct_` 的 `order/gmv/roi/cir`。
+- ⚠️ **金額欄單位 = 值 ÷100000 得「元」**：`cost/cpc/cpm/broad_gmv/direct_gmv/daily_budget/total_budget`（實測 cost 2588884→$25.89… 校驗 daily_budget 50000000→$500 合理）。
+- 落地策略：**翻頁抓全 total，但只留當天有跑的活動**（`cost>0 或 impression>0`）——1882 個活動多數 paused，nail 昨日僅 11 個活躍。
+- 口徑提醒：廣告 `broad_gmv`（廣告歸因成交）與大盤 `src_paid_ads`（流量來源=廣告的確認銷售）**不同口徑、不會相等**，各自有用途。
+
+## 訂單（第二階段，走匯出檔非 API）
+
+`/portal/sale/order` 是完整 portal SPA，無頭瀏覽器一開即被風控重導 login、純 API 路徑試 8 變體全 404。
+**定案改走加密匯出檔**（同訂貨系統 `shopee_export.py` 的 msoffcrypto 解密），做商品聯動 basket 分析。
+
 ## 其他已看到但第一階段不用的端點
 
 - `GET /api/mydata/v2/product/overview/`、`/metric-trends/`、`/v3/product/overview/product-rankings/`（商品概覽頁）

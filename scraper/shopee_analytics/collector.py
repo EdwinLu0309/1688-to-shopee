@@ -49,6 +49,22 @@ FUNNEL_FIELDS = [
 ]
 SOURCE_FIELDS = ["total_sales", "product_card", "live", "video", "affiliate", "paid_ads"]
 
+# 廣告層（CPC 廣告活動，pas homepage query；金額欄 ÷100000）
+# broad_=廣義歸因（含間接）、direct_=直接點擊當下。cost/gmv/budget 都是 ÷100000 的「分×1000」。
+AD_META_FIELDS = ["campaign_id", "title", "type", "state", "daily_budget", "total_budget"]
+AD_REPORT_FIELDS = [
+    "cost", "impression", "click", "ctr", "cpc", "cpm",
+    "atc", "atc_rate", "checkout", "cr",
+    "broad_order", "broad_gmv", "broad_roi", "broad_cir",
+    "direct_order", "direct_gmv", "direct_roi", "direct_cir",
+    "page_views", "unique_visitors", "avg_rank",
+]
+# 這些欄位是「金額×1000」(÷100000 得元)：cost/gmv/cpc/cpm/budget
+AD_MONEY_FIELDS = {
+    "cost", "cpc", "cpm", "broad_gmv", "direct_gmv", "daily_budget", "total_budget",
+}
+AD_CAMPAIGN_TYPE = "cpc_homepage_v3"  # 首頁聚合視圖，一次涵蓋 product/shop 全 CPC 類型
+
 
 @dataclass
 class DayData:
@@ -57,6 +73,7 @@ class DayData:
     products: list[dict] = field(default_factory=list)   # 商品層列
     models: list[dict] = field(default_factory=list)     # 規格層列
     shop_daily: dict = field(default_factory=dict)       # 大盤一列
+    ads: list[dict] = field(default_factory=list)        # 廣告活動層列
     raw: dict = field(default_factory=dict)              # 原始 JSON 快照
 
 
@@ -135,8 +152,58 @@ def collect_day(client: ShopeeDataClient, shop: str, day: date, throttle: float 
     row["shop_pv"] = _num(pv.get("value")) if isinstance(pv, dict) else _num(pv)
     data.shop_daily = row
 
-    logger.info(f"[{shop}] {day} 完成：商品 {len(data.products)} 筆 / 規格 {len(data.models)} 筆 / 大盤 1 列")
+    # 4) 廣告活動層（pas homepage query，POST 翻頁；只留當天有活動的＝cost>0 或 impression>0）
+    time.sleep(throttle)
+    data.ads, data.raw["ads_homepage"] = _collect_ads(client, day, throttle)
+
+    logger.info(
+        f"[{shop}] {day} 完成：商品 {len(data.products)} 筆 / 規格 {len(data.models)} 筆 / "
+        f"大盤 1 列 / 廣告 {len(data.ads)} 筆"
+    )
     return data
+
+
+def _collect_ads(client: ShopeeDataClient, day: date, throttle: float) -> tuple[list[dict], list[dict]]:
+    """抓 CPC 廣告活動昨日報表。翻頁至 total；落地只留當天有花費/曝光的活動。
+
+    回 (落地列, 原始 entry_list)。
+    """
+    start, end = _day_range_epoch(day)
+    rows: list[dict] = []
+    offset, limit, total = 0, 100, None
+    raw_entries: list[dict] = []
+    while True:
+        data = client.post("/api/pas/v1/homepage/query/", {
+            "start_time": start, "end_time": end, "offset": offset, "limit": limit,
+            "filter": {"campaign_type": AD_CAMPAIGN_TYPE},
+        })
+        entries = data.get("entry_list") or []
+        raw_entries.extend(entries)
+        if total is None:
+            total = data.get("total", len(entries))
+        offset += limit
+        if offset >= total or not entries:
+            break
+        time.sleep(throttle)
+
+    for e in raw_entries:
+        rep = e.get("report") or {}
+        camp = e.get("campaign") or {}
+        if not (rep.get("cost") or rep.get("impression")):  # 當天沒跑的活動略過
+            continue
+        row: dict = {
+            "campaign_id": camp.get("campaign_id"),
+            "title": e.get("title"), "type": e.get("type"), "state": e.get("state"),
+            "daily_budget": camp.get("daily_budget"), "total_budget": camp.get("total_budget"),
+        }
+        for f in AD_REPORT_FIELDS:
+            row[f] = _num(rep.get(f))
+        # 金額欄 ÷100000 轉「元」
+        for f in AD_MONEY_FIELDS:
+            if row.get(f) is not None:
+                row[f] = round(row[f] / 100000, 2)
+        rows.append(row)
+    return rows, raw_entries
 
 
 def save_raw_snapshot(data: DayData, root: str | Path) -> Path:
