@@ -33,6 +33,7 @@ from .collector import (
     SOURCE_FIELDS,
 )
 from .gms_detail import GMS_FIELDS as _GMS_FIELDS
+from .shop_keyword import KW_FIELDS as _KW_FIELDS
 
 _AD_COLS = AD_META_FIELDS + AD_REPORT_FIELDS
 
@@ -81,6 +82,9 @@ _CN = {
     "product_id": "商品ID", "conversions": "轉換數", "units": "銷售數",
     "gmv": "銷售金額", "roas": "投入產出比", "cost_per_conv": "每轉換成本",
     "cir": "成本收入比", "voucher_amount": "優惠券金額", "voucher_sales": "優惠券銷售額",
+    # 賣場廣告逐關鍵字
+    "campaign_id": "活動ID", "campaign_name": "活動名稱",
+    "keyword": "投放關鍵字", "match_type": "比對模式", "search_term": "買家搜尋詞",
 }
 _SRC_CN = {
     "total_sales": "總銷售額", "product_card": "商品卡片", "live": "直播",
@@ -105,6 +109,7 @@ MODEL_HEADER = (
 SHOP_HEADER = ["日期", "賣場"] + [_cn(f) for f in _SHOP_DAILY_COLS]
 AD_HEADER = ["日期", "賣場"] + [_cn(f) for f in _AD_COLS]
 GMS_HEADER = ["日期", "賣場"] + [_cn(f) for f in _GMS_FIELDS]
+KW_HEADER = ["日期", "賣場"] + [_cn(f) for f in _KW_FIELDS]
 
 
 def _get_client():
@@ -234,7 +239,18 @@ def save(data: DayData, sheet_id: str) -> None:
     else:
         grows = []
 
+    # 賣場廣告逐關鍵字（按月分頁；哪些搜尋詞帶轉換/燒錢）
+    if data.shop_kw:
+        wsk = _ensure_ws(sh, f"賣場廣告關鍵字_{data.dt:%Y%m}", KW_HEADER, rows=20000)
+        deleted = _delete_day_rows(sh, wsk, dt, data.shop)
+        if deleted:
+            logger.info(f"賣場廣告關鍵字 冪等清除舊列 {deleted} 筆")
+        krows = [[dt, data.shop] + [k.get(c, "") for c in _KW_FIELDS] for k in data.shop_kw]
+        wsk.append_rows(krows, value_input_option="RAW")
+    else:
+        krows = []
+
     logger.info(
-        f"Google Sheet 已寫入：商品 {len(rows)} 列 + 規格 {len(mrows)} 列 + "
-        f"大盤 1 列 + 廣告 {len(arows)} 列 + 自動選品商品 {len(grows)} 列（{dt} {data.shop}）"
+        f"Google Sheet 已寫入：商品 {len(rows)} + 規格 {len(mrows)} + 大盤 1 + 廣告 {len(arows)} + "
+        f"自動選品商品 {len(grows)} + 賣場關鍵字 {len(krows)} 列（{dt} {data.shop}）"
     )

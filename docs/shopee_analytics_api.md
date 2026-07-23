@@ -110,7 +110,11 @@ body：`{"start_time": <epoch秒>, "end_time": <epoch秒>, "offset": 0, "limit":
    → `{file_name, content}`，content 是 CSV 全文（前 7 列 metadata、第 8 列表頭、
      第 9 列起資料；首筆是 Shop GMV Max 聚合列 product_id='-' 要排除）
 
-- 其他 report_type（同機制可撈）：`總體廣告數據`/`關鍵字-版位層級` 等匯出檔也走這條 export_job flow。
+- 其他 report_type（同機制可撈）：對 trigger 送非法 report_type，API 吐出完整枚舉——
+  `shop_manual__single_detail`（手動賣場廣告逐關鍵字，要帶 `campaign_id`）、
+  `product_manual__single_detail`（手動商品廣告逐關鍵字）、`shop_auto__single_detail` 等。
+- ⚠️ trigger 有限流 `code=200 too many export requests`：多活動連續匯出必撞 →
+  `run_export_job` 退避重試（15/30/45/60s）+ 活動間 sleep 8s（見 gms_detail/shop_keyword）。
 - CSV 金額欄已是「元」不用換算；逐商品加總 = 聚合列（實測 74 商品加總 3,680.85 = Shop GMV Max 花費）。
 - 用途：挑「自動試出的高 ROAS 商品 → 轉手動加碼」（如 AS 質感方瓶基礎膠 ROAS 16.2）。
 - 落地：SQLite `gms_product_daily` + Sheet「自動選品商品_YYYYMM」分頁。

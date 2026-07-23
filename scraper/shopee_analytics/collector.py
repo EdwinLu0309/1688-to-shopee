@@ -82,6 +82,7 @@ class DayData:
     shop_daily: dict = field(default_factory=dict)       # 大盤一列
     ads: list[dict] = field(default_factory=list)        # 廣告活動層列
     gms: list[dict] = field(default_factory=list)        # 自動選品逐商品列
+    shop_kw: list[dict] = field(default_factory=list)    # 賣場廣告逐關鍵字列
     raw: dict = field(default_factory=dict)              # 原始 JSON 快照
 
 
@@ -181,9 +182,25 @@ def collect_day(client: ShopeeDataClient, shop: str, day: date, throttle: float 
     except Exception as e:  # noqa: BLE001 匯出較慢/易失敗，不擋其他資料
         logger.warning(f"[{shop}] {day} 自動選品明細抓取失敗（不影響其他）：{e}")
 
+    # 6) 手動賣場廣告逐關鍵字明細（每天燒 2-3k，重點；只抓當天有花費的活動）
+    time.sleep(throttle)
+    try:
+        from .shop_keyword import collect_shop_keyword_detail
+
+        shop_campaigns = [
+            (int(a["campaign_id"]), a.get("title") or "")
+            for a in data.ads
+            if a.get("type") == "shop_manual" and a.get("campaign_id")
+            and (a.get("cost") or 0) > 0
+        ]
+        if shop_campaigns:
+            data.shop_kw = collect_shop_keyword_detail(client, day, shop_campaigns)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[{shop}] {day} 賣場廣告關鍵字抓取失敗（不影響其他）：{e}")
+
     logger.info(
-        f"[{shop}] {day} 完成：商品 {len(data.products)} 筆 / 規格 {len(data.models)} 筆 / "
-        f"大盤 1 列 / 廣告 {len(data.ads)} 筆 / 自動選品商品 {len(data.gms)} 筆"
+        f"[{shop}] {day} 完成：商品 {len(data.products)} / 規格 {len(data.models)} / 大盤 1 / "
+        f"廣告 {len(data.ads)} / 自動選品商品 {len(data.gms)} / 賣場關鍵字 {len(data.shop_kw)}"
     )
     return data
 

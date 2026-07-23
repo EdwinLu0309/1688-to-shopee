@@ -56,34 +56,59 @@ def _num(v: str):
         return None
 
 
-def collect_gms_detail(client: ShopeeDataClient, day: date,
-                       poll_max: int = 40, poll_interval: float = 3.0) -> list[dict]:
-    """抓 day 當天自動選品逐商品明細。回逐商品列（排除聚合 Shop GMV Max 列）。"""
+def run_export_job(client: ShopeeDataClient, report_type: str, day: date,
+                   extra_body: dict | None = None,
+                   poll_max: int = 40, poll_interval: float = 3.0) -> str | None:
+    """通用匯出流程：trigger → 輪詢 → download，回 CSV 全文（失敗回 None）。
+
+    所有 pas 匯出報表（自動選品/賣場關鍵字/商品關鍵字…）都走這條，只換 report_type
+    與 extra_body（如單一活動詳情要帶 campaign_id）。有效 report_type 枚舉：對 trigger 送
+    非法值時 API 會吐出（如 shop_manual__single_detail / product_manual__single_detail）。
+    """
+    from .client import ShopeeAPIError
+
     start, end = _day_epoch(day)
-    r = client.post("/api/pas/v1/report/export_job/trigger/", {
-        "language": "zh-Hant", "report_type": REPORT_TYPE,
-        "start_time": start, "end_time": end,
-    })
+    body = {"language": "zh-Hant", "report_type": report_type,
+            "start_time": start, "end_time": end}
+    if extra_body:
+        body.update(extra_body)
+    # trigger 有「too many export requests」限流（code=200）→ 退避重試（多活動連續匯出必撞）
+    r = None
+    for attempt in range(5):
+        try:
+            r = client.post("/api/pas/v1/report/export_job/trigger/", body)
+            break
+        except ShopeeAPIError as e:
+            if e.code == 200 and attempt < 4:  # too many export requests
+                wait = 15 * (attempt + 1)
+                logger.info(f"匯出限流（{report_type}），{wait}s 後重試（{attempt + 1}/5）")
+                time.sleep(wait)
+                continue
+            raise
+    if r is None:
+        return None
     export_id = r.get("export_id") or r.get("id")
     if not export_id:
-        logger.warning(f"自動選品明細 trigger 沒回 export_id：{r}")
-        return []
-
-    for i in range(poll_max):
+        logger.warning(f"匯出 trigger 沒回 export_id（{report_type}）：{r}")
+        return None
+    for _ in range(poll_max):
         s = client.post("/api/pas/v1/report/export_job/get_single_result/", {"export_id": export_id})
         if s.get("status") == "success":
             break
         if s.get("status") == "fail":
-            logger.warning(f"自動選品明細匯出失敗：{s}")
-            return []
+            logger.warning(f"匯出失敗（{report_type}）：{s}")
+            return None
         time.sleep(poll_interval)
     else:
-        logger.warning(f"自動選品明細匯出逾時（export_id={export_id}）")
-        return []
+        logger.warning(f"匯出逾時（{report_type} export_id={export_id}）")
+        return None
+    return client.post("/api/pas/v1/report/export_job/download/", {"export_id": export_id}).get("content", "")
 
-    d = client.post("/api/pas/v1/report/export_job/download/", {"export_id": export_id})
-    content = d.get("content", "")
-    return _parse_csv(content)
+
+def collect_gms_detail(client: ShopeeDataClient, day: date) -> list[dict]:
+    """抓 day 當天自動選品逐商品明細。回逐商品列（排除聚合 Shop GMV Max 列）。"""
+    content = run_export_job(client, REPORT_TYPE, day)
+    return _parse_csv(content) if content else []
 
 
 def _parse_csv(content: str) -> list[dict]:
