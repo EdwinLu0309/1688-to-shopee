@@ -693,6 +693,34 @@ def shopee_collect_cmd(shop: str, date_str: str | None, sheet_id: str | None,
     )
 
 
+@cli.command("order-basket")
+@click.argument("export_xlsx", type=click.Path(exists=True))
+@click.option("--password", "-P", default=None, help="訂單報表密碼（帳號手機末 6 碼）")
+@click.option("--shop", default="nail", help="賣場代號")
+@click.option("--commit", is_flag=True, help="寫入 Google Sheet（訂單明細累積+商品聯動摘要）")
+def order_basket_cmd(export_xlsx: str, password: str | None, shop: str, commit: bool) -> None:
+    """讀蝦皮訂單報表（加密）→ 商品聯動 basket 分析（買A配B、買它常買幾件）。
+
+    ⚠️訂單報表含買家個資→只取訂單/商品/貨號/數量，不落地個資。預設只印，--commit 才寫 Sheet。
+    """
+    from config import settings as _settings
+
+    from scraper.shopee_analytics import order_basket
+
+    details = order_basket.read_order_details(export_xlsx, password=password)
+    res = order_basket.analyze(details)
+    click.echo("\n" + order_basket.format_report(res))
+    if commit:
+        sheet_id = _settings.SHOPEE_ANALYTICS_SHEET_IDS.get(shop)
+        if not sheet_id:
+            click.echo(f"\n  ✗ {shop} 沒有設定 Sheet ID")
+            sys.exit(1)
+        order_basket.save_to_sheet(res, sheet_id, shop)
+        click.echo("\n  ✓ 已寫入 Google Sheet（訂單明細_累積 + 商品聯動摘要）")
+    else:
+        click.echo("\n👉 確認無誤後加 --commit 寫入 Google Sheet")
+
+
 @cli.command("shopee-collect-daily")
 @click.option("--date", "date_str", default=None, help="要抓的日期 YYYY-MM-DD（預設昨天）")
 @click.option("--data-dir", default="data/shopee_analytics", help="raw 快照與 SQLite 根目錄")
