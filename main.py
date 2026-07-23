@@ -645,17 +645,24 @@ def shopee_login_cmd(shop: str) -> None:
 @cli.command("shopee-collect")
 @click.option("--shop", default="nail", help="賣場代號（nail/lady/baby）")
 @click.option("--date", "date_str", default=None, help="要抓的日期 YYYY-MM-DD（預設昨天）")
-@click.option("--sheet-id", default=None, help="Google Sheet ID（不給則只存 raw + SQLite）")
+@click.option("--sheet-id", default=None,
+              help="Google Sheet ID（預設查 settings.SHOPEE_ANALYTICS_SHEET_IDS；--no-sheet 只存本機）")
+@click.option("--no-sheet", is_flag=True, help="不寫 Google Sheet，只存 raw + SQLite")
 @click.option("--data-dir", default="data/shopee_analytics", help="raw 快照與 SQLite 根目錄")
-def shopee_collect_cmd(shop: str, date_str: str | None, sheet_id: str | None, data_dir: str) -> None:
+def shopee_collect_cmd(shop: str, date_str: str | None, sheet_id: str | None,
+                       no_sheet: bool, data_dir: str) -> None:
     """抓一天份蝦皮數據（商品明細 + 每日大盤 + 來源拆分）→ raw 快照 + SQLite（+ Google Sheet）。"""
     from datetime import date as _date
+
+    from config import settings as _settings
 
     from scraper.shopee_analytics import storage_sqlite
     from scraper.shopee_analytics.client import ShopeeAPIError, ShopeeDataClient
     from scraper.shopee_analytics.collector import collect_day, save_raw_snapshot, yesterday
     from scraper.shopee_analytics.shopee_login import cookie_path_for
 
+    if not no_sheet and sheet_id is None:
+        sheet_id = _settings.SHOPEE_ANALYTICS_SHEET_IDS.get(shop)
     day = _date.fromisoformat(date_str) if date_str else yesterday()
     cookie_path = cookie_path_for(shop)
     if not cookie_path.exists():

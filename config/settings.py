@@ -69,6 +69,14 @@ RECONCILE_DB_TAB = "1688_DB"
 # 美甲帳號專屬 cookie（與 Lady 的 config/cookies.json 分開，免每次切換帳號重登）
 COOKIE_PATH_NAIL = BASE_DIR / "config" / "cookies_nail.json"
 
+# 【Nail】蝦皮數據中心（#S098 每日抓取落地表：商品日報_YYYYMM + 大盤日報_YYYY）
+# SA（同 inventory-sync）已分享編輯權。Lady/Baby 之後各建一張，用 SHOPEE_ANALYTICS_SHEET_IDS 加。
+SHOPEE_ANALYTICS_SHEET_IDS = {
+    "nail": os.environ.get(
+        "SHOPEE_ANALYTICS_SHEET_ID_NAIL", "1gsVt4ZDhEExs3aruBRiES8dB-hDPOXCX295OdQBOTPE"
+    ),
+}
+
 # Kkren（巧巧郎集運）中繼表【中繼】巧巧郎出貨狀態；抓已出貨→去重 append 到 Kkren_Data 分頁
 # 2-2 到貨表的 Kkren_DB 靠 IMPORTRANGE 此表 Kkren_Data。Kkren 登入態存 config/kkren_state.json。
 KKREN_SHEET_ID = os.environ.get("KKREN_SHEET_ID", "181lP-qkX-qu7Vd9FQGs3U452sHdU_-1TjE3khanXRm8")

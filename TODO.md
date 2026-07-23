@@ -1,7 +1,7 @@
 # TODO
 
 ## 高優先
-- [ ] #S098 ★蝦皮數據抓取首跑（Mac）：`python main.py shopee-login --shop nail` 登入美甲帳號（Windows 兩次逾時未完成）→ `python main.py shopee-collect --shop nail` 驗證三張表落地（raw + SQLite）
+- [x] 2026-07-23 #S098 ★蝦皮數據抓取首跑（Mac）：`shopee-login --shop nail` 登入成功（45 cookie）→ `shopee-collect --shop nail` 抓 7/22 全綠：商品 423/規格 994/大盤 1 列（confirmed $63,591、廣告佔 91.4%）→ raw + SQLite 落地驗證過
 - [ ] #S098 Edwin 建「蝦皮數據中心」Google Sheet 分享 SA（`inventory-sync@inventory-sync-493112.iam.gserviceaccount.com` 編輯權）→ `shopee-collect --sheet-id <ID>` 驗證 Sheet 落地
 - [ ] #S098 接 Mac daemon / cron 每天 10:30 自動 `shopee-collect`（抓前一天；Lady/Baby 之後各登入一份 cookie 同套程式）
 - [ ] #S098 model_id ↔ 商品選項貨號 對照（models 沒帶貨號，跟訂貨/庫存 join 需要）；歷史回填可先用 Downloads 的 parentskudetail/shop-stats 逐月匯出檔

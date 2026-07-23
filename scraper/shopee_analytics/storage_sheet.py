@@ -37,7 +37,12 @@ def _get_client():
     import gspread
     from google.oauth2.service_account import Credentials
 
-    raw = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"].strip()
+    raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    if not raw:
+        # 沒設環境變數就退回專案既有 SA 路徑（同 ordering 套件，inventory-sync SA）
+        from config import settings
+
+        raw = settings.ORDER_SHEET_SA_JSON
     if raw.startswith("{"):
         creds = Credentials.from_service_account_info(json.loads(raw), scopes=SCOPES)
     else:
@@ -55,15 +60,38 @@ def _ensure_ws(sh, title: str, header: list[str], rows: int = 2000):
     return ws
 
 
-def _delete_day_rows(ws, dt: str, shop: str) -> int:
-    """冪等：刪掉同日期+賣場的舊列（由下往上刪避免位移）。"""
+def _delete_day_rows(sh, ws, dt: str, shop: str) -> int:
+    """冪等：刪掉同日期+賣場的舊列。
+
+    ⚠️ 不能逐列 delete_rows（423 列＝423 次寫入 API → 必炸 429 quota）；
+    把要刪的列併成連續區間，一次 batch_update 刪完。
+    """
     values = ws.get_values("A:B")
     to_delete = [
-        i + 1 for i, row in enumerate(values)
+        i for i, row in enumerate(values)  # 0-based index
         if len(row) >= 2 and row[0] == dt and row[1] == shop
     ]
-    for idx in reversed(to_delete):
-        ws.delete_rows(idx)
+    if not to_delete:
+        return 0
+    # 併連續區間（如 [5,6,7,20,21] → [(5,8),(20,22)]，end exclusive）
+    ranges: list[tuple[int, int]] = []
+    start = prev = to_delete[0]
+    for idx in to_delete[1:]:
+        if idx == prev + 1:
+            prev = idx
+        else:
+            ranges.append((start, prev + 1))
+            start = prev = idx
+    ranges.append((start, prev + 1))
+    # 由下往上刪避免位移；全部塞進一次 batch_update
+    requests = [
+        {"deleteDimension": {"range": {
+            "sheetId": ws.id, "dimension": "ROWS",
+            "startIndex": s, "endIndex": e,
+        }}}
+        for s, e in sorted(ranges, reverse=True)
+    ]
+    sh.batch_update({"requests": requests})
     return len(to_delete)
 
 
@@ -74,7 +102,7 @@ def save(data: DayData, sheet_id: str) -> None:
 
     # 商品日報（按月分頁）
     ws = _ensure_ws(sh, f"商品日報_{data.dt:%Y%m}", PRODUCT_HEADER, rows=15000)
-    deleted = _delete_day_rows(ws, dt, data.shop)
+    deleted = _delete_day_rows(sh, ws, dt, data.shop)
     if deleted:
         logger.info(f"商品日報 冪等清除舊列 {deleted} 筆")
     rows = [[dt, data.shop] + [r.get(f, "") for f in PRODUCT_FIELDS] for r in data.products]
@@ -83,7 +111,7 @@ def save(data: DayData, sheet_id: str) -> None:
 
     # 大盤日報（按年分頁）
     ws2 = _ensure_ws(sh, f"大盤日報_{data.dt:%Y}", SHOP_HEADER, rows=400)
-    deleted = _delete_day_rows(ws2, dt, data.shop)
+    deleted = _delete_day_rows(sh, ws2, dt, data.shop)
     if deleted:
         logger.info(f"大盤日報 冪等清除舊列 {deleted} 筆")
     ws2.append_rows(
