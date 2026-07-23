@@ -692,5 +692,54 @@ def shopee_collect_cmd(shop: str, date_str: str | None, sheet_id: str | None,
     )
 
 
+@cli.command("shopee-collect-daily")
+@click.option("--date", "date_str", default=None, help="要抓的日期 YYYY-MM-DD（預設昨天）")
+@click.option("--data-dir", default="data/shopee_analytics", help="raw 快照與 SQLite 根目錄")
+def shopee_collect_daily_cmd(date_str: str | None, data_dir: str) -> None:
+    """每日排程入口：抓 settings.SHOPEE_ANALYTICS_SHEET_IDS 裡所有「已登入」賣場（10:30 排程跑這個）。
+
+    缺 cookie 的賣場自動略過（尚未登入）；session 過期會記 log 但不中斷其他賣場。
+    """
+    from datetime import date as _date
+
+    from config import settings as _settings
+
+    from scraper.shopee_analytics import storage_sheet, storage_sqlite
+    from scraper.shopee_analytics.client import ShopeeAPIError, ShopeeDataClient
+    from scraper.shopee_analytics.collector import collect_day, save_raw_snapshot, yesterday
+    from scraper.shopee_analytics.shopee_login import cookie_path_for
+
+    day = _date.fromisoformat(date_str) if date_str else yesterday()
+    db_path = Path(data_dir) / "shopee_analytics.db"
+    ran, skipped, failed = [], [], []
+    for shop, sheet_id in _settings.SHOPEE_ANALYTICS_SHEET_IDS.items():
+        cookie_path = cookie_path_for(shop)
+        if not cookie_path.exists():
+            logger.warning(f"[{shop}] 尚未登入（缺 {cookie_path.name}），略過")
+            skipped.append(shop)
+            continue
+        try:
+            with ShopeeDataClient(cookie_path) as client:
+                data = collect_day(client, shop, day)
+            save_raw_snapshot(data, data_dir)
+            storage_sqlite.save(data, db_path)
+            if sheet_id:
+                storage_sheet.save(data, sheet_id)
+            ran.append(shop)
+        except ShopeeAPIError as e:
+            if e.is_session_expired:
+                logger.error(f"[{shop}] session 過期，請重跑 shopee-login --shop {shop}")
+            else:
+                logger.error(f"[{shop}] API 錯誤：{e}")
+            failed.append(shop)
+        except Exception as e:  # noqa: BLE001 一店掛不影響其他店
+            logger.exception(f"[{shop}] 抓取失敗：{e}")
+            failed.append(shop)
+
+    click.echo(f"\n  ✓ {day} 每日抓取：成功 {ran or '—'} / 略過 {skipped or '—'} / 失敗 {failed or '—'}")
+    if failed:
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     cli()

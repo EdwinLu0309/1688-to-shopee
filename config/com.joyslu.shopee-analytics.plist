@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 蝦皮數據中心每日抓取排程。每天 10:30 抓「前一天」全店數據（商品/規格/大盤/廣告）→ Google Sheet。
+     蝦皮前一天資料要早上 10 點後才穩定，故排 10:30。抓所有已登入賣場（缺 cookie 自動略過）。
+     安裝：雙擊 run_shopee_analytics_install.command。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.joyslu.shopee-analytics</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/weilu/projects/1688-to-shopee/.venv/bin/python</string>
+        <string>main.py</string>
+        <string>shopee-collect-daily</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/weilu/projects/1688-to-shopee</string>
+
+    <!-- 每天 10:30 跑一次（非常駐；跑完就結束）。若 Mac 當下睡著，喚醒後 launchd 會補跑。 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/weilu/projects/1688-to-shopee/logs/shopee_analytics.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/weilu/projects/1688-to-shopee/logs/shopee_analytics.log</string>
+</dict>
+</plist>
