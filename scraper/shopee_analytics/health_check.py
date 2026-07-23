@@ -19,6 +19,12 @@ from loguru import logger
 
 DB_PATH = Path("data/shopee_analytics/shopee_analytics.db")
 
+# 【全】ERP 每日庫存紀錄（inventory-sync 專案的最終產出；01:00 Mac cron 撈 ERP → 02:00
+# Apps Script 匯入）。寬表一列一貨號、日期是欄頭（H 欄=最新、新→舊、保留 45 天），
+# 故「H1 欄頭 == 今天」= 整條鏈端到端成功。SA 同一份（inventory-sync）。
+ERP_SHEET_ID = "1KTGSgut9fpqr4xoHN42EpHo0321OUNbJSQv02cg1q08"
+ERP_WIDE_TAB = "庫存日記錄_寬表"
+
 
 @dataclass
 class CheckResult:
@@ -84,12 +90,31 @@ def check_shopee(day: date) -> list[CheckResult]:
     return results
 
 
+def check_erp() -> CheckResult:
+    """驗 ERP 庫存寬表最新日期欄（H1）是不是「今天」——是＝01:00 撈料+02:00 匯入整條鏈成功。
+
+    （1688 核對 daemon 不點名：Edwin 主動勾選觸發、當下就看得到結果，非被動排程。）
+    """
+    from .storage_sheet import _get_client
+
+    try:
+        ws = _get_client().open_by_key(ERP_SHEET_ID).worksheet(ERP_WIDE_TAB)
+        h1 = (ws.get_values("H1") or [[""]])[0][0].strip()
+    except Exception as e:  # noqa: BLE001
+        return CheckResult("ERP 庫存", False, f"讀取失敗：{e}")
+    today = date.today().isoformat()
+    if h1 == today:
+        return CheckResult("ERP 庫存", True, f"今日欄({h1})已更新")
+    return CheckResult("ERP 庫存", False, f"最新欄還停在 {h1 or '空'}（應為 {today}）")
+
+
 def run(day: date | None = None) -> bool:
     """跑所有點名 → 一則彙總通知。回傳整體是否全綠。"""
     day = day or (date.today() - timedelta(days=1))
     checks: list[CheckResult] = []
     checks += check_shopee(day)
-    # 之後加：ERP 庫存、1688 核對 daemon 心跳……（CHECKS 擴充點）
+    checks.append(check_erp())
+    # 之後加：其他每日作業……（擴充點）
 
     all_ok = all(c.ok for c in checks)
     lines = [f"{'✅' if c.ok else '❌'} {c.name}：{c.detail}" for c in checks]
