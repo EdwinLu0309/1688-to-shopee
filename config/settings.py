@@ -77,8 +77,12 @@ _SHOPEE_SHEET_IDS_RAW = {
     "nail": os.environ.get(
         "SHOPEE_ANALYTICS_SHEET_ID_NAIL", "1gsVt4ZDhEExs3aruBRiES8dB-hDPOXCX295OdQBOTPE"
     ),
-    "lady": os.environ.get("SHOPEE_ANALYTICS_SHEET_ID_LADY", ""),
-    "baby": os.environ.get("SHOPEE_ANALYTICS_SHEET_ID_BABY", ""),
+    "lady": os.environ.get(
+        "SHOPEE_ANALYTICS_SHEET_ID_LADY", "15x8461nM1G4rU82ur3Q9BPrHTxybEPJYT_HcgjcOjJM"
+    ),
+    "baby": os.environ.get(
+        "SHOPEE_ANALYTICS_SHEET_ID_BABY", "1SNkw4P1T2PMadrfzZWfzFHOI5y9DMBOg9Lg8tHm_Ppc"
+    ),
 }
 # 只保留有填 Sheet ID 的賣場（沒填的還沒建表，不進排程）
 SHOPEE_ANALYTICS_SHEET_IDS = {k: v for k, v in _SHOPEE_SHEET_IDS_RAW.items() if v}
