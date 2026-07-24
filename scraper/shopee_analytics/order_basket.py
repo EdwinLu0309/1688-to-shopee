@@ -145,18 +145,30 @@ def save_to_sheet(res: BasketResult, sheet_id: str, shop: str = "nail") -> None:
         ws.append_rows(new_rows, value_input_option="RAW")
     logger.info(f"訂單明細_累積：新增 {len(new_rows)} 列（去重後）")
 
-    # ② 商品聯動摘要（覆寫；basket 從累積明細算最準，這裡先放本批結果）
+    # ② 商品聯動摘要：從「累積所有月份」重算（每月帶入一份，樣本越多越準）
+    all_rows = ws.get_values("A:I")[1:]  # 含剛 append 的全部歷史
+    acc = [
+        OrderDetail(order_id=r[2], buyer="", date=r[0],
+                    status=r[8] if len(r) > 8 else "", pid=r[4], name=r[5], sku=r[6],
+                    qty=int(float(r[7])) if len(r) > 7 and r[7] else 1)
+        for r in all_rows if len(r) >= 8 and r[2]
+    ]
+    acc_res = analyze(acc)
+    dates = [r[0] for r in all_rows if r and r[0]]
+    span = f"{min(dates)} ~ {max(dates)}" if dates else "—"
+
     try:
         ws2 = sh.worksheet("商品聯動摘要")
         ws2.clear()
     except Exception:
         ws2 = sh.add_worksheet(title="商品聯動摘要", rows=200, cols=6)
-    block = [["【買 A 配 B — 最常一起買】", "", ""], ["商品 A", "商品 B", "共買訂單數"]]
-    block += [[a, b, n] for a, b, n in res.pairs]
+    block = [[f"涵蓋期間 {span}｜{acc_res.n_orders} 張訂單／{acc_res.n_products} 品項", "", ""]]
+    block += [["【買 A 配 B — 最常一起買】", "", ""], ["商品 A", "商品 B", "共買訂單數"]]
+    block += [[a, b, n] for a, b, n in acc_res.pairs]
     block += [["", "", ""], ["【常一次買多件】", "", ""], ["商品", "平均件數", "最多/訂單數"]]
-    block += [[name, round(avg, 1), f"{mx}/{cnt}"] for name, avg, cnt, mx in res.multibuy]
+    block += [[name, round(avg, 1), f"{mx}/{cnt}"] for name, avg, cnt, mx in acc_res.multibuy]
     ws2.update(values=block, range_name="A1", raw=True)
-    logger.info(f"商品聯動摘要：pairs {len(res.pairs)} + 多件 {len(res.multibuy)}")
+    logger.info(f"商品聯動摘要（累積 {span}）：pairs {len(acc_res.pairs)} + 多件 {len(acc_res.multibuy)}")
 
 
 def format_report(res: BasketResult) -> str:

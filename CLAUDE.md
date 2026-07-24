@@ -361,8 +361,13 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
   `com.joyslu.data-health.plist` 每天 11:00 **驗資料本身**（點名制，非聽作業回報）：蝦皮查 SQLite 有昨天資料、
   ERP 查【全】ERP庫存寬表 H1 欄頭＝今天（`ERP_SHEET_ID`）。結果跳 **macOS 對話框**（`alert_mac` 停螢幕不消失，
   比橫幅可靠）+ 寫「抓取狀態」分頁（歷史）。異常才補橫幅+提示音。1688 核對 daemon 不點名（主動勾選型）。
-- **待接**：訂單（商品聯動 basket 分析，走加密匯出檔非 API，同訂貨系統 `shopee_export.py` 解密）；Lady/Baby 各
-  `shopee-login` + 建 Sheet 加進 `SHOPEE_ANALYTICS_SHEET_IDS`；model_id ↔ 商品選項貨號 對照。
+- **★訂單商品聯動 basket（#S101，`order_basket.py`）＝每月一次半自動**（Edwin 定義，不每天抓——
+  basket 是慢變數 + 訂單報表含個資）：Edwin 每月匯出訂單報表（`Order.all.*.xlsx`，msoffcrypto 加密、
+  **密碼＝帳號手機末 6 碼**，美甲＝576137）丟過來 → `order-basket <報表> -P <密碼> --commit`。
+  解密只取訂單/商品/貨號/數量（**不碰個資欄**）、排除不成立單 → 落地 Sheet `訂單明細_累積`（去個資、
+  月 append 去重）+ `商品聯動摘要`（從累積所有月重算：買A配B共現 + 常買多件）。用商品ID 聚合到商品層。
+  ⚠️簡訊驗證只在「觸發下載」那步（Edwin 手機手動），讀已下載檔免簽章。
+- **待接**：Lady/Baby 各 `shopee-login` + 建 Sheet 加進 `SHOPEE_ANALYTICS_SHEET_IDS`；model_id ↔ 商品選項貨號 對照。
 
 ## 環境變數
 - `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py 用，標題+詳情）
