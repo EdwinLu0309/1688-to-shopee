@@ -71,11 +71,17 @@ COOKIE_PATH_NAIL = BASE_DIR / "config" / "cookies_nail.json"
 
 # 【Nail】蝦皮數據中心（#S098 每日抓取落地表：商品日報_YYYYMM + 大盤日報_YYYY）
 # SA（同 inventory-sync）已分享編輯權。Lady/Baby 之後各建一張，用 SHOPEE_ANALYTICS_SHEET_IDS 加。
-SHOPEE_ANALYTICS_SHEET_IDS = {
+#（#S101：三家 cookie 都已登入驗證過各抓各的；Lady/Baby 的 Sheet 待 Edwin 建好填 ID，
+#  填了排程就自動納入——`shopee-collect-daily` 是 loop 這個 dict 的已登入賣場。）
+_SHOPEE_SHEET_IDS_RAW = {
     "nail": os.environ.get(
         "SHOPEE_ANALYTICS_SHEET_ID_NAIL", "1gsVt4ZDhEExs3aruBRiES8dB-hDPOXCX295OdQBOTPE"
     ),
+    "lady": os.environ.get("SHOPEE_ANALYTICS_SHEET_ID_LADY", ""),
+    "baby": os.environ.get("SHOPEE_ANALYTICS_SHEET_ID_BABY", ""),
 }
+# 只保留有填 Sheet ID 的賣場（沒填的還沒建表，不進排程）
+SHOPEE_ANALYTICS_SHEET_IDS = {k: v for k, v in _SHOPEE_SHEET_IDS_RAW.items() if v}
 
 # Kkren（巧巧郎集運）中繼表【中繼】巧巧郎出貨狀態；抓已出貨→去重 append 到 Kkren_Data 分頁
 # 2-2 到貨表的 Kkren_DB 靠 IMPORTRANGE 此表 Kkren_Data。Kkren 登入態存 config/kkren_state.json。
