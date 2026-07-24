@@ -367,7 +367,12 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
   解密只取訂單/商品/貨號/數量（**不碰個資欄**）、排除不成立單 → 落地 Sheet `訂單明細_累積`（去個資、
   月 append 去重）+ `商品聯動摘要`（從累積所有月重算：買A配B共現 + 常買多件）。用商品ID 聚合到商品層。
   ⚠️簡訊驗證只在「觸發下載」那步（Edwin 手機手動），讀已下載檔免簽章。
-- **待接**：Lady/Baby 各 `shopee-login` + 建 Sheet 加進 `SHOPEE_ANALYTICS_SHEET_IDS`；model_id ↔ 商品選項貨號 對照。
+- **★三賣場全開（#S102 結案）**：nail/lady/baby 各一份 cookie + 各一張 Sheet（ID 在
+  `SHOPEE_ANALYTICS_SHEET_IDS`，**未填 ID 的賣場自動排除排程**）。實跑三家 0 失敗、資料零串台，
+  健康點名自動變四行（三家+ERP）。⚠️**蝦皮無切換賣場 API**（session 綁登入當下賣場）→ 一賣場一份
+  cookie 是唯一解；企業帳號可用（一組帳密切三次賣場登入）。**簡訊驗證/選賣場只在登入那一次**，
+  之後排程無頭直打 API 免驗證；cookie 長效，過期才重登（健康點名會抓到）。
+- **待接**：model_id ↔ 商品選項貨號 對照（models 沒帶貨號，跟訂貨/庫存 join 需要）。
 
 ## 環境變數
 - `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py 用，標題+詳情）

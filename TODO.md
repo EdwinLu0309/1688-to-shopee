@@ -6,7 +6,7 @@
 - [x] 2026-07-23 #S100 接 Mac 每天 10:30 自動抓：`shopee-collect-daily`（loop 所有已登入賣場，缺 cookie 略過、一店掛不影響其他）+ LaunchAgent `com.joyslu.shopee-analytics.plist`（StartCalendarInterval 10:30）+ `run_shopee_analytics_install.command`。已 load，下次觸發明早 10:30
 - [x] 2026-07-23 #S101 ★訂單商品聯動 basket 收尾（蝦皮數據最後一塊）：`order_basket.py` + CLI `order-basket -P <手機末6碼> --commit`；**定義為每月跑一次半自動**（不自動化，basket 慢變數+含個資）；落地 訂單明細_累積(去個資去重) + 商品聯動摘要(從累積算)。7/22 實測 151單，貓眼磁鐵+貓眼膠 11 單、AS方瓶均 11.3 件/單
 - [ ] #S101 每月流程：Edwin 匯出當月 `Order.all` 丟過來 → 跑 order-basket 帶入（累積越多月 basket 越準）
-- [ ] #S100 Lady/Baby 蝦皮數據：各 `shopee-login --shop lady/baby` + 建 Sheet 加進 `SHOPEE_ANALYTICS_SHEET_IDS`，排程自動納入
+- [x] 2026-07-24 #S102 ★Lady/Baby 蝦皮數據全開（**專案結案**）：三家各登入存 cookie + 各建 Sheet 填進 `SHOPEE_ANALYTICS_SHEET_IDS`；實跑三家 0 失敗（lady 271商品/432關鍵字、baby 264商品）、資料零串台、健康點名自動四行。蝦皮無切賣場 API→一賣場一 cookie；簡訊/選賣場只在登入那次
 - [ ] #S098 model_id ↔ 商品選項貨號 對照（models 沒帶貨號，跟訂貨/庫存 join 需要）；歷史回填可先用 Downloads 的 parentskudetail/shop-stats 逐月匯出檔
 - [x] 2026-07-13 #S084 ★金流核對「一鍵刷新」：`pending_scraper`（頁內 mtop `buyerOrderList` 抓 1688 待付款訂單）+ `reconcile_db`（覆蓋 1688_DB）+ `reconcile_pipeline`（dry-run/0筆防呆）+ `reconcile_gui.py` + CLI `reconcile-refresh`。待收貨 22 筆解析+臨時分頁寫入實測過
 - [ ] #S084 首次實跑 `reconcile-refresh --commit`：等 Edwin 下了當日批、有真待付款訂單時，眼睛核對覆蓋結果（目前帳號待付款=0）

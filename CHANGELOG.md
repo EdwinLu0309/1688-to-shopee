@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026-07-24（#S102：蝦皮數據三賣場全開 + 訂單商品聯動 — 專案結案）
+
+### 新增
+- **`order_basket.py` + CLI `order-basket`**：訂單商品聯動 basket 分析。解密蝦皮訂單報表
+  （msoffcrypto，**密碼＝帳號手機末 6 碼**）→「買 A 配 B」共現 + 「買它常一次買幾件」。
+  ⚠️含買家個資 → **只取訂單/商品/貨號/數量，個資欄（地址/電話/姓名）完全不落地**；排除不成立訂單。
+  落地 Sheet `訂單明細_累積`（月 append 去重）+ `商品聯動摘要`（**從累積所有月重算**，標涵蓋期間）。
+- **三賣場全開**：Lady/Baby 各登入存 cookie + 建 Sheet 填進 `SHOPEE_ANALYTICS_SHEET_IDS`
+  （未填 ID 的賣場自動排除排程，Edwin 補 ID 即自動納入）。
+
+### 定案
+- **訂單＝每月跑一次半自動**（Edwin 定義）：不自動化、不每天抓——basket 是慢變數，
+  且訂單報表含個資（蝦皮建議一週刪一次）。Edwin 每月匯出丟過來 → 跑 order-basket 帶入。
+- **蝦皮無切換賣場 API**（session 綁登入當下賣場）→ 一賣場一份 cookie 是唯一解。
+  企業帳號可用：一組帳密切三次賣場登入。**簡訊驗證/選賣場只在登入那一次**，之後抓取無頭免驗證。
+
+### 實測
+- 三賣場模擬 10:30 排程一次跑：**成功 nail/lady/baby、0 失敗**，Lady/Baby 6 分頁全自動建
+  （lady 商品271/規格295/廣告3/自動選品76/賣場關鍵字432；baby 商品264/規格117/廣告1/自動選品72）
+- 三家資料各落自己 Sheet 零串台；export 限流退避重試實戰接住一次
+- 健康點名自動變四行（三家+ERP），零改動（跟著 `SHOPEE_ANALYTICS_SHEET_IDS` 走）
+- 訂單首驗 7/22：151 單/136 品項；貓眼磁鐵＋XEIJAYI 貓眼 11 單、AS 質感方瓶均 11.3 件/單
+  （最多 46）——**與廣告 ROAS 16 贏家交叉印證**
+
+## 2026-07-23（#S101：蝦皮數據中心落地 — Mac 首跑 + 廣告全層 + 排程 + 健康點名）
+
+### 新增
+- **Mac 首跑落地**：`shopee-login`/`shopee-collect` 拿 cookie 抓全綠；SA 憑證 fallback
+  `ORDER_SHEET_SA_JSON`；Sheet 冪等刪舊列改 **batch_update 刪連續區間**（原逐列 delete 423 次炸 429）
+- **規格日報分頁 + 全中文表頭**（`_CN`/`_cn()`；`_ensure_ws` 表頭不符自動遷移）。「規格名稱」＝成本/毛利對帳 key
+- **廣告全層**：① 活動層 `POST pas/v1/homepage/query/`（**兩種 campaign_type 合併**
+  `cpc_homepage_v3`+`product_gms`，金額÷100000）② 大盤加廣告總計三欄 ③ **自動選品逐商品**
+  （`gms_detail.py`，UI 黑箱一列 → **export_job flow**：trigger→輪詢→download 回 CSV 全文）
+  ④ **賣場廣告逐關鍵字**（`shop_keyword.py`，`shop_manual__single_detail` 帶 campaign_id）
+- **每日排程**：LaunchAgent `com.joyslu.shopee-analytics.plist` 10:30 跑 `shopee-collect-daily`
+- **健康點名**（`health_check.py`）：LaunchAgent `com.joyslu.data-health.plist` 11:00
+  **點名制驗資料本身**（排程沒跑＝連失敗通知都沒有）→ macOS **對話框**（停螢幕，橫幅會秒消）
+  + Sheet「抓取狀態」分頁。含 ERP 寬表 H1 檢查。1688 核對 daemon 不點名（主動勾選型）
+
+### 踩坑 / 對帳
+- Edwin 對帳發現廣告總額缺 3,680.84 ＝自動選品獨立一塊 → 探得 `product_gms`，補上後
+  總花費 13,127.91／ROAS 4.51 與廣告頁**逐字一致**
+- ⚠️ export_job trigger 限流 `code=200 too many export requests` → 退避重試 15/30/45/60s + 活動間 sleep 8s
+- 對 trigger 送非法 report_type → API 吐完整枚舉（同 campaign_type 技巧）
+- 訂單 portal 頁擋 headless、API 8 變體全 404 → 改走加密匯出檔
+
 ## 2026-07-22（#S098：蝦皮數據中心每日抓取系統 — API 探勘 + 抓取套件落地）
 
 ### 新增
