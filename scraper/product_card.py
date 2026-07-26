@@ -333,6 +333,7 @@ def generate_asset_packs(
     use_master: bool = False,
     sa_json: str | Path | None = None,
     shop_subdir: bool = True,
+    force_analyze: bool = False,
 ) -> list[dict]:
     """批次產商品資產包。
 
@@ -394,25 +395,38 @@ def generate_asset_packs(
             counts = asyncio.run(_download_media(product, pack))
             logger.info(f"[{code}] 媒體下載：{counts}")
 
-        # vision 讀詳情圖 → 廠商賣點條列（存 廠商賣點.json，併進商品卡）
+        # 廠商賣點：一律先讀已存在的 廠商賣點.json（帶 Edwin 的手動修正進商品卡）。
+        # --analyze 只在「還沒有賣點檔」時才跑 vision；已存在就跳過保護（避免蓋掉修正）。
+        # 真要重跑 vision 覆寫 → force_analyze=True。
+        hl_path = pack / "廠商賣點.json"
         highlights = None
-        if analyze_highlights:
+        if hl_path.exists():
+            try:
+                highlights = json.loads(hl_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                logger.warning(f"[{code}] 廠商賣點.json 壞了：{e}")
+        if analyze_highlights and (highlights is None or force_analyze):
             imgs = _find_source_images(pack, item_id)
             if imgs:
                 try:
                     from scraper.auto_classify import extract_highlights
                     highlights = extract_highlights(imgs)
-                    (pack / "廠商賣點.json").write_text(
+                    hl_path.write_text(
                         json.dumps(highlights, ensure_ascii=False, indent=2), encoding="utf-8")
                     logger.info(f"[{code}] 廠商賣點 {len(highlights.get('highlights', []))} 條")
                 except Exception as e:
                     logger.warning(f"[{code}] 賣點解析失敗：{e}")
             else:
                 logger.warning(f"[{code}] 沒有圖片可解析賣點（先 --download-media 或跑 images）")
+        elif analyze_highlights and highlights is not None and not force_analyze:
+            logger.info(f"[{code}] 廠商賣點.json 已存在，跳過 vision（保護修正；要重跑加 --force-analyze）")
 
         (pack / "商品卡.md").write_text(
             build_card_markdown(product, code, highlights, supplier=supplier), encoding="utf-8")
-        shutil.copyfile(jf, pack / "raw.json")
+        # raw.json 只有「還沒有 或 有重抓新資料」才寫；預設不覆蓋（它是原始快照）
+        raw_path = pack / "raw.json"
+        if not raw_path.exists() or download_media:
+            shutil.copyfile(jf, raw_path)
 
         results.append({"item_id": item_id, "code": code, "dir": str(pack)})
         logger.info(f"[{code}] 資產包 → {pack}")

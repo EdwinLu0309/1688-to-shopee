@@ -637,10 +637,11 @@ def kkren_refresh(ctx: click.Context, since_days: int, commit: bool) -> None:
 @click.option("--master", "use_master", is_flag=True, help="用商品主表當編號/廠商來源（資料夾名＝主表商品編號，跨系統一致）")
 @click.option("--sa-json", default=None, help="主表 SA 憑證路徑（--master 用；預設自動找）")
 @click.option("--flat", is_flag=True, help="不加賣場子夾（out-base 已是某賣場的資產夾時用，如雲端 1.【Nail】）")
+@click.option("--force-analyze", is_flag=True, help="即使 廠商賣點.json 已存在也重跑 vision 覆寫（預設保護手動修正不重跑）")
 @click.pass_context
 def product_cards(ctx: click.Context, shop: str, json_dir: str, out_base: str | None,
                   ai_list: str | None, items: str, download_media: bool, analyze: bool,
-                  use_master: bool, sa_json: str | None, flat: bool) -> None:
+                  use_master: bool, sa_json: str | None, flat: bool, force_analyze: bool) -> None:
     """把每支商品整理成「商品資產包」：{賣場}/商品資產/{編號}/（純廠商固定事實商品卡 + 圖/影片/raw）。"""
     from scraper.product_card import generate_asset_packs
 
@@ -656,6 +657,7 @@ def product_cards(ctx: click.Context, shop: str, json_dir: str, out_base: str | 
         use_master=use_master,
         sa_json=sa_json,
         shop_subdir=not flat,
+        force_analyze=force_analyze,
     )
 
     click.echo("")
