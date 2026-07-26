@@ -427,7 +427,10 @@ def generate_asset_packs(
         m = master.get(item_id, {})
         code = m.get("code") or code_map.get(item_id, item_id)
         supplier = m.get("supplier", "")
-        pack = shop_dir / _sanitize(code)
+        name = m.get("name", "")  # 主表品名（AS_黑瓶功能膠）
+        # 資料夾名＝編號_品名（編號給 AI 對應、品名給人一眼認出是什麼商品）
+        folder = f"{code}_{name}" if name else code
+        pack = shop_dir / _sanitize(folder)
         for sub in ("基礎圖", "優化圖", "影片"):
             (pack / sub).mkdir(parents=True, exist_ok=True)
 
