@@ -634,9 +634,13 @@ def kkren_refresh(ctx: click.Context, since_days: int, commit: bool) -> None:
 @click.option("--items", default="", help="只產這些 item_id（逗號分隔，空=全部）")
 @click.option("--download-media", is_flag=True, help="順便下載 1688 圖片/影片進資產包（預設只產卡+raw+空夾）")
 @click.option("--analyze", is_flag=True, help="用 vision 讀詳情圖條列廠商賣點（需 OPENAI_API_KEY + 有圖；配 --download-media）")
+@click.option("--master", "use_master", is_flag=True, help="用商品主表當編號/廠商來源（資料夾名＝主表商品編號，跨系統一致）")
+@click.option("--sa-json", default=None, help="主表 SA 憑證路徑（--master 用；預設自動找）")
+@click.option("--flat", is_flag=True, help="不加賣場子夾（out-base 已是某賣場的資產夾時用，如雲端 1.【Nail】）")
 @click.pass_context
 def product_cards(ctx: click.Context, shop: str, json_dir: str, out_base: str | None,
-                  ai_list: str | None, items: str, download_media: bool, analyze: bool) -> None:
+                  ai_list: str | None, items: str, download_media: bool, analyze: bool,
+                  use_master: bool, sa_json: str | None, flat: bool) -> None:
     """把每支商品整理成「商品資產包」：{賣場}/商品資產/{編號}/（純廠商固定事實商品卡 + 圖/影片/raw）。"""
     from scraper.product_card import generate_asset_packs
 
@@ -649,6 +653,9 @@ def product_cards(ctx: click.Context, shop: str, json_dir: str, out_base: str | 
         item_ids=item_ids,
         download_media=download_media,
         analyze_highlights=analyze,
+        use_master=use_master,
+        sa_json=sa_json,
+        shop_subdir=not flat,
     )
 
     click.echo("")

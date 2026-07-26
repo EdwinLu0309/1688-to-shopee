@@ -434,6 +434,27 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
 蝦皮標題、8 區塊詳情、顏色簡繁對照、尺碼標籤、flags。`build_variants()` 用程式拼蝦皮二階規格選項名
 （`編號_簡稱_顏色` / 尺碼），確保精準不交給 LLM。大 SOP 走 Anthropic prompt cache。
 
+## ★商品資產包（product_card.py + master_reader.py，2026-07-26 #S103）
+標題/詳情**不系統化生成**（回網頁版 Chat 討論+二調）；系統只負責「記住商品」＝**每個商品一個
+可累積資料夾**放雲端硬碟（Chat 連接器直接讀）。`generate_asset_packs()` 產：
+```
+{賣場}/商品資產/{編號}/
+├── 商品卡.md      ← 100% 純廠商固定事實（一基本 二特徵 三選項規格 四基礎數據；動態編號）
+├── 廠商賣點.json  ← vision 讀詳情圖抓的賣點（可累積編輯）
+├── 基礎圖/(main/detail/sku) 優化圖/ 影片/ raw.json
+```
+- **主表驅動（`--master`）**：`master_reader.read_master()` 讀【Nail】1-1 商品主表「商品表」分頁
+  → 資料夾名＝**主表商品編號**（AAS1，跨訂貨/庫存一致）、廠商用主表（抓取常抓不到店名）。
+  SA 憑證自動找（env `ORDER_SHEET_SA_JSON` / settings / `~/OneDrive/文件/inventory-sync-*.json`）。
+- **軸命名通用化**：軸標題跟 1688 實際 attribute 走（甲油膠→顏色、光療燈→規格）；`_axis2_title`
+  只有像尺碼（S/M/L/斤）才叫「尺碼」，否則「規格/選項」——修美甲燈 52 型號被誤標尺碼。
+- **賣點解析（`--analyze`）**：`auto_classify.extract_highlights()` gpt-5.5 vision 讀詳情圖 →
+  條列廠商印在圖上的賣點/規格（屬性表抓不到的），過濾出貨備註/虛詞/重複。需 `OPENAI_API_KEY`+圖。
+- **繁體**：opencc `s2tw`（純字形，**不用 s2twp**——會誤換「項目→專案」「类型→型別」慣用詞）。
+- **售價/分類/文案**＝我方決策/會變動 → **不寫進商品卡**，從主表核對（Edwin 定調：卡只放固定事實）。
+- CLI：`product-cards --shop nail --master --flat --download-media --analyze --out-base "G:\…\商品資產"`
+  （`--flat`＝雲端已按賣場分夾時不再加 nail/ 子夾）。抓取無 cookie 也常成功（scrape_many）。
+
 ## 爬取方式說明
 1688 反爬嚴格（Playwright 即使用 channel="chrome" 仍被偵測），目前實際爬取是透過 Claude in Chrome MCP 在用戶已登入的 Chrome 中執行 JS 提取 DOM。Playwright 相關程式碼保留作為備用。
 

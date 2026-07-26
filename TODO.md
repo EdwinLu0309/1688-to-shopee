@@ -1,6 +1,10 @@
 # TODO
 
 ## 高優先
+- [x] 2026-07-26 #S103 ★商品資產包系統：`product_card.py`(generate_asset_packs) + `master_reader.py`(讀商品主表) + `auto_classify.extract_highlights`(vision 賣點) + CLI `product-cards --master --flat --download-media --analyze --out-base`。每商品一資料夾(商品卡.md 純廠商固定事實/廠商賣點.json/基礎圖/優化圖/影片/raw)、主表驅動編號、軸命名通用化、繁體 s2tw。AAS1 實測直接落地 Google Drive
+- [ ] #S103 ★批量跑主表 290 個有網址商品（抓取 + 產資產包到雲端；vision 費用/時間評估後分批）
+- [ ] #S103 資料源小問題：部分商品 attributes「颜色」欄混了廠商備註（如 AAS1「散拍数量备注色号：」）；`廠商賣點.json` 目前存簡體原文（商品卡.md 才繁體）——要不要 json 也繁體待 Edwin 定
+- [ ] #S103 這台公司 Windows `.env` 已補 `OPENAI_API_KEY`（賣點解析用）；SA 憑證在 `~/OneDrive/文件/`（master_reader 自動找）
 - [x] 2026-07-26 #S104 ★三賣場數據 AI 分析層 v1（分支 `feature/daily-analytics`）：`metrics/daily_report/signals/advisor/change_log/analysis/sheet_util` 七檔 + CLI `shopee-analyze` + 掛進 `shopee-collect-daily`。三塊＝每日戰報(8關鍵數×三賣場×昨比/週比) / AI店長顧問(跨表訊號→Claude白話→⚠️動作) / 改動追蹤日誌(改前後3/7天成效)。合成資料驗過純運算
 - [ ] #S104 ★**真實端到端在 Mac 跑第一版**：`shopee-analyze`（或等 10:30 `shopee-collect-daily` 自動帶）→ 開 Nail 數據表看三新分頁（每日戰報/AI店長顧問/改動追蹤日誌）→ Edwin 對螢幕核對數字對不對
 - [ ] #S104 Edwin 確認 8 個關鍵數要加/拿掉哪些（改 `metrics.METRICS`）；開改動追蹤日誌後當天開始填改動

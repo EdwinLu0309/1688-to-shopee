@@ -84,6 +84,43 @@ def classify_details(item: str, subdir: str = "detail") -> dict:
     return {"fullbody": fb, "sizechart": sc}
 
 
+def extract_highlights(image_paths: list, max_images: int = 10) -> dict:
+    """讀商品詳情圖 → 條列廠商印在圖上的「賣點/規格重點」（文字屬性表抓不到的）。
+
+    通用（女裝/美甲/3C 皆可）：燈珠數、功率、波長、容量、機能優勢、材質工藝、適用場景等。
+    逐張送（不用縮圖總表，才讀得清圖上小字）；回
+    {"highlights": ["72 顆雙排燈珠", "紅光不使手部顯黑", …], "specs": {"功率": "48W", …}}。
+    """
+    files = [Path(p) for p in image_paths if Path(p).exists()][:max_images]
+    if not files:
+        return {"highlights": [], "specs": {}}
+    prompt = (
+        "這是一個 1688 商品的詳情圖（同一件商品的多張）。請讀出廠商在圖片上主打的"
+        "「商品賣點與規格重點」——就是印在圖上、一般文字屬性表沒有的特色，例如：\n"
+        "· 規格數字（燈珠數/功率/波長/容量/尺寸/入數等）→ 放 specs\n"
+        "· 機能與優勢（如『紅光不使手部顯黑』『免洗封層』『速乾』『一秒定位』）→ 放 highlights\n"
+        "· 材質工藝、適用場景/對象、對比競品的優點 → 放 highlights\n\n"
+        "【務必過濾，不要收進來】：\n"
+        "· 出貨/物流備註（如『新舊款隨機發貨』『迭代過渡期』『拍前聯繫客服』『介意勿拍』）\n"
+        "· 空泛行銷虛詞（單獨的『全新升級』『更大空間』『高品質』『廠家直銷』這種沒有具體內容的）\n"
+        "· 純情緒字（『超值』『爆款』『熱賣』）\n"
+        "· 平台/店鋪/售後/發票相關\n\n"
+        "【要求】：每條賣點是**具體、獨立、可查證**的一句話；語意重複的合併成一條（如『大空間』"
+        "＋『可容納雙手』→ 合成一條『燈口寬敞可容納雙手照燈』）；具體數字盡量進 specs 不要重複進 highlights。"
+        "忠實照抄圖上文字、不腦補。回 JSON：\n"
+        '{"highlights": ["具體賣點1", "具體賣點2", …], "specs": {"規格項": "值"}}\n'
+        "highlights 控制在約 6-10 條精華；specs 放明確規格數字（找不到給空物件 {}）。"
+    )
+    content = [{"type": "input_text", "text": prompt}] + \
+              [{"type": "input_image", "image_url": _uri_file(p, cap=1100)} for p in files]
+    resp = client.responses.create(model="gpt-5.5",
+                                   input=[{"role": "user", "content": content}])
+    data = _json_from(getattr(resp, "output_text", "") or "")
+    data.setdefault("highlights", [])
+    data.setdefault("specs", {})
+    return data
+
+
 def read_size_chart(item: str, stem: str) -> dict:
     """讀尺碼表 → {product_type:'褲'|'裙', headers:[...], rows:[[...]], weight_jin:{size:'80-95'}}。"""
     p = Path(f"output/{item}/images/detail/{stem}.jpg")
