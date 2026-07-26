@@ -440,7 +440,7 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
 ```
 {賣場}/商品資產/{編號}/
 ├── 商品卡.md      ← 100% 純廠商固定事實（一基本 二特徵 三選項規格 四基礎數據；動態編號）
-├── 廠商賣點.json  ← vision 讀詳情圖抓的賣點（可累積編輯）
+├── 商品賣點.json  ← vision 讀詳情圖抓的賣點（可累積編輯）
 ├── 基礎圖/(main/detail/sku) 優化圖/ 影片/ raw.json
 ```
 - **主表驅動（`--master`）**：`master_reader.read_master()` 讀【Nail】1-1 商品主表「商品表」分頁

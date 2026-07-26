@@ -9,7 +9,7 @@
 ### 新增
 - **`scraper/product_card.py`**：商品資產包產生器 `generate_asset_packs()`。以「商品」為單位產
   `{賣場}/商品資產/{編號}/` 資料夾：`商品卡.md`（**100% 純廠商固定事實**：基本/特徵/選項規格/
-  基礎數據）+ `基礎圖/`（1688 原圖）+ `優化圖/` + `影片/` + `raw.json` + `廠商賣點.json`。
+  基礎數據）+ `基礎圖/`（1688 原圖）+ `優化圖/` + `影片/` + `raw.json` + `商品賣點.json`。
   - **軸命名通用化**：軸標題跟 1688 實際 attribute 走（美甲甲油膠→「顏色」、光療燈→「規格」），
     非服飾不硬叫「尺碼」（`_axis2_title`：有斤/像尺碼才叫尺碼，否則「規格/選項」）。
   - **簡轉繁**：opencc `s2tw`（純字形，不用 s2twp 免誤換「項目→專案」慣用詞）。
@@ -19,8 +19,12 @@
   代表網址→item_id。SA 憑證自動找（env/settings/OneDrive fallback）。靠表頭名稱對應防欄位搬動。
 - **`auto_classify.extract_highlights()`**：gpt-5.5 vision 讀詳情圖 → 條列廠商印在圖上的
   **賣點/規格重點**（燈珠數/功率/機能優勢…屬性表抓不到的）。prompt 過濾出貨備註/虛詞/重複、
-  規格數字進 specs、控 6-10 條精華。存 `廠商賣點.json` + 併進商品卡「廠商重點（圖片解析）」區。
-- **main.py `product-cards`**：`--shop --master --flat --download-media --analyze --out-base`。
+  規格數字進 specs、控 6-10 條精華。存 `商品賣點.json` + 併進商品卡「商品賣點」區。
+- **覆寫保護 + 使用說明**：`商品賣點.json` 是可累積編輯的活檔——重產一律先讀它帶進卡；
+  `--analyze` 只在賣點檔還沒有時跑 vision（`--force-analyze` 才強制覆寫），`raw.json` 也不亂蓋。
+  `write_usage_doc` 在「商品資產」根寫 `_使用說明.md`（給網頁版 Chat 讀懂協作流程：討論好→問是否
+  覆寫商品賣點.json→重產商品卡）。**「廠商賣點」更名「商品賣點」**（含我們自己的見解，非廠商獨有）。
+- **main.py `product-cards`**：`--shop --master --flat --download-media --analyze --force-analyze --out-base`。
   `--master` 主表驅動、`--flat` 不加賣場子夾（雲端已分賣場）、`--analyze` 跑 vision 賣點。
 
 ### 實測（真實 1688 抓取，無 cookie 也成功）

@@ -3,12 +3,15 @@
 
 定位（2026-07-26 #S103 定案，全賣場通用）：
 - **資產包 = 一個商品一個資料夾**，放在雲端硬碟（Google Drive，網頁版 Chat 的連接器直接讀）：
-    {賣場}/商品資產/{編號}/
-    ├── 商品卡.md      ← 本模組產：**100% 純廠商固定事實**（編號 + 1688 抓來的東西）
-    ├── 基礎圖/        ← 1688 原圖（下載進來）
-    ├── 優化圖/        ← 自己/GPT 做好的（汰換 1688 爛圖；本模組只建空夾）
-    ├── 影片/          ← 1688 影片
-    └── raw.json       ← 1688 原始抓取 JSON（數據源頭）
+    {賣場}/商品資產/
+    ├── _使用說明.md   ← 給網頁版 Chat 讀的協作說明（write_usage_doc）
+    └── {編號}/
+        ├── 商品卡.md    ← 本模組產：**100% 純廠商固定事實**＋商品賣點（產物，別直接改）
+        ├── 商品賣點.json ← 賣點與重點（AI 讀圖初稿＋我們的見解；★可累積編輯的活檔）
+        ├── 基礎圖/      ← 1688 原圖（下載進來）
+        ├── 優化圖/      ← 自己/GPT 做好的（汰換 1688 爛圖；本模組只建空夾）
+        ├── 影片/        ← 1688 影片
+        └── raw.json     ← 1688 原始抓取 JSON（源頭底料）
 - **商品卡只放固定事實**：會變動 / 我方決策的東西一律不寫進來——
     · 售價、蝦皮分類 ID（我方上架決策）→ 從商品主表核對，不寫死
     · 文案（Chat 生成、會二調）→ 之後有自己的資產位置
@@ -43,6 +46,40 @@ def _to_tw(text: str) -> str:
         except Exception:
             _cc = False
     return _cc.convert(text) if _cc else text
+
+
+# 給網頁版 Chat 讀的使用說明（寫在「商品資產」根目錄；每次產包時刷新）。
+USAGE_DOC = """# 商品資產包 — 使用說明（給網頁版 Chat 先讀我）
+
+每個子資料夾＝一個商品的資產包，**資料夾名＝商品編號**（如 `AAS1`）。
+
+## 資料夾裡有什麼
+| 檔案 | 是什麼 | 能不能改 |
+|---|---|---|
+| `商品卡.md` | 給人／你(Chat)讀的**成品**：純廠商固定事實（基本／特徵／選項／基礎數據）＋商品賣點 | ❌ **產物，別直接改**（重產會蓋掉） |
+| `商品賣點.json` | 這個商品的**賣點與重點**（AI 讀詳情圖的初稿＋我們自己的見解） | ✅ **可以一直養的活檔，要改就改這個** |
+| `raw.json` | 1688 原始抓取資料（源頭底料） | ❌ 只有重抓才更新 |
+| `基礎圖/ 優化圖/ 影片/` | 圖片影片檔案 | 圖歸圖，不影響卡 |
+
+## 你(Chat)該怎麼跟我(Edwin)協作 ★重要
+1. 我會拿 `商品卡.md` 跟你討論標題／詳情／賣點。
+2. 只要討論到**商品賣點有要修正或新增**（改掉不對的、補上我們自己的見解或客服常問點）：
+   → **請主動問我：「要不要把這些更新直接覆寫進 `商品賣點.json`？」**
+3. 我說「要」→ 你就產出**新版 `商品賣點.json` 的完整內容**（格式：`{"highlights": [...], "specs": {...}}`）給我覆寫。
+4. `商品賣點.json` 一旦更新 → **`商品卡.md` 要跟著重生**：
+   - 你可以照 `商品卡.md` 既有格式，用 `raw.json` ＋ 新版 `商品賣點.json` **重寫一份 `商品卡.md`** 給我；
+   - 或提醒我回 CLI 跑 `python main.py product-cards --master --flat --items <編號> --out-base "<這個賣場的商品資產夾>"` 重產。
+
+## 鐵則
+- 修正**只寫進 `商品賣點.json`**（活檔）。**不要改 `商品卡.md`**（產物）、不要改 `raw.json`（源頭）。
+- 重產有保護：跑 `--analyze` 時若 `商品賣點.json` 已存在會**跳過 AI、保護你的修正**（要 AI 重讀圖才加 `--force-analyze`）。
+"""
+
+
+def write_usage_doc(root: Path) -> None:
+    """在「商品資產」根目錄寫／刷新使用說明（給 Chat 讀）。"""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "_使用說明.md").write_text(USAGE_DOC, encoding="utf-8")
 
 
 def _jin_to_kg(text: str) -> str:
@@ -192,12 +229,12 @@ def build_card_markdown(product: dict, code: str, highlights: dict | None = None
         L.append("（無屬性資料）")
     L.append("")
 
-    # 三、廠商重點（vision 解析詳情圖，賣點藏在圖裡、屬性表抓不到）
+    # 三、商品賣點（vision 解析詳情圖，賣點藏在圖裡、屬性表抓不到）
     highlights = highlights or {}
     hl = highlights.get("highlights") or []
     specs = highlights.get("specs") or {}
     if hl or specs:
-        L.append(sec("廠商重點（圖片解析）"))
+        L.append(sec("商品賣點（AI 讀圖＋我們的見解）"))
         for h in hl:
             L.append(f"- {h}")
         if specs:
@@ -282,6 +319,8 @@ def build_card_markdown(product: dict, code: str, highlights: dict | None = None
     L.append("---")
     L.append(f"> 📁 圖片影片見本資料夾：`基礎圖/`（主圖 {n_main}／細節 {n_detail}）、"
              f"`優化圖/`、`影片/`（{'有' if has_video else '無'}）")
+    L.append("> ✏️ 要改賣點/重點 → 改本資料夾的 `商品賣點.json`（活檔），再重產本卡；"
+             "別直接改本檔（產物會被覆蓋）。用法見同層 `_使用說明.md`。")
     L.append("")
 
     # 整卡簡轉繁（台灣用語）；URL/編號是英數不受影響
@@ -344,7 +383,7 @@ def generate_asset_packs(
         ai_list_csv:        AI 名單 CSV（只為對編號；預設 input/lady_ai_list.csv 若存在）
         item_ids:           只產這些 item_id（None = 全部）
         download_media:     是否下載 1688 圖片/影片進資產包（預設 False，先只產卡+raw+空夾）
-        analyze_highlights: 是否用 vision 讀詳情圖條列廠商賣點（需 OPENAI_API_KEY + 有圖）
+        analyze_highlights: 是否用 vision 讀詳情圖條列商品賣點（需 OPENAI_API_KEY + 有圖）
         use_master:         用商品主表當編號/廠商來源（資料夾名＝主表商品編號，跨系統一致）
         sa_json:            主表 SA 憑證路徑（use_master 時用；預設自動找）
 
@@ -358,6 +397,7 @@ def generate_asset_packs(
     # 雲端已按賣場分夾（1.【Nail】）→ --flat 不再加 nail/ 子夾；本機預設加
     shop_dir = out_base / shop if shop_subdir else out_base
     shop_dir.mkdir(parents=True, exist_ok=True)
+    write_usage_doc(shop_dir)  # 給 Chat 讀的使用說明，跟各商品資料夾放一起
 
     # 編號來源：主表（權威，含廠商/分類）優先，否則退 AI 名單 CSV
     master: dict[str, dict] = {}
@@ -395,16 +435,16 @@ def generate_asset_packs(
             counts = asyncio.run(_download_media(product, pack))
             logger.info(f"[{code}] 媒體下載：{counts}")
 
-        # 廠商賣點：一律先讀已存在的 廠商賣點.json（帶 Edwin 的手動修正進商品卡）。
+        # 商品賣點：一律先讀已存在的 商品賣點.json（帶 Edwin 的手動修正進商品卡）。
         # --analyze 只在「還沒有賣點檔」時才跑 vision；已存在就跳過保護（避免蓋掉修正）。
         # 真要重跑 vision 覆寫 → force_analyze=True。
-        hl_path = pack / "廠商賣點.json"
+        hl_path = pack / "商品賣點.json"
         highlights = None
         if hl_path.exists():
             try:
                 highlights = json.loads(hl_path.read_text(encoding="utf-8"))
             except Exception as e:
-                logger.warning(f"[{code}] 廠商賣點.json 壞了：{e}")
+                logger.warning(f"[{code}] 商品賣點.json 壞了：{e}")
         if analyze_highlights and (highlights is None or force_analyze):
             imgs = _find_source_images(pack, item_id)
             if imgs:
@@ -413,13 +453,13 @@ def generate_asset_packs(
                     highlights = extract_highlights(imgs)
                     hl_path.write_text(
                         json.dumps(highlights, ensure_ascii=False, indent=2), encoding="utf-8")
-                    logger.info(f"[{code}] 廠商賣點 {len(highlights.get('highlights', []))} 條")
+                    logger.info(f"[{code}] 商品賣點 {len(highlights.get('highlights', []))} 條")
                 except Exception as e:
                     logger.warning(f"[{code}] 賣點解析失敗：{e}")
             else:
                 logger.warning(f"[{code}] 沒有圖片可解析賣點（先 --download-media 或跑 images）")
         elif analyze_highlights and highlights is not None and not force_analyze:
-            logger.info(f"[{code}] 廠商賣點.json 已存在，跳過 vision（保護修正；要重跑加 --force-analyze）")
+            logger.info(f"[{code}] 商品賣點.json 已存在，跳過 vision（保護修正；要重跑加 --force-analyze）")
 
         (pack / "商品卡.md").write_text(
             build_card_markdown(product, code, highlights, supplier=supplier), encoding="utf-8")
