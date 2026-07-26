@@ -30,27 +30,33 @@ class AnalysisResult:
     digest: str
 
 
-def run_analysis(day: date, db_path: str | Path, dashboard_sheet_id: str,
-                 with_ai: bool = True) -> AnalysisResult:
-    logger.info(f"分析層開跑（資料日 {day}）→ Sheet {dashboard_sheet_id}")
+def run_analysis(day: date, db_path: str | Path, dashboard_sheet_id: str | None = None,
+                 with_ai: bool = True, to_supabase: bool = False) -> AnalysisResult:
+    """算三賣場分析 → 寫 Sheet（給 sheet_id 才寫）與/或 Supabase（網頁版）。"""
+    logger.info(f"分析層開跑（資料日 {day}）"
+                + (f"→ Sheet {dashboard_sheet_id}" if dashboard_sheet_id else "")
+                + ("＋Supabase" if to_supabase else ""))
     report = compute_report(db_path, day)
 
-    sh = open_sheet(dashboard_sheet_id)
-
-    # 1) 每日戰報
-    daily_report.write_report(sh, report)
-
-    # 2) AI 店長顧問
+    # AI 店長顧問（Sheet 與 Supabase 共用同一份）
     sigs = [extract_signals(db_path, sr.shop, sr.name, day, sr)
             for sr in report.shops if sr.has_data]
     digest = advisor.build_digest(report, sigs)
     advice = advisor.generate_advice(digest) if with_ai else advisor._fallback(digest)
-    advisor.write_advisor(sh, day, advice)
 
-    # 3) 改動追蹤日誌（掃 Edwin 填的列，算前後成效）
-    change_log.update_change_log(sh, db_path, today=date.today())
+    # A) Google Sheet 版（可選）
+    if dashboard_sheet_id:
+        sh = open_sheet(dashboard_sheet_id)
+        daily_report.write_report(sh, report)
+        advisor.write_advisor(sh, day, advice)
+        change_log.update_change_log(sh, db_path, today=date.today())
 
-    logger.info("分析層完成（戰報 + 顧問 + 改動追蹤）")
+    # B) 網頁版 → Supabase（可選）
+    if to_supabase:
+        from . import storage_supabase
+        storage_supabase.write_all(report, day, advice, db_path)
+
+    logger.info("分析層完成")
     return AnalysisResult(report=report, advice=advice, digest=digest)
 
 

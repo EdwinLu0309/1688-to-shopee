@@ -92,6 +92,12 @@ SHOPEE_ANALYTICS_SHEET_IDS = {k: v for k, v in _SHOPEE_SHEET_IDS_RAW.items() if 
 # 之後 Edwin 建一張獨立的彙整表、分享給同一 SA，再把 ID 填這裡（或設 env）即改寫過去。
 SHOPEE_DASHBOARD_SHEET_ID = os.environ.get("SHOPEE_DASHBOARD_SHEET_ID", "")
 
+# 網頁版（#S104）：分析結果寫進 personal-os-dashboard 的 Supabase（shopee schema）。
+# 這是 dashboard 的專案（ptaoxxbnpyitbrrlqust），與 GPT 生圖圖床的 Supabase 不同 → 各一組。
+# service key 走 service_role（bypass RLS）；兩者都設才會寫 Supabase，否則自動略過。
+POS_SUPABASE_URL = os.environ.get("POS_SUPABASE_URL", "")
+POS_SUPABASE_SERVICE_KEY = os.environ.get("POS_SUPABASE_SERVICE_KEY", "")
+
 # Kkren（巧巧郎集運）中繼表【中繼】巧巧郎出貨狀態；抓已出貨→去重 append 到 Kkren_Data 分頁
 # 2-2 到貨表的 Kkren_DB 靠 IMPORTRANGE 此表 Kkren_Data。Kkren 登入態存 config/kkren_state.json。
 KKREN_SHEET_ID = os.environ.get("KKREN_SHEET_ID", "181lP-qkX-qu7Vd9FQGs3U452sHdU_-1TjE3khanXRm8")

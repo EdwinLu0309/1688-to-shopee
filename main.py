@@ -626,6 +626,40 @@ def kkren_refresh(ctx: click.Context, since_days: int, commit: bool) -> None:
         click.echo("\n👉 確認無誤後加 --commit 寫入 Kkren_Data")
 
 
+@cli.command("product-cards")
+@click.option("--shop", default="nail", help="賣場代號（nail/lady/baby）→ 分子夾")
+@click.option("--json-dir", "-j", type=click.Path(exists=True), default="output", help="放 {item_id}.json 的目錄")
+@click.option("--out-base", "-o", type=click.Path(), default=None, help="資產根目錄（預設 {json-dir}/商品資產；指向 G:\\ 雲端即直接落地）")
+@click.option("--ai-list", type=click.Path(exists=True), default=None, help="AI 名單 CSV（只為對編號；預設 input/lady_ai_list.csv 若存在）")
+@click.option("--items", default="", help="只產這些 item_id（逗號分隔，空=全部）")
+@click.option("--download-media", is_flag=True, help="順便下載 1688 圖片/影片進資產包（預設只產卡+raw+空夾）")
+@click.option("--analyze", is_flag=True, help="用 vision 讀詳情圖條列廠商賣點（需 OPENAI_API_KEY + 有圖；配 --download-media）")
+@click.pass_context
+def product_cards(ctx: click.Context, shop: str, json_dir: str, out_base: str | None,
+                  ai_list: str | None, items: str, download_media: bool, analyze: bool) -> None:
+    """把每支商品整理成「商品資產包」：{賣場}/商品資產/{編號}/（純廠商固定事實商品卡 + 圖/影片/raw）。"""
+    from scraper.product_card import generate_asset_packs
+
+    item_ids = [s.strip() for s in items.split(",") if s.strip()] if items else None
+    results = generate_asset_packs(
+        json_dir=Path(json_dir),
+        shop=shop,
+        out_base=Path(out_base) if out_base else None,
+        ai_list_csv=Path(ai_list) if ai_list else None,
+        item_ids=item_ids,
+        download_media=download_media,
+        analyze_highlights=analyze,
+    )
+
+    click.echo("")
+    if not results:
+        click.echo(f"  {json_dir} 中找不到 {{item_id}}.json，先抓取商品再產資產包")
+        sys.exit(1)
+    for r in results:
+        click.echo(f"    ✓ {r['code']} → {r['dir']}")
+    click.echo(f"\n  共 {len(results)} 個資產包 → {Path(results[0]['dir']).parent}\n")
+
+
 # ── 蝦皮數據中心每日抓取（scraper/shopee_analytics/，詳見 docs/shopee_analytics_api.md）──
 
 @cli.command("shopee-login")
@@ -773,11 +807,8 @@ def shopee_collect_daily_cmd(date_str: str | None, data_dir: str) -> None:
         try:
             from scraper.shopee_analytics.analysis import dashboard_sheet_id, run_analysis
 
-            sid = dashboard_sheet_id()
-            if sid:
-                run_analysis(day, db_path, sid, with_ai=True)
-            else:
-                logger.warning("沒有可寫的戰報 Sheet（SHOPEE_DASHBOARD_SHEET_ID 與 nail 表都空），略過分析層")
+            sid = dashboard_sheet_id()   # 有就一起寫 Sheet；沒有也會寫 Supabase（網頁版）
+            run_analysis(day, db_path, sid, with_ai=True, to_supabase=True)
         except Exception as e:  # noqa: BLE001 分析層掛不該擋抓取通知
             logger.exception(f"分析層失敗（抓取本身已完成）：{e}")
 
@@ -797,26 +828,45 @@ def shopee_collect_daily_cmd(date_str: str | None, data_dir: str) -> None:
 @click.option("--date", "date_str", default=None, help="資料日期 YYYY-MM-DD（預設昨天）")
 @click.option("--sheet-id", default=None, help="戰報 Sheet ID（預設 settings 或 nail 表）")
 @click.option("--no-ai", is_flag=True, help="不呼叫 Claude，AI 顧問走規則版")
+@click.option("--from-sheets", is_flag=True,
+              help="讀雲端 Sheet（免本機 SQLite；沒抓取過的機器如公司 Windows 用這個）")
+@click.option("--no-sheet", is_flag=True, help="不寫 Google Sheet（只寫 Supabase 網頁版）")
+@click.option("--supabase/--no-supabase", "to_supabase", default=True,
+              help="寫進 dashboard 的 Supabase（網頁版；預設開，未設 POS_SUPABASE_* 會自動略過）")
 @click.option("--data-dir", default="data/shopee_analytics", help="SQLite 根目錄")
-def shopee_analyze_cmd(date_str: str | None, sheet_id: str | None,
-                       no_ai: bool, data_dir: str) -> None:
-    """三賣場分析層：讀 SQLite → 寫每日戰報 + AI 店長顧問 + 改動追蹤日誌（不重抓）。"""
+def shopee_analyze_cmd(date_str: str | None, sheet_id: str | None, no_ai: bool,
+                       from_sheets: bool, no_sheet: bool, to_supabase: bool,
+                       data_dir: str) -> None:
+    """三賣場分析層：讀資料 → 寫戰報/顧問/改動追蹤（Google Sheet ＋/或 網頁版 Supabase）。
+
+    預設讀本機 SQLite（Mac daemon 產）；`--from-sheets` 改讀雲端 Sheet（Windows 免 DB）。
+    """
     from datetime import date as _date
+
+    from config import settings as _settings
 
     from scraper.shopee_analytics.analysis import dashboard_sheet_id, run_analysis
     from scraper.shopee_analytics.collector import yesterday
 
     day = _date.fromisoformat(date_str) if date_str else yesterday()
-    sid = sheet_id or dashboard_sheet_id()
-    if not sid:
-        click.echo("  ✗ 沒有戰報 Sheet ID（設 SHOPEE_DASHBOARD_SHEET_ID 或 nail 表）")
-        sys.exit(1)
-    db_path = Path(data_dir) / "shopee_analytics.db"
-    if not db_path.exists():
-        click.echo(f"  ✗ 找不到 {db_path}（這台還沒抓過蝦皮資料？先跑 shopee-collect）")
+    sid = None if no_sheet else (sheet_id or dashboard_sheet_id())
+    if not sid and not to_supabase:
+        click.echo("  ✗ 沒有輸出目標（Sheet 或 Supabase 至少一個）")
         sys.exit(1)
 
-    res = run_analysis(day, db_path, sid, with_ai=not no_ai)
+    if from_sheets:
+        from scraper.shopee_analytics.sheet_source import hydrate
+
+        click.echo("  讀雲端 Sheet 中…（三賣場大盤/商品/廣告日報）")
+        db_path = hydrate(Path(data_dir) / "_from_sheets.db", day,
+                          _settings.SHOPEE_ANALYTICS_SHEET_IDS)
+    else:
+        db_path = Path(data_dir) / "shopee_analytics.db"
+        if not db_path.exists():
+            click.echo(f"  ✗ 找不到 {db_path}（這台沒抓過蝦皮資料）→ 加 --from-sheets 改讀雲端表")
+            sys.exit(1)
+
+    res = run_analysis(day, db_path, sid, with_ai=not no_ai, to_supabase=to_supabase)
     click.echo(f"\n  ✓ {day} 分析完成 → Sheet {sid}")
     click.echo(f"    今天一句話：{res.advice.one_liner}")
     if res.advice.action_needed:

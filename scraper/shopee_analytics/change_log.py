@@ -168,25 +168,29 @@ def _fmt_pct(p):
     return f"{'+' if p >= 0 else ''}{p*100:.1f}%"
 
 
-def _compute_row(con, ch: Change, today: date) -> list:
-    """算某一列的系統欄 G..O（8 欄）。"""
+def compute_change(con, ch: Change, today: date) -> dict:
+    """算一筆改動的系統欄（回傳原始數值 dict，Sheet 版與 Supabase 版共用）。
+
+    key：track_note / before3 / after3 / pct3 / before7 / after7 / pct7 / verdict / kind
+    （數值欄可能 None；kind＝指標型別給呈現端格式化用；error 時只有 track_note）
+    """
+    blank = {"track_note": "", "before3": None, "after3": None, "pct3": None,
+             "before7": None, "after7": None, "pct7": None, "verdict": "", "kind": None}
     if ch.change_day is None:
-        return ["⚠️ 改動日格式錯誤", "", "", "", "", "", "", ""]
+        return {**blank, "track_note": "⚠️ 改動日格式錯誤"}
     if ch.shop is None:
-        return ["⚠️ 賣場無法辨識（填 美甲/女裝/嬰幼）", "", "", "", "", "", "", ""]
+        return {**blank, "track_note": "⚠️ 賣場無法辨識（填 美甲/女裝/嬰幼）"}
     if ch.metric_key is None:
-        return ["⚠️ 指標無法對應（填 成交額/轉換率/CTR/ROAS…）", "", "", "", "", "", "", ""]
+        return {**blank, "track_note": "⚠️ 指標無法對應（填 成交額/轉換率/CTR/ROAS…）"}
 
     pid = None
-    t = ch.target.strip()
+    t = (ch.target or "").strip()
     if t and t.isdigit():
-        # 對象是商品ID：確認該商品有資料
         exists = con.execute(
             "SELECT 1 FROM product_daily WHERE shop=? AND id=? LIMIT 1", (ch.shop, int(t))
         ).fetchone()
         if exists:
             pid = int(t)
-    # ad_* 指標在商品層拿不到 → 退回整店
     m = _metric_fn(ch.metric_key)
     note = ""
     if pid and ch.metric_key in ("ad_cost", "ad_roi", "ad_share"):
@@ -203,13 +207,21 @@ def _compute_row(con, ch: Change, today: date) -> list:
     pct3 = _pct(before3, after3)
     pct7 = _pct(before7, after7)
     status = f"追蹤中{note}" if ad3 >= MIN_AFTER_DAYS else f"資料累積中 {ad3}/{MIN_AFTER_DAYS} 天{note}"
-    verdict = _judge(pct3, m.direction, ad3)
+    return {"track_note": status, "before3": before3, "after3": after3, "pct3": pct3,
+            "before7": before7, "after7": after7, "pct7": pct7,
+            "verdict": _judge(pct3, m.direction, ad3), "kind": m.kind}
+
+
+def _compute_row(con, ch: Change, today: date) -> list:
+    """算某一列的系統欄 G..O（8 欄，Sheet 用；格式化字串）。"""
+    d = compute_change(con, ch, today)
+    kind = d["kind"]
 
     def f(v):
-        return M.fmt_value(v, m.kind) if v is not None else "—"
+        return M.fmt_value(v, kind) if (v is not None and kind) else "—"
 
-    return [status, f(before3), f(after3), _fmt_pct(pct3),
-            f(before7), f(after7), _fmt_pct(pct7), verdict,
+    return [d["track_note"], f(d["before3"]), f(d["after3"]), _fmt_pct(d["pct3"]),
+            f(d["before7"]), f(d["after7"]), _fmt_pct(d["pct7"]), d["verdict"],
             datetime.now().strftime("%Y-%m-%d %H:%M")]
 
 
