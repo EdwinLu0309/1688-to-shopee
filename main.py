@@ -767,6 +767,20 @@ def shopee_collect_daily_cmd(date_str: str | None, data_dir: str) -> None:
 
     click.echo(f"\n  ✓ {day} 每日抓取：成功 {ran or '—'} / 略過 {skipped or '—'} / 失敗 {failed or '—'}")
 
+    # 三家抓完 → 接著跑分析層（每日戰報 + AI 店長顧問 + 改動追蹤日誌）。
+    # 只要有任一家成功就跑（讀 SQLite 重算，缺的賣場戰報以「—」呈現）。失敗不擋通知。
+    if ran:
+        try:
+            from scraper.shopee_analytics.analysis import dashboard_sheet_id, run_analysis
+
+            sid = dashboard_sheet_id()
+            if sid:
+                run_analysis(day, db_path, sid, with_ai=True)
+            else:
+                logger.warning("沒有可寫的戰報 Sheet（SHOPEE_DASHBOARD_SHEET_ID 與 nail 表都空），略過分析層")
+        except Exception as e:  # noqa: BLE001 分析層掛不該擋抓取通知
+            logger.exception(f"分析層失敗（抓取本身已完成）：{e}")
+
     # 跑完即時通知（macOS 通知中心）；11:00 健康點名另有獨立保險網
     from scraper.shopee_analytics.health_check import notify_mac
 
@@ -777,6 +791,38 @@ def shopee_collect_daily_cmd(date_str: str | None, data_dir: str) -> None:
     notify_mac(f"📊 蝦皮數據抓取完成（{day:%m/%d}）",
                f"成功：{', '.join(ran) or '無'}" + (f"；未登入略過：{', '.join(skipped)}" if skipped else ""),
                sound=False)
+
+
+@cli.command("shopee-analyze")
+@click.option("--date", "date_str", default=None, help="資料日期 YYYY-MM-DD（預設昨天）")
+@click.option("--sheet-id", default=None, help="戰報 Sheet ID（預設 settings 或 nail 表）")
+@click.option("--no-ai", is_flag=True, help="不呼叫 Claude，AI 顧問走規則版")
+@click.option("--data-dir", default="data/shopee_analytics", help="SQLite 根目錄")
+def shopee_analyze_cmd(date_str: str | None, sheet_id: str | None,
+                       no_ai: bool, data_dir: str) -> None:
+    """三賣場分析層：讀 SQLite → 寫每日戰報 + AI 店長顧問 + 改動追蹤日誌（不重抓）。"""
+    from datetime import date as _date
+
+    from scraper.shopee_analytics.analysis import dashboard_sheet_id, run_analysis
+    from scraper.shopee_analytics.collector import yesterday
+
+    day = _date.fromisoformat(date_str) if date_str else yesterday()
+    sid = sheet_id or dashboard_sheet_id()
+    if not sid:
+        click.echo("  ✗ 沒有戰報 Sheet ID（設 SHOPEE_DASHBOARD_SHEET_ID 或 nail 表）")
+        sys.exit(1)
+    db_path = Path(data_dir) / "shopee_analytics.db"
+    if not db_path.exists():
+        click.echo(f"  ✗ 找不到 {db_path}（這台還沒抓過蝦皮資料？先跑 shopee-collect）")
+        sys.exit(1)
+
+    res = run_analysis(day, db_path, sid, with_ai=not no_ai)
+    click.echo(f"\n  ✓ {day} 分析完成 → Sheet {sid}")
+    click.echo(f"    今天一句話：{res.advice.one_liner}")
+    if res.advice.action_needed:
+        click.echo("    ⚠️ 要動作：")
+        for a in res.advice.action_needed:
+            click.echo(f"      - {a}")
 
 
 if __name__ == "__main__":

@@ -374,8 +374,38 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
   之後排程無頭直打 API 免驗證；cookie 長效，過期才重登（健康點名會抓到）。
 - **待接**：model_id ↔ 商品選項貨號 對照（models 沒帶貨號，跟訂貨/庫存 join 需要）。
 
+## ★三賣場數據 AI 分析層（scraper/shopee_analytics/，2026-07-26 #S104）
+把每天抓好的三賣場數據「重新接回去」變成 Edwin 一眼可用的東西。定調（Edwin 拍板）：
+**本質不是做完善 dashboard，是「AI 每天替我讀完三家數據 → 直接給結論和待辦」**＝出錢請的專業店長顧問。
+紀律＝**少而精**、只抓觸發決策的幾個關鍵數，不做每商品多分析點。**先 Google Sheet 版**跑第一版，
+之後才做畫面（要接 personal-os-dashboard 監控層再說）。三塊，都寫進「戰報 Sheet」（3 分頁）：
+- **1. 每日戰報（`daily_report.py`）**：一眼看三賣場。矩陣＝**8 關鍵數**（列）× 三賣場（每家 值/昨比/週比）。
+  8 數（改 `metrics.py` 的 `METRICS` list 即增刪）＝成交額/成交訂單數/成交轉換率/CTR/訪客下單率/廣告花費/廣告ROAS/廣告佔營收比。
+  昨比＝vs 前一天、週比＝vs 7 天前，帶 🟢🔴▲▼（**不靠 Sheet 條件式格式**，手機也一眼）。每次跑覆蓋整頁＝只呈現最新一天。
+- **2. AI 店長顧問（`advisor.py` + `signals.py`）**：每天一則白話＝今天一句話/✅維持/⚠️動作/🔎機會。
+  價值在**跨表交叉**（商品×廣告×大盤）：`signals.py` 抽「銷量爆發/有看沒買/關鍵字燒錢零轉換/高ROAS關鍵字/
+  自動選品高ROAS/廣告佔比過高/轉換·CTR·營收週比驟降」→ digest → Claude（`claude-sonnet-4-6`，同 copywriter）。
+  **無 `ANTHROPIC_API_KEY` 或呼叫失敗 → rule-based fallback**（照樣條列訊號、不開天窗）。冪等：同資料日覆蓋、否則插最上面。
+- **3. 改動追蹤日誌（`change_log.py`）**：閉環「改了什麼→有沒有變好」。一張分頁，左半 Edwin 填
+  （改動日/賣場/對象/類型/改了什麼/想改善的指標）、右半系統每天自動算（改動前後 3/7 天目標指標+變化%+判定）。
+  系統無法自己歸因（看得到 CTR 掉但不知是改了標題）故「改了什麼」要人填。**對象填商品ID＝追該商品、留空＝追整店**；
+  領先指標(CTR/轉換)3-7 天可判、落後指標(營收)拉長，故同時給 3 天與 7 天兩窗。判定門檻在 `change_log.py` 頂端。
+- **orchestrator `analysis.py`**：`run_analysis(day, db_path, sheet_id)` 依序寫三塊。**掛在 `shopee-collect-daily`
+  尾巴**（三家抓完、有任一家成功就跑，讀 SQLite 重算）。也可獨立重跑：`shopee-analyze [--date] [--no-ai] [--sheet-id]`
+  （不重抓，純讀 SQLite 重寫）。
+- **寫哪張表**：`settings.SHOPEE_DASHBOARD_SHEET_ID`（env 可覆蓋）；**留空＝寫進 Nail 數據表**（SA 已有編輯權、
+  第一版即可跑）。之後 Edwin 建一張獨立彙整表分享給同一 SA、填 ID 即改寫過去。
+- **資料源＝本機 SQLite**（`shop_daily`/`product_daily`/`shop_keyword_daily`/`gms_product_daily`，有歷史）：
+  成交額/訪客/廣告花費·ROAS 取 `shop_daily` 官方值（＝Edwin 大盤看到的同一數好核對）；
+  成交訂單數/曝光/點擊 `shop_daily` 沒有 → 用 `product_daily` 全店加總導出（CTR＝Σ點擊/Σ曝光）。
+- **⚠️這台 Windows 無本機蝦皮 SQLite**（daemon+DB 在 Mac）→ 純運算已用合成資料驗過，**真實端到端要在 Mac 跑**
+  （有 AI key + 真資料）：`shopee-collect-daily` 自動帶、或手動 `shopee-analyze`。
+- **待接（#S104 下一步）**：① Edwin 確認 8 個關鍵數要加/拿掉哪些（改 `METRICS`）；② 顧問⚠️動作自動變追蹤日誌一列
+  （閉環再黏緊，現為手填）；③ 跑幾天後對螢幕核對數字；④ 之後接 dashboard 畫面。
+
 ## 環境變數
-- `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py 用，標題+詳情）
+- `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py + 分析層 AI 店長顧問 advisor.py）
+- `SHOPEE_DASHBOARD_SHEET_ID` — 三賣場分析層戰報表 ID（留空＝寫進 Nail 數據表，#S104）
 - `OPENAI_API_KEY` — GPT 生圖（gpt-image-1.5）
 - `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`（`sb_secret_…`）/ `SUPABASE_BUCKET`（預設 `joyslu-images`）
   — GPT 生圖圖床（Supabase Storage public bucket；只 GPT 路線用）。service key 是機密，勿 commit。

@@ -1,6 +1,11 @@
 # TODO
 
 ## 高優先
+- [x] 2026-07-26 #S104 ★三賣場數據 AI 分析層 v1（分支 `feature/daily-analytics`）：`metrics/daily_report/signals/advisor/change_log/analysis/sheet_util` 七檔 + CLI `shopee-analyze` + 掛進 `shopee-collect-daily`。三塊＝每日戰報(8關鍵數×三賣場×昨比/週比) / AI店長顧問(跨表訊號→Claude白話→⚠️動作) / 改動追蹤日誌(改前後3/7天成效)。合成資料驗過純運算
+- [ ] #S104 ★**真實端到端在 Mac 跑第一版**：`shopee-analyze`（或等 10:30 `shopee-collect-daily` 自動帶）→ 開 Nail 數據表看三新分頁（每日戰報/AI店長顧問/改動追蹤日誌）→ Edwin 對螢幕核對數字對不對
+- [ ] #S104 Edwin 確認 8 個關鍵數要加/拿掉哪些（改 `metrics.METRICS`）；開改動追蹤日誌後當天開始填改動
+- [ ] #S104（可選）Edwin 建獨立彙整表分享 SA → 填 `SHOPEE_DASHBOARD_SHEET_ID` 改寫過去；顧問⚠️動作自動變追蹤日誌一列（閉環黏緊）；之後接 personal-os-dashboard 畫面
+- [ ] #S104 `feature/daily-analytics` 驗完 merge；**merge 前先還原 `git stash@{0}`（#S103 商品卡 WIP）到 main**
 - [x] 2026-07-23 #S098 ★蝦皮數據抓取首跑（Mac）：`shopee-login --shop nail` 登入成功（45 cookie）→ `shopee-collect --shop nail` 抓 7/22 全綠：商品 423/規格 994/大盤 1 列（confirmed $63,591、廣告佔 91.4%）→ raw + SQLite 落地驗證過
 - [x] 2026-07-23 #S100 「【Nail】蝦皮數據中心」Sheet 落地驗證：SA 已有編輯權、`商品日報_202607`(423列)+`大盤日報_2026`(1列) 寫入+冪等重跑乾淨；Sheet ID 進 settings 預設（`SHOPEE_ANALYTICS_SHEET_IDS`）；冪等刪舊列改 batch（逐列 423 次會炸 429）
 - [x] 2026-07-23 #S100 接 Mac 每天 10:30 自動抓：`shopee-collect-daily`（loop 所有已登入賣場，缺 cookie 略過、一店掛不影響其他）+ LaunchAgent `com.joyslu.shopee-analytics.plist`（StartCalendarInterval 10:30）+ `run_shopee_analytics_install.command`。已 load，下次觸發明早 10:30

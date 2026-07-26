@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-07-26（#S104：三賣場數據 AI 分析層 v1 — 把抓好的數據接回去變 Edwin 一眼可用）
+
+### 新增（`scraper/shopee_analytics/`，分支 `feature/daily-analytics`）
+- **`metrics.py`**：8 關鍵數運算層（讀 SQLite `shop_daily`/`product_daily` → 三賣場值+昨比+週比）。
+  8 數在 `METRICS` list（增刪只改這裡）＝成交額/成交訂單數/成交轉換率/CTR/訪客下單率/廣告花費/廣告ROAS/廣告佔營收比。
+- **`daily_report.py`**：每日戰報分頁（矩陣＝8 數×三賣場，🟢🔴▲▼ 不靠條件式格式、每日覆蓋）。
+- **`signals.py` + `advisor.py`**：AI 店長顧問。跨表抽訊號（爆發/有看沒買/關鍵字燒錢/高ROAS/廣告佔比過高/週比驟降）
+  → digest → Claude（`claude-sonnet-4-6`）→ 今天一句話/✅維持/⚠️動作/🔎機會。**無 API key→rule-based fallback**。
+- **`change_log.py`**：改動追蹤日誌。左半 Edwin 填、右半系統算改動前後 3/7 天目標指標+變化%+判定（有效/無效/待觀察）。
+- **`analysis.py` + CLI `shopee-analyze`**：orchestrator；掛在 `shopee-collect-daily` 尾巴（三家抓完自動跑），可獨立重跑。
+- **`sheet_util.py`**：分頁共用 gspread 小工具（開表/確保分頁/覆蓋寫）。
+- `settings.SHOPEE_DASHBOARD_SHEET_ID`（env 可覆蓋，留空＝寫進 Nail 數據表，第一版即可跑）。
+
+### 定調（Edwin 拍板）
+- 本質＝「AI 每天替我讀完三家數據→給結論+待辦」＝專業店長顧問，**不是做完善 dashboard**。紀律＝少而精。
+- **先 Google Sheet 版**跑第一版看資料對不對，之後才做畫面。
+
+### 驗證
+- 這台 Windows 無本機蝦皮 SQLite（daemon+DB 在 Mac）→ 用**合成資料**把 metrics/戰報矩陣/訊號/digest/改動追蹤
+  純運算全跑通驗過。**真實端到端要在 Mac 跑**（有 AI key + 真資料）。
+
 ## 2026-07-24（#S102：蝦皮數據三賣場全開 + 訂單商品聯動 — 專案結案）
 
 ### 新增

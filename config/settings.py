@@ -87,6 +87,11 @@ _SHOPEE_SHEET_IDS_RAW = {
 # 只保留有填 Sheet ID 的賣場（沒填的還沒建表，不進排程）
 SHOPEE_ANALYTICS_SHEET_IDS = {k: v for k, v in _SHOPEE_SHEET_IDS_RAW.items() if v}
 
+# 【三賣場】每日分析層戰報表（#S104：每日戰報 / AI店長顧問 / 改動追蹤日誌 三分頁）。
+# 留空＝寫進 Nail 數據表（SA 已有編輯權，可立即跑第一版）；
+# 之後 Edwin 建一張獨立的彙整表、分享給同一 SA，再把 ID 填這裡（或設 env）即改寫過去。
+SHOPEE_DASHBOARD_SHEET_ID = os.environ.get("SHOPEE_DASHBOARD_SHEET_ID", "")
+
 # Kkren（巧巧郎集運）中繼表【中繼】巧巧郎出貨狀態；抓已出貨→去重 append 到 Kkren_Data 分頁
 # 2-2 到貨表的 Kkren_DB 靠 IMPORTRANGE 此表 Kkren_Data。Kkren 登入態存 config/kkren_state.json。
 KKREN_SHEET_ID = os.environ.get("KKREN_SHEET_ID", "181lP-qkX-qu7Vd9FQGs3U452sHdU_-1TjE3khanXRm8")
