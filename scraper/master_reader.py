@@ -31,7 +31,11 @@ _HEADER_ALIASES = {
     "price": ["蝦皮售價", "蝦皮售价", "售價", "售价"],
     "status": ["狀態", "状态"],
     "tag": ["標籤", "标签"],
+    "asset_status": ["資產包狀態", "资产包状态"],
+    "want": ["要產", "要产"],
 }
+
+_TRUE = {"TRUE", "True", "true", "✓", "V", "v", "是", "1", "yes", "Y"}
 
 
 def _norm(s: str) -> str:
@@ -122,3 +126,60 @@ def read_master(
         }
     logger.info(f"主表讀到 {len(out)} 個有代表網址的商品")
     return out
+
+
+def _col_letter(idx0: int) -> str:
+    """0-based 欄 index → A1 字母（0→A、17→R、18→S…）。"""
+    s = ""
+    n = idx0
+    while True:
+        s = chr(ord("A") + n % 26) + s
+        n = n // 26 - 1
+        if n < 0:
+            break
+    return s
+
+
+def open_for_sync(sa_json: str | Path | None = None):
+    """開主表供「一鍵同步」用。回 (ws, colmap, records)。
+
+    records：每個「有代表網址」的商品一筆，含 item_id/code/name/supplier/url +
+    want(要產勾選 bool)/asset_done(資產包狀態已✓ bool)/_row(1-based 列號，供回寫)。
+    """
+    import gspread
+
+    sa = resolve_sa_json(sa_json)
+    if not sa:
+        raise FileNotFoundError("找不到 SA 憑證（參數/settings/OneDrive 都沒有）")
+    gc = gspread.service_account(filename=str(sa))
+    ws = gc.open_by_key(MASTER_SHEET_ID).get_worksheet_by_id(MASTER_TAB_GID)
+    rows = ws.get_all_values()
+    colmap = _build_colmap(rows[0]) if rows else {}
+
+    records = []
+    for i, r in enumerate(rows[1:], start=2):  # 1-based sheet row（含表頭在第 1 列）
+        url = _cell(r, colmap.get("url"))
+        iid = _item_id(url)
+        code = _cell(r, colmap.get("code"))
+        if not iid or not code:
+            continue
+        records.append({
+            "item_id": iid, "code": code,
+            "name": _cell(r, colmap.get("name")),
+            "supplier": _cell(r, colmap.get("supplier")),
+            "url": url, "_row": i,
+            "want": _cell(r, colmap.get("want")) in _TRUE,
+            "asset_done": bool(_cell(r, colmap.get("asset_status"))),
+        })
+    return ws, colmap, records
+
+
+def write_status(ws, colmap: dict, row: int, done: bool = True, clear_want: bool = True) -> None:
+    """回寫某列：資產包狀態＝✓、清掉要產勾選。"""
+    reqs = []
+    if "asset_status" in colmap:
+        reqs.append((f"{_col_letter(colmap['asset_status'])}{row}", "✓" if done else ""))
+    if clear_want and "want" in colmap:
+        reqs.append((f"{_col_letter(colmap['want'])}{row}", False))
+    for a1, val in reqs:
+        ws.update(range_name=a1, values=[[val]])

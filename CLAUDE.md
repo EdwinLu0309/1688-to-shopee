@@ -454,6 +454,12 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
 - **售價/分類/文案**＝我方決策/會變動 → **不寫進商品卡**，從主表核對（Edwin 定調：卡只放固定事實）。
 - CLI：`product-cards --shop nail --master --flat --download-media --analyze --out-base "G:\…\商品資產"`
   （`--flat`＝雲端已按賣場分夾時不再加 nail/ 子夾）。抓取無 cookie 也常成功（scrape_many）。
+- **一鍵同步（正線運轉，`asset_sync.py` + `sync-assets` CLI + `run_sync_assets_windows.bat` 雙擊）**：
+  主表「商品表」有 `要產`(checkbox)＋`資產包狀態`(✓) 兩欄。Edwin 勾要跑的 → 觸發：讀勾選 →
+  抓取 → 產資產包寫雲端 → 回寫 `資產包狀態=✓`＋清 `要產`。**增量**只跑勾的/未完成的、被擋跳過。
+  `--all`＝跑所有未完成、`--no-analyze`＝省 vision。雲端根＝`settings.ASSET_CLOUD_BASE`（env 覆蓋）。
+  資料夾名＝`{編號}_{品名}`（如 `AAS1_AS_黑瓶功能膠`，編號給 AI、品名給人認）。要在 Edwin 機器跑
+  （Playwright/SA/OPENAI_API_KEY/掛好的雲端硬碟）。
 
 ## 爬取方式說明
 1688 反爬嚴格（Playwright 即使用 channel="chrome" 仍被偵測），目前實際爬取是透過 Claude in Chrome MCP 在用戶已登入的 Chrome 中執行 JS 提取 DOM。Playwright 相關程式碼保留作為備用。

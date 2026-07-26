@@ -669,6 +669,35 @@ def product_cards(ctx: click.Context, shop: str, json_dir: str, out_base: str | 
     click.echo(f"\n  共 {len(results)} 個資產包 → {Path(results[0]['dir']).parent}\n")
 
 
+@cli.command("sync-assets")
+@click.option("--shop", default="nail", help="賣場代號（nail/lady/baby）")
+@click.option("--out-base", default=None, help="雲端商品資產根（預設 settings.ASSET_CLOUD_BASE）")
+@click.option("--all", "run_all", is_flag=True, help="跑所有『資產包狀態』還空的（不看勾選）；預設只跑勾了『要產』的")
+@click.option("--no-analyze", is_flag=True, help="不跑 vision 賣點解析（省錢/沒 OPENAI key 時）")
+@click.option("--headless", is_flag=True, help="抓取用無頭瀏覽器（預設有頭，被擋可當場登入）")
+@click.option("--sa-json", default=None, help="主表 SA 憑證路徑（預設自動找）")
+def sync_assets_cmd(shop: str, out_base: str | None, run_all: bool,
+                    no_analyze: bool, headless: bool, sa_json: str | None) -> None:
+    """一鍵同步商品資產包：讀主表勾選 → 抓取+產卡+寫雲端 → 回寫主表狀態。"""
+    from config.settings import ASSET_CLOUD_BASE
+    from scraper.asset_sync import sync_assets
+
+    res = sync_assets(
+        shop=shop,
+        out_base=out_base or ASSET_CLOUD_BASE,
+        sa_json=sa_json,
+        only_missing=run_all,
+        analyze=not no_analyze,
+        headless=headless,
+        progress=lambda m: click.echo(f"  {m}"),
+    )
+    click.echo(f"\n  ✅ 完成 {res['done']} / 失敗或被擋 {res['failed']}（共 {res['total']}）")
+    for r in res["results"]:
+        if not r["ok"]:
+            click.echo(f"    ✗ {r['code']}：{r['note']}")
+    click.echo("")
+
+
 # ── 蝦皮數據中心每日抓取（scraper/shopee_analytics/，詳見 docs/shopee_analytics_api.md）──
 
 @cli.command("shopee-login")

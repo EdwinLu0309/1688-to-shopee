@@ -33,6 +33,14 @@
   **直接寫進 Google Drive `【Nail】1. 商品\商品資產\AAS1\`**，Chat 雲端連接器可讀。
 - SUNX 燈（52 型號合賣）：軸正確標「規格」不是「尺碼」，驗證通用化。
 
+### 運轉：一鍵同步（Edwin 定的 Sheet 勾選驅動）
+- **主表加兩欄**：`資產包狀態`（程式回寫 ✓／空）+ `要產`（checkbox，Edwin 勾要跑哪些）。
+- **`scraper/asset_sync.py`（`sync-assets` CLI + `run_sync_assets_windows.bat` 雙擊）**：讀主表勾選
+  → 沒抓過才抓 1688（一個瀏覽器批次）→ 產資產包（下載圖+vision+主表編號+繁體+寫雲端）
+  → 回寫主表 `資產包狀態=✓`、清掉 `要產`。**增量**（只跑勾的/未完成的）、抓取被擋跳過留下次重跑。
+  `--all` 跑所有未完成、`--no-analyze` 省 vision、`--headless` 無頭。雲端根＝`settings.ASSET_CLOUD_BASE`（env 可覆蓋）。
+- **實測**：主表勾 AAS2 → 雙擊/CLI → 抓取 29 圖 → 產 `AAS2_AS_紅瓶功能膠` 寫雲端 → 主表自動標 ✓、要產清空。
+
 ## 2026-07-26（#S104：三賣場數據 AI 分析層 v1 — 把抓好的數據接回去變 Edwin 一眼可用）
 
 ### 新增（`scraper/shopee_analytics/`，分支 `feature/daily-analytics`）

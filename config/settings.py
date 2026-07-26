@@ -43,6 +43,13 @@ GOOGLE_SHEET_GID = "823737836"
 AI_LIST_SHEET_ID = "1D7qBDG3WEeUrMPKa2K3yeqmarJ7aKFDThSaWJBk0wcc"
 AI_LIST_SHEET_GID = "0"
 
+# 商品資產包「一鍵同步」雲端輸出根（Google Drive Desktop 掛的路徑；因機器而異，用 env 覆蓋）。
+# sync-assets 的 --out-base 預設用它。目前 Nail；之後多賣場再做成 dict。
+ASSET_CLOUD_BASE = os.environ.get(
+    "ASSET_CLOUD_BASE",
+    r"G:\我的雲端硬碟\2. 賣場營運\1.【Nail】\【Nail】1. 商品\商品資產",
+)
+
 # 【Lady】預購商品訂貨表（訂貨系統三分頁：1_訂貨主檔 / 2_每日訂購彙總 / 3_訂單明細）
 # join key = 商品選項貨號（蝦皮 O 欄＝編號_顏色（身高款）_尺碼）
 ORDER_SHEET_ID = "1CJ4u0Nqds0t2_th-Pu97Df4GEJJi9A5AB1edIpIoIyQ"
