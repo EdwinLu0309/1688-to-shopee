@@ -24,6 +24,7 @@ _AD_COLS = AD_META_FIELDS + AD_REPORT_FIELDS
 
 _SHOP_DAILY_COLS = (
     FUNNEL_FIELDS
+    + ["confirmed_orders"]        # 成交訂單數（來自 key_metrics，非 funnel；買家會多下單→訂單≥買家）
     + [f"src_{f}" for f in SOURCE_FIELDS]
     + [f"src_{f}_ratio" for f in SOURCE_FIELDS]
     + ["shop_pv"]

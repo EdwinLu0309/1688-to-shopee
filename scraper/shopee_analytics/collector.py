@@ -159,6 +159,9 @@ def collect_day(client: ShopeeDataClient, shop: str, day: date, throttle: float 
         row[f"src_{f}_ratio"] = _num(overview.get(f + "_ratio"))
     pv = metrics.get("shop_pv")
     row["shop_pv"] = _num(pv.get("value")) if isinstance(pv, dict) else _num(pv)
+    # 成交訂單數：funnel 只有買家數，訂單數在 key_metrics（一個買家可下多單→訂單≥買家）
+    co = metrics.get("confirmed_orders")
+    row["confirmed_orders"] = _num(co.get("value")) if isinstance(co, dict) else _num(co)
     data.shop_daily = row
 
     # 4) 廣告活動層（pas homepage query，POST 翻頁；只留當天有活動的＝cost>0 或 impression>0）

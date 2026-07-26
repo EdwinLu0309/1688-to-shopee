@@ -51,16 +51,16 @@ METRICS: list[Metric] = [
     Metric("confirmed_sales", "成交額", "money", "up",
            lambda r: r.get("confirmed_sales"), "已確認銷售額"),
     Metric("confirmed_orders", "成交訂單數", "int", "up",
-           lambda r: r.get("sum_confirmed_orders"), "全店加總"),
+           lambda r: r.get("confirmed_orders"), "蝦皮官方成交訂單"),
     Metric("conv_rate", "成交轉換率", "pct", "up",
-           lambda r: _ratio(r.get("sum_confirmed_orders"), r.get("shop_uv")),
-           "成交訂單/訪客"),
+           lambda r: _ratio(r.get("confirmed_orders"), r.get("hybrid_uv")),
+           "成交訂單/不重複訪客"),
     Metric("ctr", "CTR點擊率", "pct", "up",
            lambda r: _ratio(r.get("sum_clicks"), r.get("sum_impressions")),
            "商品卡點擊/曝光"),
     Metric("uv_to_placed", "訪客下單率", "pct", "up",
-           lambda r: _ratio(r.get("placed_buyers"), r.get("shop_uv")),
-           "下單買家/訪客"),
+           lambda r: _ratio(r.get("placed_buyers"), r.get("hybrid_uv")),
+           "下單買家/不重複訪客"),
     Metric("ad_cost", "廣告花費", "money", "neutral",
            lambda r: r.get("ad_cost"), "所有廣告(含自動選品)"),
     Metric("ad_roi", "廣告ROAS", "ratio", "up",
@@ -110,7 +110,8 @@ class DailyReport:
 def _read_raw(con: sqlite3.Connection, shop: str, dt: str) -> dict | None:
     """讀某賣場某天的聚合原料；沒有大盤列 → None（那天沒抓到）。"""
     sd = con.execute(
-        "SELECT confirmed_sales, shop_uv, placed_buyers, ad_cost, ad_gmv, ad_roi "
+        "SELECT confirmed_sales, shop_uv, hybrid_uv, placed_buyers, "
+        "       ad_cost, ad_gmv, ad_roi, confirmed_orders "
         "FROM shop_daily WHERE shop=? AND dt=?",
         (shop, dt),
     ).fetchone()
@@ -119,10 +120,12 @@ def _read_raw(con: sqlite3.Connection, shop: str, dt: str) -> dict | None:
     raw: dict = {
         "confirmed_sales": sd[0],
         "shop_uv": sd[1],
-        "placed_buyers": sd[2],
-        "ad_cost": sd[3],
-        "ad_gmv": sd[4],
-        "ad_roi": sd[5],
+        "hybrid_uv": sd[2],       # 不重複訪客（賣場+商品頁去重）＝蝦皮大盤「不重複訪客數」
+        "placed_buyers": sd[3],
+        "ad_cost": sd[4],
+        "ad_gmv": sd[5],
+        "ad_roi": sd[6],
+        "confirmed_orders": sd[7],  # 成交訂單數（key_metrics，非商品層加總）
     }
     prod = con.execute(
         "SELECT COALESCE(SUM(confirmed_orders),0), "
