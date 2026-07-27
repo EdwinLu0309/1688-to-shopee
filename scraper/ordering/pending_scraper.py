@@ -395,3 +395,59 @@ def to_arrival_grid(records: list[OrderRecord]) -> list[list]:
                 row[_TRACKING_IDX] = r.tracking_no                  # AF=運單號（訂單級首列）
             grid.append(row)
     return grid
+
+
+def _group_by_order(grid: list[list]) -> list[tuple[str, list[list]]]:
+    """把資料列依訂單編號（A 欄）分組。A 欄有值＝新訂單首列，A 欄空＝續接上一訂單品項列。
+
+    回傳 [(訂單編號, [該訂單所有列]), …]，保留原順序。
+    """
+    groups: list[list] = []
+    for row in grid:
+        key = (str(row[0]).strip() if row else "")
+        if key:
+            groups.append([key, [row]])
+        elif groups:
+            groups[-1][1].append(row)
+        else:
+            groups.append(["", [row]])   # 開頭就沒訂單編號（理論上不會）→ 自成一組
+    return [(k, rows) for k, rows in groups]
+
+
+def _tracking_of(rows: list[list]) -> str:
+    """取一組訂單首列的運單號（AF）。"""
+    head = rows[0] if rows else []
+    if len(head) > _TRACKING_IDX:
+        return str(head[_TRACKING_IDX] or "").strip()
+    return ""
+
+
+def merge_arrival_grid(old_grid: list[list], new_grid: list[list]) -> list[list]:
+    """到貨版合併：新抓的訂單為主，缺運單號時回填舊值，舊有但這次沒抓到的訂單整組保留。
+
+    解決「訂單離開待收貨（或這次沒回運單號）→ 整張覆蓋把運單號清掉 → 到貨分頁 XLOOKUP 對不到」。
+    到貨 1688_DB 因此變成累加台帳：運單號一旦抓到就永久留著。
+    """
+    old_groups = _group_by_order(old_grid)
+    old_map = {k: rows for k, rows in old_groups if k}
+
+    merged: list[list] = []
+    new_keys: set[str] = set()
+    for k, rows in _group_by_order(new_grid):
+        if k:
+            new_keys.add(k)
+            # 這次沒運單號、但舊 DB 有 → 回填到首列 AF
+            if not _tracking_of(rows) and k in old_map:
+                old_tn = _tracking_of(old_map[k])
+                if old_tn:
+                    head = rows[0]
+                    while len(head) <= _TRACKING_IDX:
+                        head.append("")
+                    head[_TRACKING_IDX] = old_tn
+        merged.extend(rows)
+
+    # 舊有、這次沒抓到的訂單（已離開待收貨）→ 保留，運單號才不會消失
+    for k, rows in old_groups:
+        if k and k not in new_keys:
+            merged.extend(rows)
+    return merged

@@ -317,6 +317,10 @@ Edwin 要「在雲端頁面點一下就自動更新」的 ERP 體驗（他 Mac �
 到貨表(2-2)核對要「運送單號→件數/重量/包裹狀態/到貨日」，資料來自集運商 Kkren(巧巧郎)。
 資料流：**Kkren 已出貨 → 中繼表 `181lP`(【中繼】巧巧郎出貨狀態) 的 `Kkren_Data` 分頁 →
 IMPORTRANGE 進 2-2 的 `Kkren_DB` → 到貨日期分頁靠「物流單號」對 `1688_DB!AF 運單號」帶出**。
+⚠️**到貨版 1688_DB 刷新＝合併累加、非整張覆蓋**（2026-07-27）：`ReconcileDB.overwrite(arrival=True)`
+先讀舊 DB，新抓訂單為主、這次缺運單號時**回填舊值**、舊有但這次沒抓到的訂單（已離開待收貨）**整組保留**
+（純函式 `pending_scraper.merge_arrival_grid`）。否則訂單一離開待收貨、運單號從 DB 消失 → 到貨分頁 XLOOKUP 全對不到。
+**故到貨表刷新前不用再手動「凍結成值」**；金額版仍是純覆蓋（要反映現況），金額日期分頁核對完仍要凍結成值。
 - **抓取（去風險定案）**：Kkren 是 SPA（`kkren.com.tw`），API 在 `api.jyb.com.tw`，認證＝
   **localStorage 的 `accessToken`（Bearer）**，非 cookie。Edwin 用 `kkren_probe`（scratch）登入一次
   存**完整登入態** `config/kkren_state.json`（含 token，⚠️新裝置登入要簡訊驗證碼）；之後 httpx 帶
