@@ -55,7 +55,7 @@ async ({status, page, pageSize}) => {
       data: { serviceId: 'OrderListDataLineService.buyerOrderList', param: param },
       dataType: 'json',
       type: 'POST',
-      timeout: 60000,
+      timeout: 30000,
     });
     return {ok: true, res: res};
   } catch (e) {
@@ -281,7 +281,9 @@ async def scrape_pending_orders(
                 for p in range(1, max_pages + 1):
                     # 逾時/限流（TIMEOUT/FLOW/限流）→ 退避重試，非該類才拋
                     r = None
-                    tries = 4   # 逾時退避重試；太多次反而像在硬打 → 易觸發 1688 風控
+                    # daemon 同步跑：doomed 呼叫要快速失敗才不會卡住輪詢（勾選沒反應）。
+                    # 健康時清單 API 幾秒就回，30s×2 次足夠；1688 全逾時時 ~1 分內放棄，回頭聽勾選。
+                    tries = 2
                     for attempt in range(tries):
                         r = await _evaluate_retry(page, CALL_JS,
                                                   {"status": st, "page": p, "pageSize": page_size})

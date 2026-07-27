@@ -330,8 +330,11 @@ IMPORTRANGE 進 2-2 的 `Kkren_DB` → 到貨日期分頁靠「物流單號」�
   （9=已付款、5=已出貨）。**一訂單多包裹→一列一 `parcels[].trackingNo`（物流單號）**。
 - **欄位對應**（`kkren_scraper.to_parcels`）：oid→訂單編號、createdAt→下單日期、
   `jyoExtraInfo.schedule.calJycutAt`週幾→結單日(星期X結單)、`.calDelivAt`週幾→預計到貨、
-  **`parcels[].trackingNo`→物流單號**、`parcels[].weight÷1000`→重量(KG，實測1980→1.98)、
-  `parcels[].statusAt+statusBrief`→物流狀態。⚠️到貨日**自帶在每筆訂單** schedule，不用另查行事曆。
+  **`parcels[].trackingNo`→物流單號**、`parcels[].weight÷1000`→重量(KG，實測1980→1.98)。
+  ⚠️**物流狀態抓 `order.subtnos[].lastTrace`（自派車軌跡，自帶時間戳、出貨後才有）**，靠
+  `jyoExtraInfo.parcelsInfo.estimateSubtnos` 對回各 parcel 物流單號（`_subtno_trace_map`）；沒有才退回
+  `parcels[].statusAt+statusBrief`（＝Kkren 倉庫打包狀態，會凍在「已打包」，**不是**真實貨態，別只抓這欄）。
+  ⚠️到貨日**自帶在每筆訂單** schedule，不用另查行事曆。
 - **去重 append**：比對 `Kkren_Data` 既有「物流單號」(第5欄)，只加新的（Edwin「只抓還沒建立過的」）。
 - **入口**：CLI `python main.py kkren-refresh [-d 天數] [--commit]`；daemon **到貨口**（`also_kkren:True`）
   打勾時**同時**刷 1688 待收貨 + Kkren 已出貨（一個勾更新 1688_DB + Kkren_Data）。

@@ -125,6 +125,30 @@ def fetch_shipped_orders(
     return orders
 
 
+def _subtno_trace_map(o: dict) -> dict[str, str]:
+    """把「自派車軌跡」(order.subtnos[].lastTrace) 對應到各 parcel 物流單號。
+
+    ⚠️ 物流真實貨態（貨物已清出/即將派件…）在 order.subtnos[].lastTrace（自帶時間戳、
+    出貨後才有），**不在** parcel.statusAt/statusBrief（那是 Kkren 倉庫打包狀態，會凍在「已打包」）。
+    parcel→subtno 的對應在 jyoExtraInfo.parcelsInfo.estimateSubtnos（與 subtnos 同索引分組）。
+    回傳 {parcel 物流單號: lastTrace}；抓不到對應就不收（該 parcel 退回用倉庫狀態）。
+    """
+    subtnos = o.get("subtnos") or []
+    groups = (((o.get("jyoExtraInfo") or {}).get("parcelsInfo") or {}).get("estimateSubtnos")) or []
+    out: dict[str, str] = {}
+    for i, group in enumerate(groups):
+        if i >= len(subtnos):
+            break
+        trace = str((subtnos[i] or {}).get("lastTrace") or "").strip()
+        if not trace:
+            continue
+        for item in (group or []):
+            tno = str((item or {}).get("trackingNo") or "").strip()
+            if tno:
+                out[tno] = trace
+    return out
+
+
 def to_parcels(orders: list[dict]) -> list[KkrenParcel]:
     """訂單 list → 一列一包裹（KkrenParcel）。"""
     out: list[KkrenParcel] = []
@@ -134,12 +158,15 @@ def to_parcels(orders: list[dict]) -> list[KkrenParcel]:
         sched = (o.get("jyoExtraInfo") or {}).get("schedule") or {}
         cut = _wday(str(sched.get("calJycutAt") or ""))
         eta = _wday(str(sched.get("calDelivAt") or ""))
+        trace_map = _subtno_trace_map(o)   # 自派車軌跡（真實貨態，優先用）
         for p in (o.get("parcels") or []):
             tno = str(p.get("trackingNo") or "").strip()
             if not tno:
                 continue
-            status = " ".join(x for x in [str(p.get("statusAt") or "").strip(),
-                                          str(p.get("statusBrief") or p.get("statusName") or "").strip()] if x)
+            # 優先用自派車軌跡 lastTrace（自帶時間戳、會推進）；沒有才退回倉庫打包狀態
+            status = trace_map.get(tno) or " ".join(
+                x for x in [str(p.get("statusAt") or "").strip(),
+                            str(p.get("statusBrief") or p.get("statusName") or "").strip()] if x)
             out.append(KkrenParcel(
                 order_no=order_no,
                 order_date=order_date,

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-07-27（Kkren 物流狀態抓對欄位＝自派車軌跡；1688 呼叫改快速失敗）
+
+### 修復
+- **Kkren 物流狀態抓錯欄位 → 抓不到真實貨態**（`kkren_scraper.to_parcels` + 新增 `_subtno_trace_map`）：
+  原本抓 parcel 的**倉庫打包狀態**（`statusAt`/`statusBrief`，會凍在「已打包」不動）；真實出貨貨態
+  （「貨物已清出，即將轉交巧巧郎自派車派件」…）其實在 **`order.subtnos[].lastTrace`**（自帶時間戳、
+  出貨後才有），靠 `jyoExtraInfo.parcelsInfo.estimateSubtnos` 對回各 parcel 物流單號。改成**優先用
+  自派車軌跡 lastTrace、沒有才退回倉庫狀態**。lastTrace 自帶時間戳 → 正好吃 upsert 的時間比較會更新。
+  實跑一次 commit：更新 192 筆狀態、新增 1 筆。
+
+### 優化
+- **1688 訂單 API 改快速失敗**（`pending_scraper`）：mtop `timeout` 60s→30s、退避重試 4→2 次。
+  原因：daemon 同步跑，1688 全逾時時每個 doomed 呼叫磨 ~5 分鐘會卡住輪詢（勾選沒反應）；改成
+  ~1 分內放棄、馬上回頭聽勾選。健康時清單 API 幾秒就回，30s 足夠。
+
 ## 2026-07-27（商品主表 SKU↔商品表活連動 + 蝦皮處理狀態分頁；到貨口拆兩段；1688 API 耐撞）
 
 ### 新增
