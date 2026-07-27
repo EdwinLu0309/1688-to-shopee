@@ -195,30 +195,60 @@ def setup(gc=None) -> None:
 
 # ── 執行一個 job：抓 1688 → 覆蓋中央檔 ──
 def _run_job(job: dict, since_date: str, order_status: str) -> str:
-    """回傳給人看的狀態字串。"""
-    records = asyncio.run(scrape_pending_orders(
-        cookie_path=job["cookie"], status=order_status,
-        since_date=since_date or None, headless=True,
-    ))
-    if not records:
-        return f"⚠️ 0 筆（{order_status}，下單日>={since_date or '全部'}）→ 未更新（避免清空 1688_DB）"
+    """回傳給人看的狀態字串。
+
+    金額版：只有 1688 一段。
+    到貨版：1688（待收貨→1688_DB）與 Kkren（已出貨→Kkren_Data）**兩段獨立**——
+    任一段失敗（如 1688 常態逾時）都不擋另一段，各自回報。這樣 1688 鬧脾氣時，
+    只要 Kkren 有跑，到貨狀態照樣能更新。
+    """
     arrival = job.get("arrival", False)
-    db = ReconcileDB(sheet_id=job["target_sheet_id"], tab=job["target_tab"])
-    info = db.overwrite(records, source_name=f"daemon {job['name']} {order_status}", arrival=arrival)
-    if arrival:
-        n_track = sum(1 for r in records if r.tracking_no)
-        msg = f"✅ {info['orders']} 訂單／{n_track} 有運單號"
-        # 到貨口同時刷 Kkren 已出貨 → Kkren_Data（去重 append）
-        if job.get("also_kkren"):
-            try:
-                from .kkren_pipeline import refresh as kkren_refresh
-                kr = kkren_refresh(since_days=30, commit=True)
-                msg += f"；Kkren 新{kr.appended}/更新{kr.updated}"
-            except Exception as e:
-                msg += f"；⚠️Kkren 失敗：{str(e)[:40]}"
-        return f"{msg}（{info['updated_time']}）"
-    total = round(sum(r.actual_pay for r in records), 2)
-    return f"✅ {info['orders']} 筆訂單／實付¥{total:,.2f}（{info['updated_time']}）"
+
+    # ── 金額版：維持原樣（只有 1688）──
+    if not arrival:
+        records = asyncio.run(scrape_pending_orders(
+            cookie_path=job["cookie"], status=order_status,
+            since_date=since_date or None, headless=True,
+        ))
+        if not records:
+            return f"⚠️ 0 筆（{order_status}，下單日>={since_date or '全部'}）→ 未更新（避免清空 1688_DB）"
+        db = ReconcileDB(sheet_id=job["target_sheet_id"], tab=job["target_tab"])
+        info = db.overwrite(records, source_name=f"daemon {job['name']} {order_status}", arrival=False)
+        total = round(sum(r.actual_pay for r in records), 2)
+        return f"✅ {info['orders']} 筆訂單／實付¥{total:,.2f}（{info['updated_time']}）"
+
+    # ── 到貨版：兩段獨立 ──
+    parts: list[str] = []
+
+    # 段1：1688 待收貨 → 1688_DB（合併累加；失敗/0 筆都不影響 Kkren）
+    try:
+        records = asyncio.run(scrape_pending_orders(
+            cookie_path=job["cookie"], status=order_status,
+            since_date=since_date or None, headless=True,
+        ))
+        if not records:
+            parts.append("1688：⚠️0 筆未更新")
+        else:
+            db = ReconcileDB(sheet_id=job["target_sheet_id"], tab=job["target_tab"])
+            info = db.overwrite(records, source_name=f"daemon {job['name']} {order_status}", arrival=True)
+            n_track = sum(1 for r in records if r.tracking_no)
+            parts.append(f"1688：✅{info['orders']}訂單/{n_track}運單號")
+    except Exception as e:
+        parts.append(f"1688：❌{str(e)[:60]}")
+        logger.warning(f"[{job['name']}] 1688 段失敗（續跑 Kkren）：{e}")
+
+    # 段2：Kkren 已出貨 → Kkren_Data（獨立於 1688 成敗）
+    if job.get("also_kkren"):
+        try:
+            from .kkren_pipeline import refresh as kkren_refresh
+            kr = kkren_refresh(since_days=30, commit=True)
+            parts.append(f"Kkren：✅新{kr.appended}/更新{kr.updated}")
+        except Exception as e:
+            parts.append(f"Kkren：❌{str(e)[:40]}")
+            logger.warning(f"[{job['name']}] Kkren 段失敗：{e}")
+
+    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return "；".join(parts) + f"（{now}）"
 
 
 # ── 一輪輪詢：檢查所有口，觸發的 job 跑一次 ──

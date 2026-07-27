@@ -31,6 +31,7 @@
 ├── config/
 │   ├── settings.py            # 全域設定（含 Gemini、Google Sheet）
 │   ├── shopee_template.xlsx   # 蝦皮批次上架模板
+│   ├── apps_script/           # 三賣場商品主表綁定 Apps Script（Lady/Nail/Baby Code.gs + 狀態同步外掛）
 │   └── browser_profile/       # Playwright 登入 profile（gitignored）
 ├── scraper/
 │   ├── models.py              # Product1688, SKUOption, PriceRange
@@ -334,6 +335,10 @@ IMPORTRANGE 進 2-2 的 `Kkren_DB` → 到貨日期分頁靠「物流單號」�
 - **去重 append**：比對 `Kkren_Data` 既有「物流單號」(第5欄)，只加新的（Edwin「只抓還沒建立過的」）。
 - **入口**：CLI `python main.py kkren-refresh [-d 天數] [--commit]`；daemon **到貨口**（`also_kkren:True`）
   打勾時**同時**刷 1688 待收貨 + Kkren 已出貨（一個勾更新 1688_DB + Kkren_Data）。
+  ⚠️**到貨口＝兩段獨立**（2026-07-27，`_run_job` arrival 分支）：1688→1688_DB 與 Kkren→Kkren_Data
+  各自 try、互不阻擋，1688 逾時/0 筆時 Kkren 照樣更新（狀態格分開回報 `1688：…；Kkren：…`）。
+  因 1688 訂單清單 API（`OrderListDataLineService.buyerOrderList`）常態 `TIMEOUT::接口超时`——連待付款也會，
+  屬 1688 端/風控暫時性；`pending_scraper` 已調耐撞（timeout 60s、pageSize 50、退避重試），全逾時時仍需等 1688 恢復、勿狂按刷新。
 - **✅ 端到端驗證**：1688 待收貨運單號（如 79016806016916）＝Kkren 物流單號，兩邊對得上；
   重量/到貨日與 Edwin 現有 Kkren_Data 逐筆一致。
 

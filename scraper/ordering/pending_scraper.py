@@ -55,7 +55,7 @@ async ({status, page, pageSize}) => {
       data: { serviceId: 'OrderListDataLineService.buyerOrderList', param: param },
       dataType: 'json',
       type: 'POST',
-      timeout: 20000,
+      timeout: 60000,
     });
     return {ok: true, res: res};
   } catch (e) {
@@ -212,8 +212,8 @@ async def scrape_pending_orders(
     status: str = "waitbuyerpay",
     since_date: Optional[str] = None,
     headless: bool = False,
-    page_size: int = 100,
-    max_pages: int = 30,
+    page_size: int = 50,
+    max_pages: int = 60,
     callback: Optional[Callable[[str], None]] = None,
 ) -> list[OrderRecord]:
     """抓某狀態的訂單（預設 waitbuyerpay 待付款），翻頁抓完。
@@ -281,7 +281,8 @@ async def scrape_pending_orders(
                 for p in range(1, max_pages + 1):
                     # 逾時/限流（TIMEOUT/FLOW/限流）→ 退避重試，非該類才拋
                     r = None
-                    for attempt in range(4):
+                    tries = 4   # 逾時退避重試；太多次反而像在硬打 → 易觸發 1688 風控
+                    for attempt in range(tries):
                         r = await _evaluate_retry(page, CALL_JS,
                                                   {"status": st, "page": p, "pageSize": page_size})
                         if not r.get("err"):
@@ -290,8 +291,8 @@ async def scrape_pending_orders(
                         transient = any(k in err for k in ("TIMEOUT", "接口超时", "FLOW", "限流", "RGV", "FAIL_SYS_TRAFFIC"))
                         if not transient:
                             break
-                        wait = 2 * (attempt + 1)
-                        notify(f"[{st_zh}] 逾時/限流，{wait}s 後重試（{attempt+1}/4）")
+                        wait = 3 * (attempt + 1)   # 3,6,9,12,15s 退避（1688 後端接口超时常見）
+                        notify(f"[{st_zh}] 逾時/限流，{wait}s 後重試（{attempt+1}/{tries}）")
                         await asyncio.sleep(wait)
                     if r.get("err"):
                         detail = r.get("err")
