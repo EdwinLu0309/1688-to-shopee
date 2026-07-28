@@ -16,7 +16,7 @@ from loguru import logger
 from config import settings
 
 from .pending_scraper import (
-    ARRIVAL_HEADERS, DB_HEADERS, OrderRecord, merge_arrival_grid,
+    ARRIVAL_HEADERS, DB_HEADERS, OrderRecord, merge_order_grid,
     to_arrival_grid, to_db_grid,
 )
 
@@ -46,9 +46,11 @@ class ReconcileDB:
         版面：第1列「來源檔案名稱：」、第2列「最後更新時間：」、第3列表頭、第4列起資料。
         arrival=True → 到貨版 50 欄格式（含運單號在 AF）；否則金額版 26 欄。
 
-        ⚠️ 到貨版（arrival）是「合併累加」不是整張覆蓋：先讀舊 1688_DB，新抓的訂單為主、
-        缺運單號時回填舊值，舊有但這次沒抓到的訂單（已離開待收貨）整組保留——否則訂單一離開
-        待收貨、運單號就從 DB 消失，到貨分頁 XLOOKUP 全部對不到。金額版仍是純覆蓋（反映現況）。
+        ⚠️ 金額版與到貨版都是「合併累加」不是整張覆蓋：先讀舊 1688_DB，新抓的訂單用新值覆蓋
+        （反映廠商改價／最新運單號），舊有但這次沒抓到的訂單整組保留。原因：
+        - 金額版：Edwin 一批下很多單、逐筆核價，先付款的訂單會離開「待付款」→ 下次刷新抓不到，
+          純覆蓋會把它清掉、訂單編號消失，就無法出到 2-2 到貨表核對。故保留已付款訂單。
+        - 到貨版：訂單離開「待收貨」→ 運單號從 DB 消失、到貨分頁 XLOOKUP 對不到；且回填舊運單號。
         """
         updated_time = updated_time or _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         headers = ARRIVAL_HEADERS if arrival else DB_HEADERS
@@ -56,15 +58,14 @@ class ReconcileDB:
 
         ws = self._sh.worksheet(self.tab)
 
-        if arrival:
-            # 讀舊資料區（前 3 列為來源/更新時間/表頭）合併，保住既有運單號
-            try:
-                existing = ws.get_all_values()
-                old_grid = existing[3:] if len(existing) > 3 else []
-            except Exception as e:
-                logger.warning(f"讀舊 1688_DB 失敗（改為純覆蓋，可能遺失舊運單號）：{e}")
-                old_grid = []
-            grid = merge_arrival_grid(old_grid, grid)
+        # 讀舊資料區（前 3 列為來源/更新時間/表頭）合併，保住已離開狀態的訂單（含運單號）
+        try:
+            existing = ws.get_all_values()
+            old_grid = existing[3:] if len(existing) > 3 else []
+        except Exception as e:
+            logger.warning(f"讀舊 1688_DB 失敗（改為純覆蓋，可能遺失舊訂單）：{e}")
+            old_grid = []
+        grid = merge_order_grid(old_grid, grid, backfill_tracking=arrival)
 
         top1 = ["來源檔案名稱：", source_name]
         top2 = ["最後更新時間：", updated_time]
@@ -72,6 +73,5 @@ class ReconcileDB:
 
         ws.clear()
         ws.update(values, value_input_option="USER_ENTERED")
-        verb = "合併" if arrival else "覆蓋"
-        logger.info(f"1688_DB {verb}完成：新抓 {len(records)} 訂單 / 寫入 {len(grid)} 列（{updated_time}）")
+        logger.info(f"1688_DB 合併完成：新抓 {len(records)} 訂單 / 寫入 {len(grid)} 列（{updated_time}）")
         return {"orders": len(records), "rows": len(grid), "updated_time": updated_time}

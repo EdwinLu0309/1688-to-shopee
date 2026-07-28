@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-07-29（金流核對刷新改合併累加，不再清掉已付款訂單；訂單頁載入加重試）
+
+### 修復
+- **金額版 1688_DB 刷新改「合併累加」不再整張覆蓋**（`reconcile_db.ReconcileDB.overwrite`
+  + `pending_scraper.merge_order_grid`）：Edwin 一批下很多單、逐筆核價時會**先按付款結掉部分訂單**
+  再繼續核剩下的；已付款訂單離開「待付款」→ 下次刷新抓不到 → 舊的純覆蓋把它連訂單編號一起清掉 →
+  就無法出到 2-2 到貨表核對（訂單編號對不上）。改成**仍在待付款的訂單用新值覆蓋（廠商改價照樣看得出）、
+  這次沒抓到的訂單整組保留**。把到貨版的 `merge_arrival_grid` 抽成通用 `merge_order_grid(…, backfill_tracking)`
+  兩版共用（到貨版多做運單號回填），`merge_arrival_grid` 改為薄包裝。
+
+### 優化
+- **1688 訂單頁載入（`page.goto`）加退避重試**（`pending_scraper.scrape_pending_orders`）：
+  air.1688 訂單頁常態性抽風、連 goto 都逾時，原本單次失敗就整個 job 掛掉太脆弱。改成重試 3 次
+  （timeout 45s、間隔 5s→10s 退避），失敗訊息也標明是「1688 端暫時性」。
+
 ## 2026-07-27（Kkren 物流狀態抓對欄位＝自派車軌跡；1688 呼叫改快速失敗）
 
 ### 修復

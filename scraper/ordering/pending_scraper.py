@@ -250,7 +250,21 @@ async def scrape_pending_orders(
         page = await ctx.new_page()
         try:
             notify("開啟 1688 訂單頁…")
-            await page.goto(ORDER_PAGE_URL, wait_until="domcontentloaded", timeout=60000)
+            # 頁面載入本身也退避重試——1688 air 頁常態性抽風（連 goto 都逾時），
+            # 單次失敗就整個 job 掛掉太脆弱。重試 3 次（30s→自增退避）。
+            goto_tries = 3
+            for gi in range(goto_tries):
+                try:
+                    await page.goto(ORDER_PAGE_URL, wait_until="domcontentloaded", timeout=45000)
+                    break
+                except Exception as e:
+                    if gi == goto_tries - 1:
+                        raise RuntimeError(
+                            f"訂單頁載入逾時（1688 端暫時性，已重試 {goto_tries} 次）：{str(e)[:80]}"
+                        )
+                    wait = 5 * (gi + 1)   # 5s, 10s 退避
+                    notify(f"訂單頁載入逾時，{wait}s 後重試（{gi + 1}/{goto_tries}）")
+                    await asyncio.sleep(wait)
             if "login" in page.url:
                 raise RuntimeError("Cookie 失效（被導向登入頁），請用主程式「🔑 登入 1688」重登")
             # SPA 載入後會自我導航（補 &page=1）會打掉執行環境 → 先等頁面安定
@@ -425,11 +439,17 @@ def _tracking_of(rows: list[list]) -> str:
     return ""
 
 
-def merge_arrival_grid(old_grid: list[list], new_grid: list[list]) -> list[list]:
-    """到貨版合併：新抓的訂單為主，缺運單號時回填舊值，舊有但這次沒抓到的訂單整組保留。
+def merge_order_grid(old_grid: list[list], new_grid: list[list],
+                     backfill_tracking: bool = False) -> list[list]:
+    """合併累加：新抓的訂單為主，舊有但這次沒抓到的訂單整組保留（依訂單編號 A 欄比對）。
 
-    解決「訂單離開待收貨（或這次沒回運單號）→ 整張覆蓋把運單號清掉 → 到貨分頁 XLOOKUP 對不到」。
-    到貨 1688_DB 因此變成累加台帳：運單號一旦抓到就永久留著。
+    解決「訂單離開該狀態 → 整張覆蓋把它清掉 → 日期分頁 XLOOKUP 對不到」：
+    - 金額版：Edwin 一批下很多單、逐筆核價，先付款的訂單會離開「待付款」→ 下次刷新抓不到，
+      但訂單編號仍要留在 1688_DB 才能出到 2-2 到貨表核對。故已付款（不在新抓）的訂單整組保留。
+    - 到貨版（backfill_tracking=True）：這次沒回運單號、但舊 DB 有 → 回填首列 AF，
+      運單號一旦抓到就永久留著。
+
+    仍在該狀態的訂單（在新抓裡）用新值覆蓋 → 反映廠商改價／最新運單號。
     """
     old_groups = _group_by_order(old_grid)
     old_map = {k: rows for k, rows in old_groups if k}
@@ -439,8 +459,8 @@ def merge_arrival_grid(old_grid: list[list], new_grid: list[list]) -> list[list]
     for k, rows in _group_by_order(new_grid):
         if k:
             new_keys.add(k)
-            # 這次沒運單號、但舊 DB 有 → 回填到首列 AF
-            if not _tracking_of(rows) and k in old_map:
+            # 到貨版：這次沒運單號、但舊 DB 有 → 回填到首列 AF
+            if backfill_tracking and not _tracking_of(rows) and k in old_map:
                 old_tn = _tracking_of(old_map[k])
                 if old_tn:
                     head = rows[0]
@@ -449,8 +469,13 @@ def merge_arrival_grid(old_grid: list[list], new_grid: list[list]) -> list[list]
                     head[_TRACKING_IDX] = old_tn
         merged.extend(rows)
 
-    # 舊有、這次沒抓到的訂單（已離開待收貨）→ 保留，運單號才不會消失
+    # 舊有、這次沒抓到的訂單（金額版＝已付款離開待付款／到貨版＝已離開待收貨）→ 保留
     for k, rows in old_groups:
         if k and k not in new_keys:
             merged.extend(rows)
     return merged
+
+
+def merge_arrival_grid(old_grid: list[list], new_grid: list[list]) -> list[list]:
+    """到貨版合併（回填運單號）：見 merge_order_grid。"""
+    return merge_order_grid(old_grid, new_grid, backfill_tracking=True)

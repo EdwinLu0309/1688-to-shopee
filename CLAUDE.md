@@ -279,8 +279,11 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
   `orderEntries[]`→品項（productName/price/quantity/productNumber/sourceId=Offer ID/skuId）。折扣＝货总−实付。
   一訂單多列（首列填訂單級欄+首品項，後續列只填品項欄），比照官方報表格式。清單 API 的收貨地址/電話被遮罩→留空（核對用不到）。
 - **日期篩選**：只留 `gmtCreate >= 核對日期`（預設今天）——今天下的訂貨表就核對今天(含)之後的訂單，不對到舊批。
-- **覆蓋語義**：重抓待付款訂單**覆蓋** `1688_DB` 資料區 + 更新頂端「最後更新時間」。⚠️**0 筆時防呆略過覆蓋**
-  （避免清空整張 DB）。廠商改價→實付款會一起被覆蓋更新，這就是「看得出廠商改價」的關鍵。
+- **合併累加語義**（2026-07-29 改，原純覆蓋）：重抓待付款訂單**合併**進 `1688_DB`——仍在待付款的訂單用新值覆蓋
+  （廠商改價→實付款一起更新，這就是「看得出廠商改價」的關鍵），**這次沒抓到的訂單整組保留**。⚠️原因：Edwin 一批下很多單、
+  逐筆核價，會先按付款結掉部分訂單再繼續核剩下的；已付款訂單離開「待付款」→ 純覆蓋會把它連訂單編號一起清掉，就無法出到
+  2-2 到貨表核對（訂單編號對不上）。故改合併保留已付款訂單（純函式 `pending_scraper.merge_order_grid`，與到貨版共用；
+  到貨版多做運單號回填）。⚠️**0 筆時防呆略過寫入**（避免無謂重寫）。
 - **入口**：GUI `reconcile_gui.py`（獨立，不動 gui.py/order_gui.py）＝設核對日期→🔄刷新預覽(dry-run 顯示筆數/實付合計/廠商)
   →✅寫入 1688_DB。啟動 `run_reconcile_mac.command` / `run_reconcile_windows.bat`。
   CLI `python main.py reconcile-refresh [-d 日期] [-s 狀態] [--commit]`。cookie 用主 gui.py 的「🔑 登入 1688」產生的 `config/cookies.json`。
@@ -321,7 +324,8 @@ IMPORTRANGE 進 2-2 的 `Kkren_DB` → 到貨日期分頁靠「物流單號」�
 ⚠️**到貨版 1688_DB 刷新＝合併累加、非整張覆蓋**（2026-07-27）：`ReconcileDB.overwrite(arrival=True)`
 先讀舊 DB，新抓訂單為主、這次缺運單號時**回填舊值**、舊有但這次沒抓到的訂單（已離開待收貨）**整組保留**
 （純函式 `pending_scraper.merge_arrival_grid`）。否則訂單一離開待收貨、運單號從 DB 消失 → 到貨分頁 XLOOKUP 全對不到。
-**故到貨表刷新前不用再手動「凍結成值」**；金額版仍是純覆蓋（要反映現況），金額日期分頁核對完仍要凍結成值。
+**故到貨表刷新前不用再手動「凍結成值」**；金額版（2026-07-29 起）也改合併累加、共用 `merge_order_grid`
+（保留已付款訂單、待付款訂單反映最新金額），金額日期分頁核對完仍要凍結成值。
 - **抓取（去風險定案）**：Kkren 是 SPA（`kkren.com.tw`），API 在 `api.jyb.com.tw`，認證＝
   **localStorage 的 `accessToken`（Bearer）**，非 cookie。Edwin 用 `kkren_probe`（scratch）登入一次
   存**完整登入態** `config/kkren_state.json`（含 token，⚠️新裝置登入要簡訊驗證碼）；之後 httpx 帶
