@@ -62,15 +62,70 @@ def alert_mac(title: str, message: str) -> None:
         logger.warning(f"macOS 對話框失敗：{e}")
 
 
+# 各分頁標題模板 ↔ SQLite 表：驗 Sheet 是否漏寫用（%Y%m 按月、%Y 按年）
+_SHEET_TAB_TABLES = [
+    ("商品日報_{ym}", "product_daily"),
+    ("規格日報_{ym}", "model_daily"),
+    ("大盤日報_{y}", "shop_daily"),
+    ("廣告日報_{ym}", "ad_daily"),
+    ("自動選品商品_{ym}", "gms_product_daily"),
+    ("賣場廣告關鍵字_{ym}", "shop_keyword_daily"),
+]
+
+
+def _sheet_missing_tabs(gc, sheet_id: str, shop: str, day: date, con) -> tuple[list[str], str]:
+    """比對「SQLite 有資料的分頁」是否也寫進了 Google Sheet。
+
+    回傳 (缺漏分頁清單, 錯誤訊息)。SQLite 有 N 列、Sheet 該日該賣場 < N → 判缺（429 半途中斷會這樣）。
+    只查 SQLite 有料的分頁（跳過本來就 0 列的，避免誤報，如 lady 的賣場關鍵字）。
+    """
+    dt = day.isoformat()
+    ym, y = f"{day:%Y%m}", f"{day:%Y}"
+    try:
+        sh = gc.open_by_key(sheet_id)
+        existing = {w.title: w for w in sh.worksheets()}
+    except Exception as e:  # noqa: BLE001 Sheet 讀不到＝無法驗證，回錯誤讓上層標註
+        return [], f"Sheet 讀取失敗：{str(e)[:50]}"
+
+    missing: list[str] = []
+    for tab_tpl, table in _SHEET_TAB_TABLES:
+        n_sql = con.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE shop=? AND dt=?", (shop, dt)
+        ).fetchone()[0]
+        if n_sql == 0:
+            continue  # 本來就沒料 → 不需在 Sheet 出現
+        title = tab_tpl.format(ym=ym, y=y)
+        ws = existing.get(title)
+        if ws is None:
+            missing.append(title.split("_")[0])
+            continue
+        ab = ws.get_values("A:B")   # 只讀日期/賣場兩欄，輕量
+        n_sheet = sum(1 for r in ab if len(r) >= 2 and r[0] == dt and r[1] == shop)
+        if n_sheet < n_sql:
+            missing.append(f"{title.split('_')[0]}({n_sheet}/{n_sql})")
+    return missing, ""
+
+
 def check_shopee(day: date) -> list[CheckResult]:
-    """驗 SQLite 裡有沒有 day 當天各賣場的資料（= 真相 Sheet 的同步副本）。"""
+    """驗當天各賣場資料——SQLite 有（同步副本）+ Google Sheet 真的寫進去了（真相來源）。
+
+    ⚠️ 只驗 SQLite 會有盲點：429 配額超限會「SQLite 有、Sheet 漏寫」→ 誤報全綠（#S104 lady 7/27）。
+    故加驗 Sheet：SQLite 有料的分頁必須在 Sheet 也有同日同賣場的列，否則判 ❌。
+    """
     from config import settings
+
+    from .storage_sheet import _get_client
 
     results: list[CheckResult] = []
     if not DB_PATH.exists():
         return [CheckResult("蝦皮數據", False, "SQLite 不存在（從沒跑過？）")]
     con = sqlite3.connect(DB_PATH)
     try:
+        gc = None
+        try:
+            gc = _get_client()
+        except Exception as e:  # noqa: BLE001 拿不到 client → 只驗 SQLite，Sheet 標未驗
+            logger.warning(f"健康點名取 Sheet client 失敗（只驗 SQLite）：{e}")
         for shop in settings.SHOPEE_ANALYTICS_SHEET_IDS:
             dt = day.isoformat()
             n_prod = con.execute(
@@ -82,9 +137,22 @@ def check_shopee(day: date) -> list[CheckResult]:
             has_shop = con.execute(
                 "SELECT COUNT(*) FROM shop_daily WHERE shop=? AND dt=?", (shop, dt)
             ).fetchone()[0]
-            ok = n_prod > 0 and has_shop > 0
+            sqlite_ok = n_prod > 0 and has_shop > 0
             detail = f"{day:%-m/%-d}份 商品{n_prod}/廣告{n_ad}/大盤{'有' if has_shop else '缺'}"
-            results.append(CheckResult(f"蝦皮數據({shop})", ok, detail))
+
+            # 加驗 Google Sheet（真相來源）——只在 SQLite 有料時才有意義
+            sheet_ok = True
+            sheet_id = settings.SHOPEE_ANALYTICS_SHEET_IDS.get(shop)
+            if gc is not None and sqlite_ok and sheet_id:
+                missing, err = _sheet_missing_tabs(gc, sheet_id, shop, day, con)
+                if err:
+                    detail += f"｜Sheet未驗({err})"       # 讀不到不判死，只註記
+                elif missing:
+                    sheet_ok = False
+                    detail += f"｜⚠️Sheet漏寫：{','.join(missing)}"
+                else:
+                    detail += "｜Sheet齊"
+            results.append(CheckResult(f"蝦皮數據({shop})", sqlite_ok and sheet_ok, detail))
     finally:
         con.close()
     return results

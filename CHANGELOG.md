@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-29（蝦皮三賣場連寫爆 Sheets 配額 429 → 分段寫+重試；健康點名加驗 Sheet）
+
+### 修復
+- **三賣場每日抓取連寫爆 Google Sheets 讀取配額(429)、部分分頁漏寫**（#S104，`main.py`
+  `shopee_collect_daily_cmd` + `storage_sheet.save`）：nail/lady/baby 背靠背寫 Sheet，一分鐘內對
+  Sheets 讀取次數超 60/分 → 429，且**寫到一半中斷留下部分分頁缺當天資料**（實際踩到 lady 7/27 廣告+
+  自動選品被截）。雙保險修：① 賣場間隔 30s 分段寫；② `storage_sheet.save` 內建 429 退避重試整包
+  （30/60/90s，`_save_once` 冪等故重試安全）。已手動補回 lady 7/27（從 SQLite 重建 DayData 重寫，免重抓）。
+- **健康點名盲點：只驗 SQLite、驗不到 Google Sheet 漏寫**（#S104，`health_check.check_shopee`
+  + 新增 `_sheet_missing_tabs`）：429 漏寫時 SQLite 有、Sheet 缺 → 原本**誤報全綠**。現同時驗 Sheet：
+  比對「SQLite 有料的分頁」是否也寫進 Sheet（該日該賣場列數 < SQLite 判 ❌ `Sheet漏寫`），Sheet 讀不到
+  只註記 `Sheet未驗` 不判死。
+
 ## 2026-07-29（金流核對刷新改合併累加，不再清掉已付款訂單；訂單頁載入加重試）
 
 ### 修復

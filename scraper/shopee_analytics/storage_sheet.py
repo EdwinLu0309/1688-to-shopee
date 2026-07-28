@@ -179,7 +179,35 @@ def _delete_day_rows(sh, ws, dt: str, shop: str) -> int:
     return len(to_delete)
 
 
-def save(data: DayData, sheet_id: str) -> None:
+def save(data: DayData, sheet_id: str, tries: int = 4) -> None:
+    """寫入一天一賣場的六分頁；撞 Google 配額(429)時退避重試整包再寫。
+
+    ⚠️ 429 常見於「三賣場連續寫、一分鐘內對 Sheets 的讀取次數爆表(60/分)」。
+    _save_once 本身冪等（每分頁先刪該日該賣場舊列再 append），故重試整包安全、
+    不會重複；且避免「寫到一半 429 中斷 → 部分分頁缺當天資料」（#S104 lady 7/27 踩過）。
+    """
+    import time as _time
+
+    from gspread.exceptions import APIError
+
+    for attempt in range(tries):
+        try:
+            _save_once(data, sheet_id)
+            return
+        except APIError as e:
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            if code == 429 and attempt < tries - 1:
+                wait = 30 * (attempt + 1)   # 30,60,90s 退避，等每分鐘配額窗口重置
+                logger.warning(
+                    f"Google Sheet 配額超限(429)，{wait}s 後重試整包（{attempt+1}/{tries}）："
+                    f"{data.shop} {data.dt}"
+                )
+                _time.sleep(wait)
+                continue
+            raise
+
+
+def _save_once(data: DayData, sheet_id: str) -> None:
     gc = _get_client()
     sh = gc.open_by_key(sheet_id)
     dt = data.dt.isoformat()

@@ -810,6 +810,13 @@ def shopee_collect_daily_cmd(date_str: str | None, data_dir: str) -> None:
     from scraper.shopee_analytics.collector import collect_day, save_raw_snapshot, yesterday
     from scraper.shopee_analytics.shopee_login import cookie_path_for
 
+    import time as _time
+
+    # 賣場之間拉開間隔再寫 Sheet——三家連續寫會在一分鐘內爆 Google Sheets 讀取配額(60/分)
+    # → 429、且會寫到一半中斷留下部分分頁缺當天資料（#S104 lady 7/27 踩過）。分段寫 +
+    # storage_sheet.save 內建 429 退避重試＝雙保險。
+    SHOP_GAP_SEC = 30
+
     day = _date.fromisoformat(date_str) if date_str else yesterday()
     db_path = Path(data_dir) / "shopee_analytics.db"
     ran, skipped, failed = [], [], []
@@ -819,6 +826,9 @@ def shopee_collect_daily_cmd(date_str: str | None, data_dir: str) -> None:
             logger.warning(f"[{shop}] 尚未登入（缺 {cookie_path.name}），略過")
             skipped.append(shop)
             continue
+        if ran:   # 已有賣場寫過 Sheet → 先隔一段再寫這家，避開每分鐘讀取配額
+            logger.info(f"賣場間隔 {SHOP_GAP_SEC}s（避免 Sheets 配額 429）…")
+            _time.sleep(SHOP_GAP_SEC)
         try:
             with ShopeeDataClient(cookie_path) as client:
                 data = collect_day(client, shop, day)

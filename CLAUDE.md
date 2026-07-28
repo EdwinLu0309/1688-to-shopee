@@ -357,6 +357,10 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
 - **抓取**：`shopee-collect --shop nail [--date] [--sheet-id] [--no-sheet]`（預設抓昨天；sheet-id 預設查
   `settings.SHOPEE_ANALYTICS_SHEET_IDS`）。落地順序 raw 快照 → SQLite → Sheet。SA 沿用 inventory-sync
   （env `GOOGLE_SERVICE_ACCOUNT_JSON`，未設則 fallback `ORDER_SHEET_SA_JSON`；SA 要被分享 Sheet 編輯權）。
+- **⚠️ 三賣場連寫爆 Sheets 讀取配額(429)＝2026-07-29 修**（#S104）：`shopee-collect-daily` 三家背靠背寫 Sheet，
+  一分鐘內對 Sheets 的讀取次數超 60/分 → 429，且**寫到一半中斷會留下部分分頁缺當天資料**（lady 7/27 廣告+自動選品
+  被截）。修法雙保險：① `shopee_collect_daily_cmd` **賣場間隔 30s 分段寫**；② `storage_sheet.save` 內建 **429 退避
+  重試整包**（30/60/90s；`_save_once` 冪等故重試安全）。補歷史漏寫免重抓＝從 SQLite 重建 `DayData` 再 `storage_sheet.save`。
 - **6 個 Sheet 分頁**（同日重跑冪等＝先 batch 刪舊列，⚠️逐列 delete 423 次會炸 429，見 `storage_sheet._delete_day_rows`）：
   1. `商品日報_YYYYMM`：商品層 `v4/product/performance/`（49 欄，分頁抓全店 ~423/天）
   2. `規格日報_YYYYMM`：規格層（inline models，994/天）——**「規格名稱」＝成本/毛利月獲利表對帳 key**
@@ -374,9 +378,12 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
   （loop `SHOPEE_ANALYTICS_SHEET_IDS` 所有已登入賣場，缺 cookie 略過、一店掛不影響其他）。
   裝：雙擊 `run_shopee_analytics_install.command`（同時裝健康點名）。
 - **★數據健康點名（#S100，`health_check.py`）**：解「排程沒跑＝連失敗通知都沒有」的無聲失敗。LaunchAgent
-  `com.joyslu.data-health.plist` 每天 11:00 **驗資料本身**（點名制，非聽作業回報）：蝦皮查 SQLite 有昨天資料、
+  `com.joyslu.data-health.plist` 每天 11:00 **驗資料本身**（點名制，非聽作業回報）：蝦皮**同時驗 SQLite + Google Sheet**、
   ERP 查【全】ERP庫存寬表 H1 欄頭＝今天（`ERP_SHEET_ID`）。結果跳 **macOS 對話框**（`alert_mac` 停螢幕不消失，
   比橫幅可靠）+ 寫「抓取狀態」分頁（歷史）。異常才補橫幅+提示音。1688 核對 daemon 不點名（主動勾選型）。
+  ⚠️**蝦皮加驗 Sheet＝2026-07-29 修盲點**（#S104）：原本只查 SQLite → 429 漏寫（SQLite 有、Sheet 缺）時**誤報全綠**。
+  現 `_sheet_missing_tabs` 比對「SQLite 有料的分頁」是否也寫進 Sheet（該日該賣場列數 < SQLite 就判 ❌ `Sheet漏寫`）；
+  Sheet 讀不到只註記 `Sheet未驗` 不判死。
 - **★訂單商品聯動 basket（#S101，`order_basket.py`）＝每月一次半自動**（Edwin 定義，不每天抓——
   basket 是慢變數 + 訂單報表含個資）：Edwin 每月匯出訂單報表（`Order.all.*.xlsx`，msoffcrypto 加密、
   **密碼＝帳號手機末 6 碼**，美甲＝576137）丟過來 → `order-basket <報表> -P <密碼> --commit`。
