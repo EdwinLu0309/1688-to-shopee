@@ -478,8 +478,16 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
 - CLI：`product-cards --shop nail --master --flat --download-media --analyze --out-base "G:\…\商品資產"`
   （`--flat`＝雲端已按賣場分夾時不再加 nail/ 子夾）。抓取無 cookie 也常成功（scrape_many）。
 - **一鍵同步（正線運轉，`asset_sync.py` + `sync-assets` CLI + `run_sync_assets_windows.bat` 雙擊）**：
-  主表「商品表」有 `要產`(checkbox)＋`資產包狀態`(✓) 兩欄。Edwin 勾要跑的 → 觸發：讀勾選 →
+  `要產`(checkbox)＋`資產包狀態`(✓) 兩欄。Edwin 勾要跑的 → 觸發：讀勾選 →
   抓取 → 產資產包寫雲端 → 回寫 `資產包狀態=✓`＋清 `要產`。**增量**只跑勾的/未完成的、被擋跳過。
+  - **⚠️ 2026-07-29 欄位搬家**：Edwin 把 `要產`/`資產包狀態` 從「商品表」搬到「**蝦皮處理狀態**」分頁。
+    `open_for_sync` 改為：商品資訊(編號/網址/廠商/品名)讀「商品表」、勾選/完成狀態讀寫「蝦皮處理狀態」
+    （以**商品編號 join**、回寫寫該分頁）。**覆蓋範圍變小**：只有「蝦皮處理狀態」有列的編號（＝已上架子集）
+    才能被勾選驅動；商品表有但該分頁沒有的（未上架）暫無法勾。**同編號多變體**（如 H-c30 基本+高腰）
+    共用同一個勾選、會產各自 item_id 的資產包。
+  - **⚠️ 必配套改 Apps Script**：「蝦皮處理狀態」是 `status_sync_addon.gs` 的 `syncStatusTab()` 以商品編號
+    重建的分頁。已把保留區從 D:K 擴到 **D:N**（L 蝦皮折扣/M 資產包狀態/N 要產一起按編號帶回、N 重補勾選框），
+    否則重建時勾選會錯位到別的商品。**這是 repo 內的原始碼，改完要重新貼進雲端綁定的 Apps Script 才生效。**
   `--all`＝跑所有未完成、`--no-analyze`＝省 vision。雲端根＝`settings.ASSET_CLOUD_BASE`（env 覆蓋）。
   資料夾名＝`{編號}_{品名}`（如 `AAS1_AS_黑瓶功能膠`，編號給 AI、品名給人認）。要在 Edwin 機器跑
   （Playwright/SA/OPENAI_API_KEY/掛好的雲端硬碟）。

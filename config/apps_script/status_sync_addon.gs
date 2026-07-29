@@ -15,9 +15,12 @@
  *   ※ 若某張表還沒裝過 Code.gs（沒有選單），可直接在 Apps Script 編輯器選 syncStatusTab
  *     按「執行」跑，或自行補一個 onOpen 建選單。
  *
- * 邏輯：以「商品編號」為 key 重建「蝦皮處理狀態」分頁 —— 手填欄（蝦皮ID/標題/詳情/
- *   圖片/選項圖/影片/優化/備註，全文字）原封帶回、新編號補空白、消失的移除，永不錯位。
- *   B/C（分類/品名）是 MAP 公式跟著 A 欄 live，不在此處理。
+ * 邏輯：以「商品編號」為 key 重建「蝦皮處理狀態」分頁 —— 手填/狀態欄（D..N＝蝦皮ID/標題/
+ *   詳情/圖片/選項圖/影片/優化/備註 + 蝦皮折扣/資產包狀態/要產）原封帶回、新編號補空白、
+ *   消失的移除，永不錯位。B/C（分類/品名）是 MAP 公式跟著 A 欄 live，不在此處理。
+ *   ※ 2026-07-29：D:K 之外新增 L:N（蝦皮折扣/資產包狀態/要產）也按編號帶回——因 Edwin 把
+ *     「要產/資產包狀態」從商品表搬來這裡當資產包程式(asset_sync)的開關，重建時必須跟著 A 欄
+ *     一起以編號對位，否則勾選會錯位到別的商品。N（要產）重建後重補勾選框。
  */
 
 function syncStatusTab(silent) {
@@ -25,9 +28,10 @@ function syncStatusTab(silent) {
   var STATUS_TAB = "蝦皮處理狀態";
   var SRC_TAB = "商品表";
   var MANUAL_START = 4;               // D 欄起（蝦皮ID）
-  var MANUAL_END = 11;                // 到 K 欄（備註）
-  var WIDTH = MANUAL_END - MANUAL_START + 1;   // 8 欄手填
-  var EMPTY_MANUAL = ["", "", "", "", "", "", "", ""];  // 全文字，預設空白
+  var MANUAL_END = 14;                // 到 N 欄（要產）——含 L 蝦皮折扣/M 資產包狀態/N 要產
+  var WANT_COL = 14;                  // N 欄＝要產（checkbox，重建後重補勾選框）
+  var WIDTH = MANUAL_END - MANUAL_START + 1;   // 11 欄（D:N）
+  var EMPTY_MANUAL = ["", "", "", "", "", "", "", "", "", "", ""];  // 預設空白（新編號）
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var src = ss.getSheetByName(SRC_TAB);
@@ -75,7 +79,9 @@ function syncStatusTab(silent) {
   }
   if (codes.length) {
     dst.getRange(2, 1, codes.length, 1).setValues(aVals);                    // A
-    dst.getRange(2, MANUAL_START, codes.length, WIDTH).setValues(mVals);     // D:K
+    dst.getRange(2, MANUAL_START, codes.length, WIDTH).setValues(mVals);     // D:N
+    // N（要產）重補勾選框：空字串→未勾、帶回的 true/false 維持（新編號預設未勾）
+    dst.getRange(2, WANT_COL, codes.length, 1).insertCheckboxes();
   }
   if (!silent) ss.toast("同步完成：" + codes.length + " 個商品", "⑤ 蝦皮處理狀態", 5);
 }

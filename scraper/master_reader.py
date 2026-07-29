@@ -18,7 +18,10 @@ from pathlib import Path
 from loguru import logger
 
 MASTER_SHEET_ID = "1eL58RfE_a5AQpSE4qGcLi0AsMKdDO_NLAsfB76NmtRc"
-MASTER_TAB_GID = 1584079803  # 「商品表」分頁
+MASTER_TAB_GID = 1584079803  # 「商品表」分頁（商品編號/代表網址/廠商… 權威來源）
+# 2026-07-29：Edwin 把「要產/資產包狀態」兩欄從「商品表」搬到「蝦皮處理狀態」分頁。
+# 一鍵同步改成：商品資訊讀「商品表」、勾選/完成狀態讀寫「蝦皮處理狀態」（以商品編號 join）。
+STATUS_TAB_TITLE = "蝦皮處理狀態"
 
 # 表頭名稱 → 內部欄位（正規化後比對；同義字先到先得）。
 _HEADER_ALIASES = {
@@ -141,10 +144,14 @@ def _col_letter(idx0: int) -> str:
 
 
 def open_for_sync(sa_json: str | Path | None = None):
-    """開主表供「一鍵同步」用。回 (ws, colmap, records)。
+    """開主表供「一鍵同步」用。回 (ws_status, status_colmap, records)。
 
-    records：每個「有代表網址」的商品一筆，含 item_id/code/name/supplier/url +
-    want(要產勾選 bool)/asset_done(資產包狀態已✓ bool)/_row(1-based 列號，供回寫)。
+    - 商品資訊（item_id/code/name/supplier/url）讀自「商品表」分頁。
+    - want(要產勾選)/asset_done(資產包狀態✓) 讀自「蝦皮處理狀態」分頁，以商品編號 join；
+      回寫（write_status）也寫「蝦皮處理狀態」→ 故回傳的 ws 是該分頁、colmap 是該分頁的。
+    - _row = 該商品在「蝦皮處理狀態」的 1-based 列號（供回寫）。
+    - 只收「在蝦皮處理狀態有對應列」且「商品表有代表網址」的商品；不在蝦皮處理狀態的
+      （未上架子集）目前無法用勾選驅動 → 略過（見 CLAUDE.md 覆蓋範圍註記）。
     """
     import gspread
 
@@ -152,30 +159,57 @@ def open_for_sync(sa_json: str | Path | None = None):
     if not sa:
         raise FileNotFoundError("找不到 SA 憑證（參數/settings/OneDrive 都沒有）")
     gc = gspread.service_account(filename=str(sa))
-    ws = gc.open_by_key(MASTER_SHEET_ID).get_worksheet_by_id(MASTER_TAB_GID)
-    rows = ws.get_all_values()
-    colmap = _build_colmap(rows[0]) if rows else {}
+    sh = gc.open_by_key(MASTER_SHEET_ID)
+
+    ws_prod = sh.get_worksheet_by_id(MASTER_TAB_GID)
+    prod_rows = ws_prod.get_all_values()
+    prod_colmap = _build_colmap(prod_rows[0]) if prod_rows else {}
+
+    ws_status = sh.worksheet(STATUS_TAB_TITLE)
+    status_rows = ws_status.get_all_values()
+    status_colmap = _build_colmap(status_rows[0]) if status_rows else {}
+    if "want" not in status_colmap and "asset_status" not in status_colmap:
+        logger.error(
+            f"「{STATUS_TAB_TITLE}」找不到「要產」或「資產包狀態」欄；表頭＝{status_rows[0] if status_rows else '(空)'}"
+        )
+
+    # 蝦皮處理狀態：商品編號 → {want, asset_done, _row}（同編號取第一筆）
+    status_by_code: dict[str, dict] = {}
+    for i, r in enumerate(status_rows[1:], start=2):  # 1-based（含表頭第 1 列）
+        code = _cell(r, status_colmap.get("code"))
+        if not code or code in status_by_code:
+            continue
+        status_by_code[code] = {
+            "want": _cell(r, status_colmap.get("want")) in _TRUE,
+            "asset_done": bool(_cell(r, status_colmap.get("asset_status"))),
+            "_row": i,
+        }
 
     records = []
-    for i, r in enumerate(rows[1:], start=2):  # 1-based sheet row（含表頭在第 1 列）
-        url = _cell(r, colmap.get("url"))
+    for r in prod_rows[1:]:
+        url = _cell(r, prod_colmap.get("url"))
         iid = _item_id(url)
-        code = _cell(r, colmap.get("code"))
+        code = _cell(r, prod_colmap.get("code"))
         if not iid or not code:
+            continue
+        st = status_by_code.get(code)
+        if not st:  # 商品表有、但蝦皮處理狀態沒這編號 → 無法勾選驅動，略過
             continue
         records.append({
             "item_id": iid, "code": code,
-            "name": _cell(r, colmap.get("name")),
-            "supplier": _cell(r, colmap.get("supplier")),
-            "url": url, "_row": i,
-            "want": _cell(r, colmap.get("want")) in _TRUE,
-            "asset_done": bool(_cell(r, colmap.get("asset_status"))),
+            "name": _cell(r, prod_colmap.get("name")),
+            "supplier": _cell(r, prod_colmap.get("supplier")),
+            "url": url, "_row": st["_row"],
+            "want": st["want"], "asset_done": st["asset_done"],
         })
-    return ws, colmap, records
+    logger.info(
+        f"一鍵同步讀到 {len(records)} 個商品（蝦皮處理狀態 {len(status_by_code)} 個編號有狀態列）"
+    )
+    return ws_status, status_colmap, records
 
 
 def write_status(ws, colmap: dict, row: int, done: bool = True, clear_want: bool = True) -> None:
-    """回寫某列：資產包狀態＝✓、清掉要產勾選。"""
+    """回寫某列（蝦皮處理狀態分頁）：資產包狀態＝✓、清掉要產勾選。"""
     reqs = []
     if "asset_status" in colmap:
         reqs.append((f"{_col_letter(colmap['asset_status'])}{row}", "✓" if done else ""))
