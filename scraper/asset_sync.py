@@ -44,7 +44,7 @@ def sync_assets(
     from scraper.playwright_scraper import scrape_many
     from scraper.product_card import generate_asset_packs
 
-    ws, colmap, records = open_for_sync(sa_json)
+    ws, colmap, records = open_for_sync(sa_json, shop=shop)
     if only_missing:
         targets = [r for r in records if not r["asset_done"]]
     else:

@@ -17,8 +17,14 @@ from pathlib import Path
 
 from loguru import logger
 
-MASTER_SHEET_ID = "1eL58RfE_a5AQpSE4qGcLi0AsMKdDO_NLAsfB76NmtRc"
+MASTER_SHEET_ID = "1eL58RfE_a5AQpSE4qGcLi0AsMKdDO_NLAsfB76NmtRc"  # Nail（預設，向後相容）
 MASTER_TAB_GID = 1584079803  # 「商品表」分頁（商品編號/代表網址/廠商… 權威來源）
+# 三賣場 1-1 商品主表 ID（「商品表」gid 三家皆同＝MASTER_TAB_GID，同模板複製；只換 sheet_id）。
+SHOP_SHEETS = {
+    "nail": "1eL58RfE_a5AQpSE4qGcLi0AsMKdDO_NLAsfB76NmtRc",
+    "lady": "1SsRfXyh65ViZ0x8TYj1wLq9SCDFvGiDtkMdpuggE7ps",
+    "baby": "1yIrFP_lJZ1Tq6VTIi_6J7xC6NZtTYXexwsoJyF3CNpo",
+}
 # 2026-07-29：Edwin 把「要產/資產包狀態」兩欄從「商品表」搬到「蝦皮處理狀態」分頁。
 # 一鍵同步改成：商品資訊讀「商品表」、勾選/完成狀態讀寫「蝦皮處理狀態」（以商品編號 join）。
 STATUS_TAB_TITLE = "蝦皮處理狀態"
@@ -143,8 +149,11 @@ def _col_letter(idx0: int) -> str:
     return s
 
 
-def open_for_sync(sa_json: str | Path | None = None):
+def open_for_sync(sa_json: str | Path | None = None, shop: str = "nail"):
     """開主表供「一鍵同步」用。回 (ws_status, status_colmap, records)。
+
+    shop：nail/lady/baby → 對應 SHOP_SHEETS 的 1-1 主表（「商品表」gid 三家皆同）。
+    未知 shop 退回 Nail（向後相容）。
 
     - 商品資訊（item_id/code/name/supplier/url）讀自「商品表」分頁。
     - want(要產勾選)/asset_done(資產包狀態✓) 讀自「蝦皮處理狀態」分頁，以商品編號 join；
@@ -159,7 +168,8 @@ def open_for_sync(sa_json: str | Path | None = None):
     if not sa:
         raise FileNotFoundError("找不到 SA 憑證（參數/settings/OneDrive 都沒有）")
     gc = gspread.service_account(filename=str(sa))
-    sh = gc.open_by_key(MASTER_SHEET_ID)
+    sheet_id = SHOP_SHEETS.get(str(shop).lower(), MASTER_SHEET_ID)
+    sh = gc.open_by_key(sheet_id)
 
     ws_prod = sh.get_worksheet_by_id(MASTER_TAB_GID)
     prod_rows = ws_prod.get_all_values()
