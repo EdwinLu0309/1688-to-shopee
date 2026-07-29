@@ -2,7 +2,7 @@
 
 ## 高優先
 - [x] 2026-07-30 ★Lady↔Nail 主表功能同步：⑤ `syncStatusTab` D:K→D:N（比照 Nail）；④ `snapshotToAmountRecord` 統一 Nail 新欄序但保留 Lady SUMIF 多筆對帳 + L付款狀態自動帶；`master_reader.open_for_sync` 加 shop 參數（`SHOP_SHEETS`，實測 Lady 讀 249 商品→資產包可跨）。核對確認 Lady/Nail live 表結構本就一致
-- [ ] 2026-07-30 ★Lady 兩支函式（④/⑤）**重貼進雲端 Apps Script**；④ 貼後**實跑一天核對金額**（SUMIF 對廠商多筆、J綠底、L付款時間）
+- [x] 2026-07-30 ★Lady 兩支函式（④/⑤）重貼進雲端 Apps Script；④ 實跑核對金額**正確**（SUMIF 對廠商多筆加總、J綠底、L付款時間皆驗證通過）
 - [ ] 2026-07-30 ★Baby 主表同步（落後 Nail/Lady）：蝦皮處理狀態補 L/M/N + syncStatusTab D:N、SKU表 J 包裝備註→選項註記、訂貨表 Q 包裝→選項註記、廠商訂單補 G廠商名稱/H小計
 - [ ] 2026-07-30 ④ 若要 Nail 也支援同廠商多筆：Nail 現用 XLOOKUP+假設「同廠商=同訂單」，未來同廠商多筆時比照 Lady 改 SUMIF
 - [x] 2026-07-26 #S103 ★商品資產包系統：`product_card.py`(generate_asset_packs) + `master_reader.py`(讀商品主表) + `auto_classify.extract_highlights`(vision 賣點) + CLI `product-cards --master --flat --download-media --analyze --out-base`。每商品一資料夾(商品卡.md 純廠商固定事實/商品賣點.json/基礎圖/優化圖/影片/raw)、主表驅動編號、軸命名通用化、繁體 s2tw。AAS1 實測直接落地 Google Drive
