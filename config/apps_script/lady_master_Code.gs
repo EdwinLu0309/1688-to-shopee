@@ -124,7 +124,7 @@ function exportOrderList(silent) {
 }
 
 
-// ───────── ④ 廠商訂單 → 進貨金額記錄 ─────────
+// ───────── ④ 廠商訂單 → 進貨金額記錄（Nail 新欄序 + Lady SUMIF 多筆對帳，2026-07-30 統一）─────────
 function snapshotToAmountRecord(silent) {
   var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!AMOUNT_SHEET_ID) { if (silent) throw new Error("未設定 AMOUNT_SHEET_ID"); ui.alert("尚未設定 Lady 進貨金額記錄表 ID（沒有此表可略過此動作）"); return; }
@@ -152,26 +152,40 @@ function snapshotToAmountRecord(silent) {
   }
   var ns = tgt.insertSheet(tag);
   var rate = Number(ss.getRange("設定!B2").getValue()) || 4.9;
-  var HDR = ["商品編號", "商品名稱", "訂單金額", "訂單金額合計", "廠商名稱", "付款平台訂單編號",
-             "訂單費用", "總金額", "運費", "核對", "TW", "付款狀態", "備註"];
-  var NC = HDR.length;
-  var out = [["匯率", "", rate].concat(blanks_(NC - 3)),
-             ["總額", "", "=SUM(K5:K)"].concat(blanks_(NC - 3)),
-             ["", "", ""].concat(blanks_(NC - 3)),
+  // 新欄序（統一比照 Nail：廠商名稱+付款平台訂單編號移到最前，好核對）：
+  // A廠商名稱 B付款平台訂單編號 C商品編號 D商品名稱 E訂單金額
+  // F訂單金額合計 G訂單費用 H總金額 I運費 J核對 K TW L付款狀態 M備註
+  // 訂單層(A,B,F~M)每個廠商群組垂直合併；C~E 為逐商品編號列。上方三列：標籤在A、數值在B。
+  var HDR = ["廠商名稱", "付款平台訂單編號", "商品編號", "商品名稱", "訂單金額",
+             "訂單金額合計", "訂單費用", "總金額", "運費", "核對", "TW", "付款狀態", "備註"];
+  var NC = HDR.length;                                  // 13 欄
+  var out = [["匯率", rate].concat(blanks_(NC - 2)),                         // B1=匯率
+             ["總額", "=SUM(K5:K)"].concat(blanks_(NC - 2)),                 // B2=台幣總額(TW=K)
+             ["1688_DB更新", "='1688_DB'!B2"].concat(blanks_(NC - 2)),       // B3=DB最後更新時間
              HDR];
   var merges = [];
   var ri = 5, i = 0;
   while (i < rows.length) {
     var j = i;
-    while (j < rows.length && String(rows[j][2]) === String(rows[i][2])) j++;
+    while (j < rows.length && String(rows[j][2]) === String(rows[i][2])) j++;  // 同廠商=同一組
     var n = j - i, first = ri, lastRow = ri + n - 1;
     for (var g = i; g < j; g++) {
-      if (g === i) {
-        out.push([rows[g][0], rows[g][1], rows[g][3],
-          "=SUM(C" + first + ":C" + lastRow + ")", rows[g][2],
-          "", "", "", "", "", "=IF($H" + first + "=\"\",\"\",$H" + first + "*$C$1)", "", ""]);
-      } else {
-        out.push([rows[g][0], rows[g][1], rows[g][3]].concat(blanks_(NC - 3)));
+      if (g === i) {  // 群組第一列：廠商層對帳(A,B,F~M，1688_DB 用 SUMIF 對廠商含多筆訂單) + 逐品(C,D,E)
+        out.push([
+          rows[g][2],                                                         // A 廠商名稱
+          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$D$4:$D=$A" + first + ")),\"\")",              // B 付款編號（同廠商多筆全列）
+          rows[g][0], rows[g][1], rows[g][3],                                 // C商品編號 D商品名稱 E訂單金額
+          "=SUM(E" + first + ":E" + lastRow + ")",                            // F 訂單金額合計
+          "=IF($H" + first + "=\"\",\"\",$H" + first + "-$I" + first + ")",   // G 訂單費用=總金額-運費（折後實付貨款）
+          "=IF(COUNTIF('1688_DB'!$D:$D,$A" + first + ")=0,\"\",SUMIF('1688_DB'!$D:$D,$A" + first + ",'1688_DB'!$I:$I))",   // H 總金額=Σ实付款
+          "=IF(COUNTIF('1688_DB'!$D:$D,$A" + first + ")=0,\"\",SUMIF('1688_DB'!$D:$D,$A" + first + ",'1688_DB'!$G:$G))",   // I 運費=Σ运费
+          "=IF(AND($F" + first + "<>\"\",$F" + first + "<>0,$G" + first + "<>\"\",$G" + first + "<=$F" + first + "),\"O\",\"\")", // J 核對:訂單費用≤合計
+          "=IF($H" + first + "=\"\",\"\",$H" + first + "*$B$1)",              // K TW=總金額×匯率
+          "",                                                                 // L 付款狀態(留手填日期)
+          ""                                                                  // M 備註
+        ]);
+      } else {   // 同組後續品項：只填 C/D/E（商品編號/名稱/金額）
+        out.push(["", "", rows[g][0], rows[g][1], rows[g][3]].concat(blanks_(NC - 5)));
       }
       ri++;
     }
@@ -180,15 +194,30 @@ function snapshotToAmountRecord(silent) {
   }
   var last = out.length;
   ns.getRange(1, 1, last, NC).setValues(out);
-  merges.forEach(function (m) { ns.getRange(m.row, 4, m.n, NC - 3).mergeVertically(); });
+  // 廠商層垂直合併：A~B(廠商/訂單編號) 與 F~M(金額欄)；C~E 逐商品不合併
+  merges.forEach(function (m) {
+    ns.getRange(m.row, 1, m.n, 2).mergeVertically();        // A~B
+    ns.getRange(m.row, 6, m.n, NC - 5).mergeVertically();   // F~M
+  });
+  // 版面
   var all = ns.getRange(1, 1, last, NC);
   all.setFontFamily("Arial").setFontSize(14).setVerticalAlignment("middle");
   all.setBorder(true, true, true, true, true, true, "#000000", SpreadsheetApp.BorderStyle.SOLID);
   ns.getRange(4, 1, 1, NC).setBackground("#d9ead3").setFontWeight("bold").setHorizontalAlignment("center");
-  ns.getRange(1, 1, 3, 3).setBackground("#fce5cd");
+  ns.getRange(1, 1, 3, 2).setBackground("#fce5cd");
+  ns.getRange(5, 12, Math.max(rows.length, 1), 1).setNumberFormat("yyyy/m/d");  // L 付款狀態=付款日期
+  // J 欄核對=「O」→ 綠底（一眼看出已對上、且沒被廠商多收的訂單）
+  var jRange = ns.getRange(5, 10, Math.max(rows.length, 1), 1);                 // J 欄(第10欄)資料區
+  var oRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("O").setBackground("#b6d7a8").setFontColor("#274e13")
+    .setRanges([jRange]).build();
+  var cfRules = ns.getConditionalFormatRules();
+  cfRules.push(oRule);
+  ns.setConditionalFormatRules(cfRules);
   ns.setFrozenRows(4);
   tgt.setActiveSheet(ns);
-  if (!silent) ui.alert("✅ 已建立「" + tag + "」，" + rows.length + " 個商品編號。");
+  if (!silent) ui.alert("✅ 已建立「" + tag + "」，" + rows.length + " 個商品編號。\n" +
+    "已自動帶入 1688_DB 對帳（廠商 SUMIF、同廠商多筆自動加總）；核對 O＝訂單費用 ≤ 訂貨合計，綠底。");
 }
 
 function blanks_(n) { var a = []; for (var i = 0; i < n; i++) a.push(""); return a; }
