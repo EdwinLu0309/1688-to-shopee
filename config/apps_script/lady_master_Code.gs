@@ -181,7 +181,7 @@ function snapshotToAmountRecord(silent) {
           "=IF(COUNTIF('1688_DB'!$D:$D,$A" + first + ")=0,\"\",SUMIF('1688_DB'!$D:$D,$A" + first + ",'1688_DB'!$G:$G))",   // I 運費=Σ运费
           "=IF(AND($F" + first + "<>\"\",$F" + first + "<>0,$G" + first + "<>\"\",$G" + first + "<=$F" + first + "),\"O\",\"\")", // J 核對:訂單費用≤合計
           "=IF($H" + first + "=\"\",\"\",$H" + first + "*$B$1)",              // K TW=總金額×匯率
-          "",                                                                 // L 付款狀態(留手填日期)
+          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$L$4:$L,'1688_DB'!$D$4:$D=$A" + first + ")),\"\")",              // L 付款狀態=各筆訂單付款時間(同廠商多筆；待付款＝空白)
           ""                                                                  // M 備註
         ]);
       } else {   // 同組後續品項：只填 C/D/E（商品編號/名稱/金額）
