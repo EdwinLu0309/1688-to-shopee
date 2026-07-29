@@ -203,9 +203,10 @@ function syncStatusTab(silent) {
   var STATUS_TAB = "蝦皮處理狀態";
   var SRC_TAB = "商品表";
   var MANUAL_START = 4;               // D 欄起（蝦皮ID）
-  var MANUAL_END = 11;                // 到 K 欄（備註）
-  var WIDTH = MANUAL_END - MANUAL_START + 1;  // 8 欄手填
-  var EMPTY_MANUAL = ["", "", "", "", "", "", "", ""];  // 全文字，預設空白
+  var MANUAL_END = 14;                // 到 N 欄（要產）——含 L 蝦皮折扣/M 資產包狀態/N 要產
+  var WANT_COL = 14;                  // N 欄＝要產（checkbox，重建後重補勾選框）
+  var WIDTH = MANUAL_END - MANUAL_START + 1;   // 11 欄（D:N）
+  var EMPTY_MANUAL = ["", "", "", "", "", "", "", "", "", "", ""];  // 預設空白（新編號）
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var src = ss.getSheetByName(SRC_TAB);
@@ -226,7 +227,7 @@ function syncStatusTab(silent) {
     }
   }
 
-  // 2) 既有手填資料 → 以編號為 key 存起來（D..K）
+  // 2) 既有手填/狀態資料 → 以編號為 key 存起來（D..N）
   var store = {};
   var dstLast = dst.getLastRow();
   if (dstLast >= 2) {
@@ -238,22 +239,24 @@ function syncStatusTab(silent) {
     }
   }
 
-  // 3) 依商品表順序重建（手填以 key 帶回，永不錯位）
+  // 3) 依商品表順序重建（手填/狀態以 key 帶回，永不錯位）
   var aVals = [], mVals = [];
   codes.forEach(function (code) {
     aVals.push([code]);
     mVals.push(store[code] ? store[code] : EMPTY_MANUAL.slice());
   });
 
-  // 4) 先清舊資料區（A 與 D:K，B/C 是 MAP 公式不動），再寫新的
+  // 4) 先清舊資料區（A 與 D:N，B/C 是 MAP 公式不動），再寫新的
   var clearRows = Math.max(dstLast - 1, codes.length) + 5;
   if (clearRows > 0) {
     dst.getRange(2, 1, clearRows, 1).clearContent();                  // A
-    dst.getRange(2, MANUAL_START, clearRows, WIDTH).clearContent();   // D:K
+    dst.getRange(2, MANUAL_START, clearRows, WIDTH).clearContent();   // D:N
   }
   if (codes.length) {
     dst.getRange(2, 1, codes.length, 1).setValues(aVals);                    // A
-    dst.getRange(2, MANUAL_START, codes.length, WIDTH).setValues(mVals);     // D:K
+    dst.getRange(2, MANUAL_START, codes.length, WIDTH).setValues(mVals);     // D:N
+    // N（要產）重補勾選框：空字串→未勾、帶回的 true/false 維持（新編號預設未勾）
+    dst.getRange(2, WANT_COL, codes.length, 1).insertCheckboxes();
   }
   if (!silent) ss.toast("同步完成：" + codes.length + " 個商品", "⑤ 蝦皮處理狀態", 5);
 }
