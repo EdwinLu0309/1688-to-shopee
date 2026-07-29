@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-07-30（Lady↔Nail 商品主表功能同步：⑤ D:N、④ 欄序統一、資產包跨賣場）
+
+### 核對結論
+- **Lady vs Nail 的 live Google Sheet 結構本來就一致**（SA 逐欄核對：商品表 A~Q 全同含 Q款式關鍵字一編號多網址、
+  SKU表/訂貨表/蝦皮處理狀態 A~N/分頁清單皆同）。「改得沒那麼完整」＝**程式端沒跟上 live 表**，本次補齊。
+  （款式關鍵字：記憶舊記 Nail=T 欄，實際三家已對齊在 Q 欄。）
+
+### 修復
+- **Lady Apps Script `syncStatusTab` D:K → D:N**（`config/apps_script/lady_master_Code.gs`，比照 Nail）：Lady live
+  「蝦皮處理狀態」已有 L蝦皮折扣/M資產包狀態/N要產 三欄，但 Code.gs 還停在 D:K 管不到→補齊（含 N 要產重補勾選框）。
+
+### 變更
+- **`master_reader.open_for_sync` 加 `shop` 參數**（`scraper/master_reader.py` + `asset_sync.py` 帶下去）：原寫死
+  `MASTER_SHEET_ID`(=Nail)→`sync-assets --shop lady` 實際仍讀 Nail。加 `SHOP_SHEETS`(nail/lady/baby) 按 shop 換
+  sheet_id（三家「商品表」gid 皆同 `1584079803`）。**實測 Lady 讀到 249 商品、要產/資產包狀態欄對得上 → Lady 資產包已可跨。**
+- **Lady ④ `snapshotToAmountRecord` 統一 Nail 新欄序**（廠商名稱/付款平台訂單編號移最前、訂單層垂直合併 A~B+F~M）
+  ——但 **B/H/I 維持 Lady 的 `TEXTJOIN+FILTER`/`SUMIF`（同廠商多筆訂單加總）**，不用 Nail 的 `XLOOKUP`（單筆會少算）。
+  L 付款狀態改**自動帶 1688_DB 訂單付款時間**（多筆 TEXTJOIN；待付款＝空白）。基準＝Edwin 雲端現行 SUMIF 版轉欄序
+  （repo 舊 ④ 無 SUMIF）。
+
+### ⚠️ 待辦/待驗
+- Lady 兩支函式（④/⑤）要**重貼進雲端 Apps Script** 才生效；④ 貼後**實跑一天核對金額**（碰真錢）。
+- **Baby 主表落後**（蝦皮處理狀態缺 L/M/N、SKU表 J=包裝備註、訂貨表 Q=包裝、廠商訂單缺 G/H）待另批同步。
+- **repo 的 Apps Script 可能落後雲端**（本次 ④ 即如此：#S114 SUMIF 只貼雲端沒 commit 回 repo）→ 動 Code.gs 前先確認雲端現況。
+
 ## 2026-07-29（資產包一鍵同步：要產/資產包狀態改讀寫「蝦皮處理狀態」分頁）
 
 ### 變更

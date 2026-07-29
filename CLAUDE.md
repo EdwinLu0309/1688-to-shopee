@@ -488,6 +488,10 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
   - **⚠️ 必配套改 Apps Script**：「蝦皮處理狀態」是 `status_sync_addon.gs` 的 `syncStatusTab()` 以商品編號
     重建的分頁。已把保留區從 D:K 擴到 **D:N**（L 蝦皮折扣/M 資產包狀態/N 要產一起按編號帶回、N 重補勾選框），
     否則重建時勾選會錯位到別的商品。**這是 repo 內的原始碼，改完要重新貼進雲端綁定的 Apps Script 才生效。**
+    ⚠️ Lady/Baby 綁定的 `{lady,baby}_master_Code.gs` 也各有一份 `syncStatusTab`，Nail 改了要同步（Lady 已於 2026-07-30 補 D:N；Baby 仍 D:K 待補）。
+  - **⚠️ 2026-07-30 跨賣場**：`open_for_sync(sa_json, shop="nail")` 加 `shop` 參數＋`SHOP_SHEETS`(nail/lady/baby)，
+    按 shop 換主表 sheet_id（三家「商品表」gid 皆同 `1584079803`）；`asset_sync.sync_assets(shop=…)` 已帶下去。
+    原本寫死 Nail → 現 `sync-assets --shop lady` 真的讀 Lady（實測 Lady 讀到 249 商品、要產/資產包狀態欄對得上）。
   `--all`＝跑所有未完成、`--no-analyze`＝省 vision。雲端根＝`settings.ASSET_CLOUD_BASE`（env 覆蓋）。
   資料夾名＝`{編號}_{品名}`（如 `AAS1_AS_黑瓶功能膠`，編號給 AI、品名給人認）。要在 Edwin 機器跑
   （Playwright/SA/OPENAI_API_KEY/掛好的雲端硬碟）。
