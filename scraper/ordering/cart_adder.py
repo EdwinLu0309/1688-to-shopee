@@ -38,6 +38,7 @@ STATUS_SPEC_MISMATCH = "❌ 規格不符"
 STATUS_PAGE_ERROR = "❌ 頁面錯誤"
 STATUS_SOLD_OUT = "🚫 已售完"
 STATUS_INQUIRY_ONLY = "📞 廠商詢單"
+STATUS_UNCONFIRMED = "⚠️ 未確認加入（請核對購物車）"  # 點了加购但沒偵測到成功提示 → 不敢報成功
 
 
 class CartAdder:
@@ -184,15 +185,23 @@ class CartAdder:
 
             await asyncio.sleep(random.uniform(0.5, 1.0))
             if not await self._click_add_cart(page):
-                logger.warning(f"品號 {items[0].product_code}：加购按鈕失敗，pending {len(pending_added)} 筆改 PAGE_ERROR")
+                logger.warning(f"品號 {items[0].product_code}：加购按鈕找不到，pending {len(pending_added)} 筆改 PAGE_ERROR")
                 for rid in pending_added:
                     statuses[rid] = STATUS_PAGE_ERROR
                 return statuses
 
-            await asyncio.sleep(random.uniform(1, 2))
-            for rid in pending_added:
-                statuses[rid] = STATUS_ADDED
-            logger.info(f"品號 {items[0].product_code}：已加入購物車（共 {len(pending_added)} 個規格）")
+            # ⚠️ 關鍵：點了加购按鈕 ≠ 真的加成功。必須確認成功提示，否則會「整批假已加入」。
+            if await self._confirm_add_success(page):
+                for rid in pending_added:
+                    statuses[rid] = STATUS_ADDED
+                logger.info(f"品號 {items[0].product_code}：已確認加入購物車（共 {len(pending_added)} 個規格）")
+            else:
+                for rid in pending_added:
+                    statuses[rid] = STATUS_UNCONFIRMED
+                logger.warning(
+                    f"品號 {items[0].product_code}：點了加购但沒偵測到成功提示 → 標『未確認』"
+                    f"（{len(pending_added)} 個規格，請用核對功能確認）"
+                )
             return statuses
 
         except RuntimeError:
@@ -428,35 +437,81 @@ class CartAdder:
             logger.error(f"填入數量時發生錯誤：{e}")
             return False
 
+    # 加购按鈕 / 成功提示 關鍵字（1688 改版時改這裡）
+    _ADD_CART_KWS = ["加采购车", "加入采购车", "加入购物车", "加入進貨單", "加入进货单"]
+    _ADD_OK_KWS = [
+        "加入采购车成功", "已加入采购车", "成功加入采购车", "加入进货单成功",
+        "已加入进货单", "加入成功", "添加成功", "已成功加入", "已加入购物车",
+        "加入购物车成功", "成功加入进货单",
+    ]
+
     async def _click_add_cart(self, page: Page) -> bool:
         """點擊加入購物車按鈕。
 
-        1688 新版頁面按鈕文字是「加采购车」。
+        ⚠️ 只點『自身文字』確實是加采购车/加入购物车 的最小元素——
+        不再用 `[class*="cart"] button` / `[data-spm*="cart"]` 這類鬆散 selector，
+        那會誤點到裝飾性購物車圖示或「去购物车」連結 → `_confirm_add_success` 之前就假成功。
+        找不到就回 False（老實報頁面錯誤），絕不亂點一個 cart 元素充數。
         """
-        cart_selectors = [
-            '//button[contains(text(), "加采购车")]',
-            '//a[contains(text(), "加采购车")]',
-            '//div[contains(text(), "加采购车")]',
-            '//span[contains(text(), "加采购车")]',
-            '//button[contains(text(), "加入购物车")]',
-            '//a[contains(text(), "加入购物车")]',
-            '//div[contains(text(), "加入购物车")]',
-            '//span[contains(text(), "加入购物车")]',
-            '[class*="cart"] button',
-            '[class*="addCart"]',
-            '[data-spm*="cart"]',
-        ]
+        try:
+            clicked = await page.evaluate("""(kws) => {
+                const els = document.querySelectorAll('button, a, div, span');
+                let best = null, bestArea = Infinity;
+                for (const el of els) {
+                    // 自身直接文字（不含子元素），或整體文字但夠短（≤12字）＝真的是按鈕不是容器
+                    const direct = Array.from(el.childNodes)
+                        .filter(n => n.nodeType === 3)
+                        .map(n => n.textContent.trim()).join('');
+                    const full = (el.textContent || '').trim();
+                    const hit = kws.some(k => direct.includes(k) || (full.includes(k) && full.length <= 12));
+                    if (!hit) continue;
+                    if (!el.offsetParent) continue;                 // 不可見
+                    const r = el.getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0) continue;
+                    if (r.width > 360 || r.height > 120) continue;  // 排除大容器
+                    const area = r.width * r.height;
+                    if (area < bestArea) { bestArea = area; best = el; }
+                }
+                if (best) { best.click(); return (best.textContent || '').trim().slice(0, 20); }
+                return null;
+            }""", self._ADD_CART_KWS)
+            if clicked:
+                logger.debug(f"已點擊加入購物車按鈕（文字：{clicked}）")
+                return True
+            logger.warning("找不到『加采购车/加入购物车』按鈕（1688 可能改版，改 _ADD_CART_KWS）")
+        except Exception as e:
+            logger.debug(f"點擊加购按鈕時發生錯誤：{e}")
+        return False
 
-        for selector in cart_selectors:
+    async def _confirm_add_success(self, page: Page, timeout: float = 6.0) -> bool:
+        """點加购後確認『真的加成功』：掃頁面的成功提示 toast。
+
+        找到任一成功字樣 → True。等最多 timeout 秒（toast 通常 1~3 秒內出現又消失）。
+        ⚠️ 若實測整批都被判『未確認』，多半是 1688 成功提示文字不在 _ADD_OK_KWS，
+           把實際那句補進去即可（用核對功能可反查真實購物車比對）。
+        """
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
             try:
-                el = page.locator(selector).first
-                if await el.is_visible(timeout=2000):
-                    await el.click()
-                    logger.debug("已點擊加入購物車按鈕")
+                hit = await page.evaluate("""(kws) => {
+                    const els = document.querySelectorAll('div, span, p, a');
+                    let scanned = 0;
+                    for (const el of els) {
+                        if (scanned++ > 6000) break;
+                        if (!el.offsetParent) continue;
+                        const t = (el.textContent || '').trim();
+                        if (!t || t.length > 40) continue;
+                        if (kws.some(k => t.includes(k))) return t.slice(0, 40);
+                    }
+                    return null;
+                }""", self._ADD_OK_KWS)
+                if hit:
+                    logger.debug(f"偵測到加購成功提示：{hit}")
                     return True
-            except Exception:
-                continue
-
+            except Exception as e:
+                logger.debug(f"確認加購成功時發生錯誤：{e}")
+            await asyncio.sleep(0.4)
         return False
 
     async def _check_captcha(self, page: Page) -> bool:

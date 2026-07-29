@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-07-28（vendored cart_adder 同步：加購改「確認成功提示才標 ✅」＋不再亂點 cart 元素）
+
+### 修復
+- **vendored `cart_adder.py` 同步 1688-order 的「假已加入」修正**（`scraper/ordering/cart_adder.py`，1688 改版兩專案要同步） — `_click_add_cart` 舊版鬆散 selector（`[class*="cart"] button` 等）只要點到任何 cart 元素就 return True、上層零驗證整批標 ✅ → **整批假成功**（少訂真金白銀）。改：① `_click_add_cart` 只點自身文字確為「加采购车/加入购物车」的最小元素（`_ADD_CART_KWS`），找不到老實回 False；② 新增 `_confirm_add_success` 掃成功 toast（`_ADD_OK_KWS`），沒偵測到 → 標 `⚠️ 未確認加入` 而非 ✅。實際跑美甲加購的是 `~/projects/1688-order`（已同步修更完整含 order.py 批次中斷留白修正），本檔為 cart_order.py（3-tab 訂貨系統）用的 vendored 副本。
+
 ## 2026-07-29（蝦皮三賣場連寫爆 Sheets 配額 429 → 分段寫+重試；健康點名加驗 Sheet）
 
 ### 修復
