@@ -31,3 +31,6 @@ scratchpad_*.log
 config/cookies_nail.json
 config/kkren_state.json
 config/cookies_kkren.json
+
+# Claude Code 本機權限設定（機器本機、勿提交）
+.claude/settings.local.json
