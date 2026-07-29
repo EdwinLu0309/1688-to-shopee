@@ -7,6 +7,9 @@
  *
  * 2026-07-27 併入「⑤ 同步蝦皮處理狀態」：把「蝦皮處理狀態」分頁依商品表以商品編號
  *   為 key 重建（新增/刪除自動對上，手填進度文字不錯位）。
+ * 2026-07-29 ⑤ 擴充：保留區從 D:K 擴到 D:N（多帶 L 蝦皮折扣/M 資產包狀態/N 要產）——
+ *   要產/資產包狀態已從商品表搬到「蝦皮處理狀態」當資產包程式(asset_sync)的開關，
+ *   重建時必須跟著 A 欄以編號對位，否則勾選會錯位到別的商品。N 重補勾選框。
  */
 
 // ───────── CONFIG ─────────
@@ -218,16 +221,19 @@ function blanks_(n) { var a = []; for (var i = 0; i < n; i++) a.push(""); return
 
 
 // ───────── ⑤ 同步蝦皮處理狀態（依商品表，以商品編號為 key 重建）─────────
-// 手填欄（蝦皮ID/標題/詳情/圖片/選項圖/影片/優化/備註，全文字）以編號為 key 帶回，
-// 新編號補空白、消失的移除，永不錯位。B/C（分類/品名）是 MAP 公式跟著 A 欄 live。
+// 手填/狀態欄（D:N＝蝦皮ID/標題/詳情/圖片/選項圖/影片/優化/備註 + 蝦皮折扣/資產包狀態/要產）
+// 以編號為 key 帶回，新編號補空白、消失的移除，永不錯位。B/C（分類/品名）是 MAP 公式跟著 A 欄 live。
+// ※ 2026-07-29：L:N（蝦皮折扣/資產包狀態/要產）也按編號帶回——要產/資產包狀態是資產包程式
+//   (asset_sync) 的開關，重建時必須跟著 A 欄以編號對位，否則勾選會錯位到別的商品。N 重補勾選框。
 function syncStatusTab(silent) {
   var ui = SpreadsheetApp.getUi();
   var STATUS_TAB = "蝦皮處理狀態";
   var SRC_TAB = "商品表";
   var MANUAL_START = 4;               // D 欄起（蝦皮ID）
-  var MANUAL_END = 11;                // 到 K 欄（備註）
-  var WIDTH = MANUAL_END - MANUAL_START + 1;   // 8 欄手填
-  var EMPTY_MANUAL = ["", "", "", "", "", "", "", ""];  // 全文字，預設空白
+  var MANUAL_END = 14;                // 到 N 欄（要產）——含 L 蝦皮折扣/M 資產包狀態/N 要產
+  var WANT_COL = 14;                  // N 欄＝要產（checkbox，重建後重補勾選框）
+  var WIDTH = MANUAL_END - MANUAL_START + 1;   // 11 欄（D:N）
+  var EMPTY_MANUAL = ["", "", "", "", "", "", "", "", "", "", ""];  // 預設空白（新編號）
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var src = ss.getSheetByName(SRC_TAB);
@@ -237,6 +243,7 @@ function syncStatusTab(silent) {
     ui.alert("找不到「" + SRC_TAB + "」或「" + STATUS_TAB + "」分頁"); return;
   }
 
+  // 1) 商品表 唯一編號（依出現順序，忽略空白與重複）
   var codes = [], seen = {};
   var srcLast = src.getLastRow();
   if (srcLast >= 2) {
@@ -247,6 +254,7 @@ function syncStatusTab(silent) {
     }
   }
 
+  // 2) 既有手填/狀態資料 → 以編號為 key 存起來（D..N）
   var store = {};
   var dstLast = dst.getLastRow();
   if (dstLast >= 2) {
@@ -258,20 +266,24 @@ function syncStatusTab(silent) {
     }
   }
 
+  // 3) 依商品表順序重建（手填/狀態以 key 帶回，永不錯位）
   var aVals = [], mVals = [];
   codes.forEach(function (code) {
     aVals.push([code]);
     mVals.push(store[code] ? store[code] : EMPTY_MANUAL.slice());
   });
 
+  // 4) 先清舊資料區（A 與 D:N，B/C 是 MAP 公式不動），再寫新的
   var clearRows = Math.max(dstLast - 1, codes.length) + 5;
   if (clearRows > 0) {
-    dst.getRange(2, 1, clearRows, 1).clearContent();
-    dst.getRange(2, MANUAL_START, clearRows, WIDTH).clearContent();
+    dst.getRange(2, 1, clearRows, 1).clearContent();                  // A
+    dst.getRange(2, MANUAL_START, clearRows, WIDTH).clearContent();   // D:N
   }
   if (codes.length) {
-    dst.getRange(2, 1, codes.length, 1).setValues(aVals);
-    dst.getRange(2, MANUAL_START, codes.length, WIDTH).setValues(mVals);
+    dst.getRange(2, 1, codes.length, 1).setValues(aVals);                    // A
+    dst.getRange(2, MANUAL_START, codes.length, WIDTH).setValues(mVals);     // D:N
+    // N（要產）重補勾選框：空字串→未勾、帶回的 true/false 維持（新編號預設未勾）
+    dst.getRange(2, WANT_COL, codes.length, 1).insertCheckboxes();
   }
   if (!silent) ss.toast("同步完成：" + codes.length + " 個商品", "⑤ 蝦皮處理狀態", 5);
 }
