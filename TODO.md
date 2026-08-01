@@ -1,6 +1,9 @@
 # TODO
 
 ## 高優先
+- [ ] 2026-07-30 #S119 ★`reconcile_daemon` 補可靠性：網路請求設 timeout + 看門狗/心跳偵測（輪詢迴圈凍住自動重啟）。踩坑：daemon 曾程序活著但迴圈凍死 21h（卡在斷網時無 timeout 的請求），LaunchAgent 只保程序在、偵測不到邏輯凍結 → 打勾不抓。診斷＝比對 log 最後寫入時間；救急＝`launchctl kickstart -k gui/$(id -u)/com.joyslu.reconcile-daemon`
+- [ ] 2026-07-30 #S119 確認 Lady 2-2 到貨這次真的抓進 `1688_DB`（daemon 已重啟恢復、當下 1688 頁慢在重試）
+- [ ] 2026-07-30 #S119 cookie 近期重登：美甲 jiaorong0826（`cookies_nail` 名目剩 0.1 天）、Baby luwei03090826（`cookies_baby` 尚未登入）
 - [x] 2026-07-30 ★Lady↔Nail 主表功能同步：⑤ `syncStatusTab` D:K→D:N（比照 Nail）；④ `snapshotToAmountRecord` 統一 Nail 新欄序但保留 Lady SUMIF 多筆對帳 + L付款狀態自動帶；`master_reader.open_for_sync` 加 shop 參數（`SHOP_SHEETS`，實測 Lady 讀 249 商品→資產包可跨）。核對確認 Lady/Nail live 表結構本就一致
 - [x] 2026-07-30 ★Lady 兩支函式（④/⑤）重貼進雲端 Apps Script；④ 實跑核對金額**正確**（SUMIF 對廠商多筆加總、J綠底、L付款時間皆驗證通過）
 - [ ] 2026-07-30 ★Baby 主表同步（落後 Nail/Lady）：蝦皮處理狀態補 L/M/N + syncStatusTab D:N、SKU表 J 包裝備註→選項註記、訂貨表 Q 包裝→選項註記、廠商訂單補 G廠商名稱/H小計
