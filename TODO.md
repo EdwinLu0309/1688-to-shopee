@@ -1,7 +1,7 @@
 # TODO
 
 ## 高優先
-- [ ] 2026-07-30 #S119 ★`reconcile_daemon` 補可靠性：網路請求設 timeout + 看門狗/心跳偵測（輪詢迴圈凍住自動重啟）。踩坑：daemon 曾程序活著但迴圈凍死 21h（卡在斷網時無 timeout 的請求），LaunchAgent 只保程序在、偵測不到邏輯凍結 → 打勾不抓。診斷＝比對 log 最後寫入時間；救急＝`launchctl kickstart -k gui/$(id -u)/com.joyslu.reconcile-daemon`
+- [x] 2026-08-01 #S119 ★`reconcile_daemon` 補可靠性：看門狗（單一 job 逾 `JOB_HARD_TIMEOUT`=8min → `os._exit` 讓 launchd 拉起乾淨新 process）+ 啟動清孤兒瀏覽器。**再犯確認**：daemon 又凍死 2 天 10h（PID 24210，卡在 Playwright 睡眠/喚醒後斷線的 CDP pipe、client timeout 沒觸發、堆 18 個孤兒 chromium）→ Nail 金額核對打勾沒反應。診斷＝log 最後寫入時間 vs now；救急＝`launchctl kickstart -k gui/$(id -u)/com.joyslu.reconcile-daemon`。看門狗獨立執行緒 + os._exit，即使主緒整個凍在 node driver 也了斷得掉。（尚未做：per-request 網路 timeout — 看門狗已覆蓋此失敗模式，優先度降低）
 - [ ] 2026-07-30 #S119 確認 Lady 2-2 到貨這次真的抓進 `1688_DB`（daemon 已重啟恢復、當下 1688 頁慢在重試）
 - [ ] 2026-07-30 #S119 cookie 近期重登：美甲 jiaorong0826（`cookies_nail` 名目剩 0.1 天）、Baby luwei03090826（`cookies_baby` 尚未登入）
 - [x] 2026-07-30 ★Lady↔Nail 主表功能同步：⑤ `syncStatusTab` D:K→D:N（比照 Nail）；④ `snapshotToAmountRecord` 統一 Nail 新欄序但保留 Lady SUMIF 多筆對帳 + L付款狀態自動帶；`master_reader.open_for_sync` 加 shop 參數（`SHOP_SHEETS`，實測 Lady 讀 249 商品→資產包可跨）。核對確認 Lady/Nail live 表結構本就一致

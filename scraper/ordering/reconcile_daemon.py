@@ -20,7 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import os
+import subprocess
 import sys
+import threading
 import time
 
 import gspread
@@ -34,6 +37,16 @@ from .reconcile_db import ReconcileDB, _SCOPES
 
 POLL_SEC = 20          # 輪詢間隔（秒）
 CONTROL_TAB = "🔄刷新控制"
+
+# ⚠️ 單一 job 硬性上限（血淚 2026-08-01）：daemon 是單執行緒 while True，一次抓取＝
+# asyncio.run(Playwright 開瀏覽器抓 1688)。實測 Playwright 會在 macOS 睡眠/喚醒後「卡死」——
+# page.goto / evaluate 卡在已斷線的 CDP pipe，client 端 timeout **不會觸發**（node driver 一起被凍），
+# 整個輪詢迴圈就此凍結（本例卡 2 天 10 小時、堆 18 個孤兒 chromium、勾選完全沒反應＝「壞掉沒抓」）。
+# launchd KeepAlive=true 只在 process「結束」才拉起，process「掛著不動」它不管 → 必須自己了斷。
+# 對策：獨立 watchdog 執行緒，任一 job 逾 JOB_HARD_TIMEOUT 未回 → os._exit 強制結束整個 daemon，
+# 由 launchd 30s 內拉起乾淨的新 process（勾選旗標還在 → 新 process 立刻補跑）。健康時 job 幾十秒內完成，
+# 8 分鐘上限有極大餘裕、正常永不誤觸。
+JOB_HARD_TIMEOUT = 8 * 60   # 秒
 
 # ── 控制分頁格位（1-index 給 gspread；0-index 給 API）──
 # B1 旗標(checkbox) / B2 核對日期 / B3 狀態(回寫) / B4 最後更新(回寫) / B5 訂單狀態 / B6 cookie 狀態(回寫)
@@ -251,6 +264,66 @@ def _run_job(job: dict, since_date: str, order_status: str) -> str:
     return "；".join(parts) + f"（{now}）"
 
 
+def _run_job_guarded(job: dict, since_date: str, order_status: str) -> str:
+    """包一層 watchdog 跑 _run_job：逾 JOB_HARD_TIMEOUT 沒回 → 判定 Playwright 卡死，
+    os._exit 強制結束整個 daemon（launchd KeepAlive 會拉起乾淨的新 process）。
+
+    watchdog 是獨立執行緒、os._exit 是 C 層立即結束，即使主執行緒整個凍結在 Playwright/node
+    也照樣了斷得掉——這正是「掛著不動、KeepAlive 不救」唯一可靠的解法。
+    """
+    done = threading.Event()
+
+    def _watchdog() -> None:
+        if not done.wait(JOB_HARD_TIMEOUT):
+            logger.error(
+                f"[{job['name']}] 逾 {JOB_HARD_TIMEOUT}s 未完成 → 判定 Playwright 卡死，"
+                f"強制結束 daemon 讓 launchd 重啟（旗標仍在，新 process 會補跑）"
+            )
+            os._exit(42)   # 非 0：交給 launchd KeepAlive 拉起新的乾淨 process
+
+    t = threading.Thread(target=_watchdog, daemon=True)
+    t.start()
+    try:
+        return _run_job(job, since_date, order_status)
+    finally:
+        done.set()
+
+
+def _reap_orphan_browsers() -> None:
+    """啟動時清掉上一輪卡死留下的孤兒 Playwright 瀏覽器（parent 已死、被 init 收養者）。
+
+    只殺 ppid==1（孤兒）且指令含 ms-playwright 的 headless 瀏覽器 —— 健康的瀏覽器 parent 是
+    活著的 python，不會被誤殺；使用者自己開的 Chrome 也不在 ms-playwright 路徑下。best-effort。
+    """
+    try:
+        out = subprocess.run(
+            ["ps", "-axo", "pid,ppid,command"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+    except Exception as e:
+        logger.warning(f"清孤兒瀏覽器：ps 失敗（略過）：{e}")
+        return
+    killed = 0
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        pid_s, ppid_s, cmd = parts
+        if ppid_s != "1":
+            continue  # 只清孤兒（parent 已死）
+        if "ms-playwright" not in cmd:
+            continue
+        if not any(k in cmd for k in ("Chromium", "chromium", "headless_shell", "Google Chrome for Testing")):
+            continue
+        try:
+            os.kill(int(pid_s), 9)
+            killed += 1
+        except (ProcessLookupError, ValueError, PermissionError):
+            pass
+    if killed:
+        logger.info(f"啟動清理：殺掉 {killed} 個上一輪卡死的孤兒 Playwright 瀏覽器")
+
+
 # ── 一輪輪詢：檢查所有口，觸發的 job 跑一次 ──
 def run_once(gc=None) -> int:
     gc = gc or _client()
@@ -281,7 +354,7 @@ def run_once(gc=None) -> int:
             ws.update_acell(CELL_STATUS, "⏳ 抓取中…")
         logger.info(f"[{job['name']}] 觸發（{len(triggered)} 口）：status={order_status} date={since_date or '今天以外全部' if since_date=='' else since_date}")
         try:
-            msg = _run_job(job, since_date, order_status)
+            msg = _run_job_guarded(job, since_date, order_status)
         except Exception as e:
             msg = f"❌ 失敗：{e}"
             logger.exception(f"[{job['name']}] job 失敗")
@@ -335,6 +408,7 @@ def check_cookies(gc=None, probe: bool = False) -> None:
 
 def run_forever() -> None:
     logger.info(f"daemon 啟動，每 {POLL_SEC}s 輪詢 {sum(len(j['triggers']) for j in JOBS)} 個口")
+    _reap_orphan_browsers()   # 清掉上一輪（若曾卡死）留下的孤兒瀏覽器
     gc = _client()
     last_cookie = 0.0    # 上次探測+寫 cookie 狀態格（0＝啟動即先做一次）
     while True:

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-08-01（reconcile_daemon 看門狗：Playwright 卡死自動了斷重啟）
+
+### 修復
+- **`reconcile_daemon` 再度凍死 2 天 10h → 加看門狗根治**（`scraper/ordering/reconcile_daemon.py`）：
+  daemon 是單執行緒 `while True`，一次抓取＝`asyncio.run(Playwright 開瀏覽器抓 1688)`。實測 Playwright 會在
+  **macOS 睡眠/喚醒後卡在已斷線的 CDP pipe，client 端 timeout 不觸發（node driver 一起被凍）**，整個輪詢迴圈就此
+  凍結（本例 PID 24210 卡 2 天 10h、堆 18 個孤兒 chromium、打勾完全沒反應＝Nail 金額核對「壞掉沒抓」）。
+  `launchd KeepAlive=true` 只在 process「結束」才拉起、「掛著不動」它不管 → 必須自己了斷。
+  - **對策**：獨立 watchdog 執行緒 `_run_job_guarded`，任一 job 逾 `JOB_HARD_TIMEOUT`(=8min) 未回 → `os._exit(42)`
+    強制結束整個 daemon，由 launchd 30s 內拉起乾淨新 process（勾選旗標還在 → 新 process 立刻補跑）。
+    watchdog 是獨立執行緒、`os._exit` 是 C 層立即結束，即使主緒整個凍在 Playwright/node 也了斷得掉。
+  - **啟動清孤兒**：`_reap_orphan_browsers` 在 `run_forever` 起手清掉上一輪卡死留下的孤兒 Playwright 瀏覽器
+    （只殺 `ppid==1` 且指令含 `ms-playwright` 的 headless 瀏覽器，不誤殺健康瀏覽器/使用者 Chrome）。
+- **救急已執行**：kill 卡死 daemon + 清 18 孤兒 chromium → `launchctl kickstart -k` 重啟 →
+  自動補跑 Nail 金額核對 **✅ 53 筆訂單／實付 ¥30,089.74**，控制分頁狀態與旗標恢復正常。
+
 ## 2026-07-30（Lady↔Nail 商品主表功能同步：⑤ D:N、④ 欄序統一、資產包跨賣場）
 
 ### 核對結論
