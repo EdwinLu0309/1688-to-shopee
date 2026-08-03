@@ -97,15 +97,10 @@ def read_master(
 
     只收「有代表網址（能解析出 item_id）且有商品編號」的列。item_id 當 key（對 output/{item_id}.json）。
     """
-    import gspread
+    from ecommerce_sources import gsheet
 
-    sa = resolve_sa_json(sa_json)
-    if not sa:
-        raise FileNotFoundError("找不到 SA 憑證（參數/settings/OneDrive 都沒有）")
-
-    gc = gspread.service_account(filename=str(sa))
-    ws = gc.open_by_key(sheet_id).get_worksheet_by_id(gid)
-    rows = ws.get_all_values()
+    sa = resolve_sa_json(sa_json)  # 保留 repo 專屬解析（含 config.settings）；gsheet 再補 env/fallback
+    rows = gsheet.read_sheet(sheet_id, gid, sa_json=sa)
     if not rows:
         logger.warning("主表是空的")
         return {}
@@ -162,14 +157,11 @@ def open_for_sync(sa_json: str | Path | None = None, shop: str = "nail"):
     - 只收「在蝦皮處理狀態有對應列」且「商品表有代表網址」的商品；不在蝦皮處理狀態的
       （未上架子集）目前無法用勾選驅動 → 略過（見 CLAUDE.md 覆蓋範圍註記）。
     """
-    import gspread
+    from ecommerce_sources import gsheet
 
-    sa = resolve_sa_json(sa_json)
-    if not sa:
-        raise FileNotFoundError("找不到 SA 憑證（參數/settings/OneDrive 都沒有）")
-    gc = gspread.service_account(filename=str(sa))
+    sa = resolve_sa_json(sa_json)  # 保留 repo 專屬解析；gsheet 再補 env/fallback
     sheet_id = SHOP_SHEETS.get(str(shop).lower(), MASTER_SHEET_ID)
-    sh = gc.open_by_key(sheet_id)
+    sh = gsheet.open_spreadsheet(sheet_id, sa_json=sa)
 
     ws_prod = sh.get_worksheet_by_id(MASTER_TAB_GID)
     prod_rows = ws_prod.get_all_values()
@@ -220,10 +212,11 @@ def open_for_sync(sa_json: str | Path | None = None, shop: str = "nail"):
 
 def write_status(ws, colmap: dict, row: int, done: bool = True, clear_want: bool = True) -> None:
     """回寫某列（蝦皮處理狀態分頁）：資產包狀態＝✓、清掉要產勾選。"""
+    from ecommerce_sources import gsheet
+
     reqs = []
     if "asset_status" in colmap:
         reqs.append((f"{_col_letter(colmap['asset_status'])}{row}", "✓" if done else ""))
     if clear_want and "want" in colmap:
         reqs.append((f"{_col_letter(colmap['want'])}{row}", False))
-    for a1, val in reqs:
-        ws.update(range_name=a1, values=[[val]])
+    gsheet.write_cells(ws, reqs)
