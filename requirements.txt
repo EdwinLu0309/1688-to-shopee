@@ -16,3 +16,6 @@ openai>=1.40.0
 gspread>=6.0.0
 google-auth>=2.0.0
 msoffcrypto-tool>=5.0.0
+
+# 共用抓取/讀表套件（#S129：master_reader 改用其 gsheet 抽屜）
+-e ../ecommerce-sources
