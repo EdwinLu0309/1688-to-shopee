@@ -36,11 +36,10 @@
 ├── scraper/
 │   ├── models.py              # Product1688, SKUOption, PriceRange
 │   ├── extract_1688.js        # 抓取法A：Chrome MCP 注入此 JS 抽 DOM → Blob 下載 JSON
-│   ├── playwright_scraper.py  # ★抓取法B（GUI 用）：Playwright+cookie+stealth 抽 DOM（免 Chrome MCP，同一套選擇器）
-│   ├── data_extractor.py      # （已失效）__INIT_DATA__ 提取，現代 1688 已無此全域變數
-│   ├── item_page.py           # Playwright 爬取 + DOM fallback（反爬擋下，未使用）
-│   ├── network.py             # XHR 攔截 + SKU 解析
-│   ├── browser.py             # Playwright persistent context
+│   ├── playwright_scraper.py  # ★抓取法B（GUI + CLI scrape 用）：Playwright+cookie+stealth 抽 DOM（免 Chrome MCP，同一套選擇器）
+│   # （#S127 已移除死碼：item_page.py / data_extractor.py / network.py —
+│   #   原 item_page 被反爬擋死、只剩 CLI scrape 借用；scrape 已改走 playwright_scraper）
+│   ├── browser.py             # Playwright persistent context（login.py 用）
 │   ├── login.py               # 手動登入模組
 │   ├── downloader.py          # 圖片下載（主圖/細節/SKU）
 │   ├── ai_generator.py        # Claude API 生成蝦皮標題/描述（保留備用）

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -11,8 +12,6 @@ from loguru import logger
 load_dotenv(override=True)
 
 from config.settings import LOG_DIR
-from scraper.browser import close_context
-from scraper.item_page import scrape_item
 
 
 def setup_logging(verbose: bool) -> None:
@@ -364,137 +363,76 @@ def google_login(ctx: click.Context) -> None:
         sys.exit(1)
 
 
-async def _run(url: str, download_images: bool, save_json: bool) -> None:
-    logger.info(f"Starting scrape: {url}")
-    product = await scrape_item(url)
+_OFFER_ID_RE = re.compile(r"offer/(\d+)\.html")
 
-    if not product:
-        logger.error("Failed to scrape product")
+
+def _item_id_from_url(url: str) -> str | None:
+    """從 1688 商品網址抽 offer id（新方法 scrape_offer 收 item_id）。"""
+    m = _OFFER_ID_RE.search(url or "")
+    if m:
+        return m.group(1)
+    m2 = re.search(r"(\d{6,})", url or "")
+    return m2.group(1) if m2 else None
+
+
+async def _run(url: str, download_images: bool, save_json: bool) -> None:
+    # 改用新方法 playwright_scraper.scrape_offer（GUI 同款、帶 cookie+stealth，
+    # 取代已被反爬擋死的 item_page.scrape_item）。回傳 dict（EXTRACT_JS 輸出）。
+    from scraper.playwright_scraper import scrape_offer
+
+    item_id = _item_id_from_url(url)
+    if not item_id:
+        logger.error(f"無法從 URL 解析 1688 offer id: {url}")
         sys.exit(1)
 
-    # Display results
+    logger.info(f"Starting scrape: {item_id}")
+    data = await scrape_offer(item_id)
+
+    if not data or data.get("_blocked") or not data.get("main_images"):
+        logger.error("抓取失敗 / 被擋 / cookie 過期（無主圖）→ 請先 python main.py login 重登")
+        sys.exit(1)
+
     click.echo("")
-    click.echo(f"  商品 ID    : {product.item_id}")
-    click.echo(f"  標題       : {product.title}")
-    click.echo(f"  店鋪       : {product.shop_name}")
+    click.echo(f"  商品 ID    : {data.get('item_id')}")
+    click.echo(f"  標題       : {data.get('title')}")
+    if data.get("price_cny"):
+        click.echo(f"  參考價     : ¥{data['price_cny']}")
+    click.echo(f"  主圖數量   : {len(data.get('main_images') or [])}")
+    click.echo(f"  細節圖數量  : {len(data.get('detail_images') or [])}")
+    if data.get("video_url"):
+        click.echo(f"  商品影片   : {data['video_url']}")
 
-    if product.shop_location:
-        click.echo(f"  店鋪位置   : {product.shop_location}")
-    if product.shop_url:
-        click.echo(f"  店鋪連結   : {product.shop_url}")
-
-    click.echo(f"  最小訂購量  : {product.min_order}")
-
-    if product.categories:
-        click.echo(f"  商品分類   : {' > '.join(product.categories)}")
-
-    if product.origin_price > 0:
-        click.echo(f"  參考價     : ¥{product.origin_price:.2f}")
-
-    # Price ranges
-    if product.price_ranges:
-        click.echo(f"  階梯價格   : ({len(product.price_ranges)} 階)")
-        for pr in product.price_ranges:
-            max_str = f"-{pr.max_qty}" if pr.max_qty > 0 else "+"
-            click.echo(f"    {pr.min_qty}{max_str} 件: ¥{pr.price:.2f}")
-
-    click.echo(f"  主圖數量   : {len(product.main_images)}")
-    click.echo(f"  細節圖數量  : {len(product.detail_images)}")
-
-    if product.video_url:
-        click.echo(f"  商品影片   : {product.video_url}")
-
-    # Product attributes
-    if product.attributes:
-        click.echo(f"  商品屬性   : ({len(product.attributes)} 項)")
-        for k, v in list(product.attributes.items())[:15]:
+    attrs = data.get("attributes") or {}
+    if attrs:
+        click.echo(f"  商品屬性   : ({len(attrs)} 項)")
+        for k, v in list(attrs.items())[:15]:
             click.echo(f"    {k}: {v}")
-        if len(product.attributes) > 15:
-            click.echo(f"    ... 共 {len(product.attributes)} 項")
+        if len(attrs) > 15:
+            click.echo(f"    ... 共 {len(attrs)} 項")
 
-    # Description preview
-    if product.description:
-        desc_preview = product.description[:100]
-        if len(product.description) > 100:
-            desc_preview += "..."
-        click.echo(f"  商品描述   : {desc_preview}")
-
-    # SKU images
-    if product.sku_images:
-        click.echo(f"  SKU 圖片   : {len(product.sku_images)} 組")
-        for name, url in list(product.sku_images.items())[:5]:
-            click.echo(f"    {name}: {url[:60]}...")
-        if len(product.sku_images) > 5:
-            click.echo(f"    ... 共 {len(product.sku_images)} 組")
-
-    # Shop ratings
-    if product.shop_ratings:
-        click.echo(f"  店鋪評分   :")
-        for k, v in product.shop_ratings.items():
-            click.echo(f"    {k.replace('rating_', '')}: {v}")
-
-    click.echo("")
-
-    # SKU list
-    click.echo(f"  SKU 數量   : {len(product.skus)}")
-    if product.skus:
-        click.echo("  SKU 列表:")
-        for i, sku in enumerate(product.skus[:20], 1):
-            attrs_str = ", ".join(f"{k}={v}" for k, v in sku.attributes.items()) or "（無屬性）"
-            img_tag = " [有圖]" if sku.image_url else ""
-            click.echo(f"    [{i:02d}] id={sku.sku_id}  屬性={attrs_str}  價格=¥{sku.price:.2f}  庫存={sku.stock}{img_tag}")
-        if len(product.skus) > 20:
-            click.echo(f"    ... 共 {len(product.skus)} 筆 SKU")
-    else:
-        click.echo("  SKU: 未抓到")
-
-    if download_images:
-        from scraper.downloader import download_product_images
-        logger.info("Downloading images...")
-        paths = await download_product_images(product)
-        click.echo(f"\n  已下載主圖: {len(paths['main'])} 張")
-        click.echo(f"  已下載細節圖: {len(paths['detail'])} 張")
+    sku_images = data.get("sku_images") or {}
+    if sku_images:
+        click.echo(f"  SKU 圖片   : {len(sku_images)} 組（第一軸選項）")
+    sizes = data.get("sizes") or []
+    if sizes:
+        click.echo(f"  尺碼       : {', '.join(sizes)}")
 
     if save_json:
         from config.settings import OUTPUT_DIR
         out_dir = Path(OUTPUT_DIR)
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{product.item_id}.json"
-        data = {
-            "item_id": product.item_id,
-            "title": product.title,
-            "description": product.description,
-            "categories": product.categories,
-            "shop_name": product.shop_name,
-            "shop_url": product.shop_url,
-            "shop_location": product.shop_location,
-            "shop_ratings": product.shop_ratings,
-            "min_order": product.min_order,
-            "origin_price": product.origin_price,
-            "price_ranges": [
-                {"min_qty": pr.min_qty, "max_qty": pr.max_qty, "price": pr.price}
-                for pr in product.price_ranges
-            ],
-            "attributes": product.attributes,
-            "main_images": product.main_images,
-            "detail_images": product.detail_images,
-            "video_url": product.video_url,
-            "sku_images": product.sku_images,
-            "skus": [
-                {
-                    "sku_id": s.sku_id,
-                    "attributes": s.attributes,
-                    "price": s.price,
-                    "stock": s.stock,
-                    "image_url": s.image_url,
-                }
-                for s in product.skus
-            ],
-        }
+        out_path = out_dir / f"{item_id}.json"
         out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         click.echo(f"\n  JSON 已儲存: {out_path}")
 
-    await close_context()
+    if download_images:
+        from config.settings import OUTPUT_DIR
+        from scraper.downloader import download_product_images_from_json
+        logger.info("Downloading images...")
+        dest = Path(OUTPUT_DIR) / item_id / "images"
+        paths = await download_product_images_from_json(data, dest)
+        click.echo(f"\n  已下載主圖: {len(paths.get('main', []))} 張")
+        click.echo(f"  已下載細節圖: {len(paths.get('detail', []))} 張")
 
 
 @cli.command("order-import")
