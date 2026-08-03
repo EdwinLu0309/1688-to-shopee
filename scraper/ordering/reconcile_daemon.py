@@ -251,11 +251,26 @@ def _run_job(job: dict, since_date: str, order_status: str) -> str:
         logger.warning(f"[{job['name']}] 1688 段失敗（續跑 Kkren）：{e}")
 
     # 段2：Kkren 已出貨 → Kkren_Data（獨立於 1688 成敗）
+    # #S130 解焊：改 subprocess 呼叫獨立 repo kkren-sync（跑它自己的 venv + cookie-hub token），
+    # 不再 import 本 repo 內舊 kkren 碼。輸出解析「已 append N」當新增數。
     if job.get("also_kkren"):
         try:
-            from .kkren_pipeline import refresh as kkren_refresh
-            kr = kkren_refresh(since_days=30, commit=True)
-            parts.append(f"Kkren：✅新{kr.appended}/更新{kr.updated}")
+            import re as _re
+
+            _kk = os.path.expanduser("~/projects/kkren-sync")
+            proc = subprocess.run(
+                [os.path.join(_kk, ".venv/bin/python"), os.path.join(_kk, "main.py"),
+                 "kkren-refresh", "--days", "30", "--commit"],
+                cwd=_kk, capture_output=True, text=True, timeout=300,
+            )
+            _out = (proc.stdout or "") + (proc.stderr or "")
+            if proc.returncode == 0:
+                _m = _re.search(r"已 append (\d+)", _out)
+                parts.append(f"Kkren：✅新{_m.group(1) if _m else '?'}")
+            else:
+                _last = (_out.strip().splitlines() or [f"exit {proc.returncode}"])[-1]
+                parts.append(f"Kkren：❌{_last[:40]}")
+                logger.warning(f"[{job['name']}] Kkren subprocess 失敗 exit={proc.returncode}：{_out[-300:]}")
         except Exception as e:
             parts.append(f"Kkren：❌{str(e)[:40]}")
             logger.warning(f"[{job['name']}] Kkren 段失敗：{e}")
