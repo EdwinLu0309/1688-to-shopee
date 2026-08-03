@@ -3,6 +3,13 @@
 ## 專案簡介
 1688 商品資訊爬取 → AI 生成蝦皮文案 → 蝦皮批次上架 Excel 自動產生。
 
+## ⚠️ 已遷出的子系統（#S130 清理批次完成）
+六子系統拆解收尾，以下已移到獨立 repo、**本 repo 舊碼已移除**（下方詳細章節僅為歷史參考）：
+- **⑤ 蝦皮後台分析** → `shopee-analytics` repo（原 `scraper/shopee_analytics/` + main.py `shopee-*`/`order-basket` 命令已刪；排程 plist 已指新 repo；`docs/shopee_analytics_api.md` 帶去該 repo）。
+- **④ Kkren 到貨** → `kkren-sync` repo（原 `scraper/ordering/kkren_{scraper,pipeline}.py` + main.py `kkren-refresh` 已刪）。**③ `reconcile_daemon` 的到貨口已解焊**：改 subprocess 呼叫 `kkren-sync` 的 `kkren-refresh --commit`（跑它自己的 venv + cookie-hub token）。
+- **① 1688 抓取** → `ecommerce-sources.alibaba1688`；**⑥ 素材** → `ecommerce-media`（5 模組，本 repo 為 re-export shim）；**讀表** → `ecommerce-sources.gsheet`。
+- 尚未遷出：**②③ 訂貨/對帳**（`scraper/ordering/` 其餘 + 三個 GUI）仍在本 repo。
+
 ## 技術棧
 - Python 3.12（.venv；Tk 9.0 深色模式正常）
 - tkinter（桌面 GUI，gui.py，Win/Mac 雙平台）
