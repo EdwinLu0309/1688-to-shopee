@@ -19,3 +19,6 @@ msoffcrypto-tool>=5.0.0
 
 # 共用抓取/讀表套件（#S129：master_reader 改用其 gsheet 抽屜）
 -e ../ecommerce-sources
+
+# 素材處理共用套件（#S130：5 個媒體模組改用其抽屜）
+-e ../ecommerce-media

@@ -426,6 +426,7 @@ API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/sho
   （閉環再黏緊，現為手填）；③ 跑幾天後對螢幕核對數字；④ 之後接 dashboard 畫面。
 
 ## 環境變數
+- `ECOMMERCE_DESIGN_DIR` — 生圖設計規範資料夾。#S130：`scraper/{gpt_image_generator,auto_classify,image_host,video_maker,size_chart_maker}.py` 已改為 re-export shim → 真碼在 `ecommerce-media` 套件。gpt_image_generator shim 會自動把此 env 指回 `config/design_engine`（品牌政策留本 repo），一般不用手動設。
 - `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py + 分析層 AI 店長顧問 advisor.py）
 - `SHOPEE_DASHBOARD_SHEET_ID` — 三賣場分析層戰報表 ID（留空＝寫進 Nail 數據表，#S104）
 - `OPENAI_API_KEY` — GPT 生圖（gpt-image-1.5）
