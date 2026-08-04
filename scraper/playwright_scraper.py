@@ -25,7 +25,8 @@ from loguru import logger
 from config.settings import OUTPUT_DIR
 
 ROOT = Path(__file__).resolve().parent.parent
-COOKIE_PATH = ROOT / "config" / "cookies.json"
+# #S134 階段4：抓取讀 cookie-hub 標準庫的 1688 服飾帳號（原 config/cookies.json 已收攏至此）
+COOKIE_PATH = Path.home() / ".joyslu" / "cookies" / "1688_lady.json"
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -167,38 +168,8 @@ async def _hover_thumbnails(page) -> None:
         pass
 
 
-async def save_cookies(cookie_path: Path = COOKIE_PATH) -> int:
-    """開瀏覽器讓使用者手動登入 1688，登入後存 cookie。回傳 cookie 筆數。
-
-    偵測跳離 login.1688.com 視為登入成功；最多等 5 分鐘。抄自 1688-order launcher。
-    """
-    from playwright.async_api import async_playwright
-
-    pw = await async_playwright().start()
-    browser = await pw.chromium.launch(
-        headless=False,
-        args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
-    )
-    context = await browser.new_context(**_apply_stealth_context_kwargs())
-    await context.add_init_script(
-        "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-    )
-    page = await context.new_page()
-    await page.goto("https://login.1688.com/member/signin.htm", wait_until="domcontentloaded")
-    try:
-        await page.wait_for_url(
-            lambda url: "login.1688.com" not in url and "1688.com" in url,
-            timeout=300_000,
-        )
-    except Exception:  # noqa: BLE001
-        pass  # 逾時也嘗試存檔
-
-    cookies = await context.cookies()
-    cookie_path.parent.mkdir(parents=True, exist_ok=True)
-    cookie_path.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
-    await browser.close()
-    await pw.stop()
-    return len(cookies)
+# （#S134 階段4：1688 登入碼已收進 cookie-hub 警衛室；本檔只保留「讀 cookie 抓取」，
+#  登入改由 gui「🔑 登入 1688」subprocess 呼叫 cookie-hub refresh 1688_lady。）
 
 
 async def scrape_offer(

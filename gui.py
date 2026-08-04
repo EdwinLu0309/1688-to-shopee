@@ -7,7 +7,7 @@
 按鈕對應：
   ⬇️ 更新名單  sheet_fetcher.fetch_ai_list（#S134：走 Service Account 讀私有 Sheet，不再需要 Google 登入）
   🚀 一鍵完成  勾選商品 → scrape_many（抓）→ run_batch_two_tier（產）一次到底
-  🔑 登入 1688 playwright_scraper.save_cookies → config/cookies.json
+  🔑 登入 1688 subprocess 呼叫 cookie-hub refresh 1688_lady（登入碼收在警衛室）→ 標準庫
   🔍 抓取商品  playwright_scraper.scrape_many（去 1688 下載資料/圖）→ output/{id}.json
   📦 產出上架檔 batch_pipeline2.run_batch_two_tier（文案+挑色+影片+蝦皮 Excel）
   📁 素材夾    output/上架素材/（影片+尺寸表，蝦皮 Excel 無影片欄，手動補）
@@ -468,16 +468,22 @@ class App:
         threading.Thread(target=self._login_worker, daemon=True).start()
 
     def _login_worker(self) -> None:
-        from scraper.playwright_scraper import save_cookies
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # #S134 階段4：登入改由 cookie-hub 警衛室統一處理（subprocess 呼叫 refresh 1688_lady，
+        # 開瀏覽器登入服飾帳號並存進標準庫）；本 repo 不再自帶 1688 登入碼。
+        import subprocess
+        from pathlib import Path
+        cookie_hub = Path.home() / "projects" / "cookie-hub" / "cookie_hub.py"
         try:
-            n = loop.run_until_complete(save_cookies(COOKIE_PATH))
-            self._thread_log(f"✅ 登入完成，已存 {n} 筆 cookie")
+            proc = subprocess.run(
+                [sys.executable, str(cookie_hub), "refresh", "1688_lady"],
+                capture_output=True, text=True, timeout=360,
+            )
+            out = (proc.stdout or "") + (proc.stderr or "")
+            self._thread_log("✅ 登入完成，cookie 已存標準庫" if "✅ 登入成功" in out
+                             else "登入未完成，請重試（或開 cookie-hub 警衛室）")
         except Exception as e:  # noqa: BLE001
             self._thread_log(f"登入錯誤：{e}")
         finally:
-            loop.close()
             self.root.after(0, self._on_task_done)
 
     # ── 🔍 只抓取 ──────────────────────────────
