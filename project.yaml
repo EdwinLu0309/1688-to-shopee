@@ -1,45 +1,44 @@
 name: 1688-to-shopee
-title: 1688→蝦皮 工具集（待拆）
+title: 1688→蝦皮 工具集（拆解中，剩 ②③ + 核心）
 layer: 營運工具
-status: 待整理
-purpose: 名義上是 1688 爬蟲→AI 生圖文→蝦皮批次上架；實際已膨脹成 6 個獨立子系統的集合體
-usage: 依子系統各有入口：main.py 命令列 / gui.py 上架 / order_gui.py 訂貨 / reconcile_gui.py 對帳
+status: 拆解中
+purpose: 原「1688 爬蟲→AI 生圖文→蝦皮批次上架」；六子系統拆解中，5/6 已遷出，現剩 ②③ 訂貨/對帳 + 上架核心
+usage: gui.py 上架 / order_gui.py 訂貨 / reconcile_gui.py 對帳（main.py CLI）
 url:
 launch_mac: run_mac.command
 launch_win: run_windows.bat
 description: |
-  掛在「1688→蝦皮」名下、實際已長成 6 個獨立子系統的 Python 桌面工具集（tkinter GUI + main.py CLI，Mac/Windows 雙平台）。原始核心＝爬 1688 單品頁（Playwright+cookie+stealth 或 Chrome MCP 注入 JS 抽 DOM）→ Claude 生蝦皮文案+變體 → 產「過審二階」批次上架 Excel（黃金規則見 CLAUDE.md，錯一條就被擋）。圖片走 1688 原圖或 GPT 生圖/轉繁體版。
+  掛在「1688→蝦皮」名下的 Python 桌面工具集（tkinter GUI + main.py CLI，Mac/Windows）。曾長成 6 個子系統，2026-08 拆解中——**5/6 已遷出獨立 repo / 共用套件，本 repo 舊碼已移除**：
+  - ✅ ⑤ 蝦皮後台分析 → `shopee-analytics` repo
+  - ✅ ④ Kkren 到貨 → `kkren-sync` repo（③ daemon 已解焊，subprocess 呼叫它）
+  - ✅ ① 1688 抓取 → `ecommerce-sources.alibaba1688`（本 repo scrape 走 playwright_scraper）
+  - ✅ ⑥ AI 素材 → `ecommerce-media`（5 模組；本 repo scraper/{gpt_image_generator,auto_classify,image_host,video_maker,size_chart_maker}.py 為 re-export shim）
+  - ✅ 讀 Google 表格 → `ecommerce-sources.gsheet`（master_reader 改用）
 
-  六個子系統：
-  1. 爬蟲上架（gui.py 一條龍：更新名單→勾選→抓取→產 Excel→素材夾）。
-  2. 每日訂貨（order_gui.py：讀蝦皮匯出→join 訂貨主檔→彙總→驅動 vendored cart_adder 到 1688 加購→核對）。
-  3. 金流對帳（reconcile_gui.py + reconcile_daemon 常駐：頁內 lib.mtop 抓 1688 待付款訂單→合併覆蓋核對表 1688_DB，看得出廠商偷改價；LaunchAgent 勾選觸發）。
-  4. Kkren（巧巧郎集運）到貨抓取（httpx+Bearer token 抓已出貨包裹運單號→中繼表 Kkren_Data）。
-  5. 蝦皮後台分析（scraper/shopee_analytics：每日抓 6 張表→raw+SQLite+Google Sheet，三賣場；再疊 AI 店長顧問/每日戰報/改動追蹤日誌，寫 Supabase 供 dashboard 讀）。
-  6. AI 素材生成（product_card 商品資產包 + gpt_image_generator 生圖 + asset_sync 主表勾選一鍵同步到雲端硬碟）。
+  現存本 repo：
+  - **① 爬蟲上架核心**（gui.py 一條龍：更新名單→勾選→抓取→產「過審二階」蝦皮 Excel→素材夾；黃金規則見 CLAUDE.md）。
+  - **② 每日訂貨**（order_gui.py：讀蝦皮匯出→join 訂貨主檔→彙總→驅動 cart_adder 到 1688 加購→核對）。
+  - **③ 金流/到貨對帳**（reconcile_gui.py + reconcile_daemon 常駐：lib.mtop 抓 1688 待付款/到貨→1688_DB，看得出廠商改價；LaunchAgent 勾選觸發）。
 
-  共用 Google Sheet 為真相、SQLite 加速、raw JSON 快照；SA inventory-sync 寫入，多賣場一賣場一份 cookie。
+  ⚠️ ②③ 是下一個拆解目標，計畫整包合進 `1688-order` repo（見 sessions #S132）。
 stack: [Python, tkinter, Playwright, Claude, Gemini, OpenAI, Supabase]
 entrypoint: main.py（另有 gui.py / order_gui.py / reconcile_gui.py 多入口）
 repo: EdwinLu0309/1688-to-shopee
 writes_to:
-  - supabase:shopee   # shopee_analytics 寫入（personal-os-dashboard 讀取）
-  - supabase:圖床
+  - google-sheet:訂貨主檔/明細/彙總 + 1688_DB 對帳表
+  - supabase:圖床（GPT 生圖路線）
 depends_on:
-  - Supabase
-  - Claude / Gemini / OpenAI API
+  - ecommerce-sources（alibaba1688 抓取 + gsheet 讀表）
+  - ecommerce-media（5 媒體模組 shim）
+  - 1688-order（cart_adder/verifier vendored 來源）
+  - Supabase / Claude / Gemini / OpenAI API
 next:
-  - 拆分：先搬最獨立的 shopee_analytics 與 kkren
-  - 分析層 #S104：真實端到端在 Mac 跑第一版（shopee-analyze / 等 10:30 自動帶）對螢幕核對；Edwin 確認 8 關鍵數增刪；feature/daily-analytics 驗完 merge
-  - 訂貨 #S071：首次實跑下單驗規格二尺碼格式（S（80~95斤）與 1688 頁逐字對）＋定下單聚合顆粒度；feature/ordering-system merge
-  - 金流核對 #S084：首次 reconcile-refresh --commit 眼睛核對覆蓋結果（待 Edwin 有真待付款訂單）
-  - 資產包 #S103：批量跑主表其餘有網址商品；一鍵同步包成 GUI 按鈕＋Mac .command；Baby 主表同步落後 Nail/Lady
-  - GPT 生圖 #S069/#S070：Responses API 串接＋轉繁體版正式接進 gpt_image_generator（取代 images.edit），清 scratch_*.py
-  - 上架 GUI：Edwin 實機端到端驗證；48 商品整批實跑（現只跑通 2 筆）
-  - cookie 近期重登：美甲 jiaorong0826（cookies_nail 快到期）、Baby luwei03090826（尚未登入）
+  - ②③ 訂貨/對帳拆解：整包合進 1688-order（sessions #S132 計畫，階段 3/4 動線上 daemon/GUI 需 Edwin 在場）
+  - 訂貨：首次實跑下單驗規格二尺碼格式；金流：首次 reconcile-refresh --commit 眼睛核對
+  - 上架 GUI：Edwin 實機端到端驗證、48 商品整批實跑
+  - 清理：scratch_*.py 污染、5 個 media shim 之後可評估清掉
 issues:
-  - 一個 repo 裝了 6 個產品：①爬蟲上架 ②每日訂貨 ③金流對帳 daemon ④Kkren 抓取 ⑤蝦皮後台分析 ⑥AI 素材生成
-  - 訂貨模組與 1688-order 是分裂雙胞胎（cart_adder/verifier 手動同步）
-  - AI 素材生成與 listing-optimization-tool（執行層）職責重疊
+  - 一個 repo 曾裝 6 產品，現剩 ②③ 訂貨/對帳 + ① 上架核心待拆
+  - 訂貨模組與 1688-order 是分裂雙胞胎（cart_adder/verifier 手動同步）→ 合併時消滅
   - 根目錄有 scratch_*.py / scratchpad_*.log 污染，應清理
-updated: 2026-08-03
+updated: 2026-08-04
