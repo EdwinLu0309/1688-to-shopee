@@ -111,31 +111,17 @@ python main.py images --ingest-downloads
   分類 ID 是查 `config/shopee_template.xlsx`「較長備貨天數範圍」sheet（2013 個分類）得來的真實 ID：
   長褲 100358 / 牛仔褲 100103 / 短褲 100360 / 褲裙 100361 / 裙裝 100102 / T恤 100352。
 
-## AI 名單怎麼從 Google Sheet 落地成 CSV（私有表；兩條 cookie 來源）
-名單是**私有** Google Sheet（`AI_LIST_SHEET_ID`，見 settings.py），公開匯出 URL 會 401，
-只有帶登入 cookie 的 httpx 打 `/gviz/tq?tqx=out:csv&gid=<gid>` 才讀得到 → 存 `input/lady_ai_list.csv`。
-入口：GUI「⬇️ 更新名單」/ CLI `python main.py fetch-list`。`sheet_fetcher._cookie_sources`
-依序試兩條來源，第一個抓到合法 CSV 的就用：
-
-1. **Playwright 登入的 session（跨平台，Windows 主力）**：`scraper/google_login.py`
-   `save_google_session()` 用**真實 Chrome**（`channel="chrome"`，Google 較不擋自動化）開瀏覽器，
-   使用者登入一次 → 拿 context.request 試抓 gviz，抓到合法 CSV 才算登入成功 → 存
-   `config/google_cookies.json`（gitignored）。之後 `load_saved_cookies()` 帶進 httpx 重複用。
-   入口：GUI「🔑 Google 登入」/ CLI `python main.py google-login`。session 過期就再登一次。
-2. **收割日常 Chrome 的 Google cookie（macOS 免登入零點擊）**：`scraper/chrome_cookies.py`
-   `get_cookies("google.com", profile)`。macOS：`security` 取 "Chrome Safe Storage" →
-   PBKDF2-SHA1(saltysalt,1003) → AES-CBC v10。Windows：`Local State` 的 DPAPI 金鑰 →
-   AES-256-GCM 解 v10/v11。逐一 Chrome 設定檔試。移植自 listing-optimization-tool 的
-   `grab_session.py`（#S065）。
-
-⚠️ **Windows Chrome 的 cookie 幾乎全是 App-Bound Encryption（v20）**（Chrome 127+），金鑰再被
-Chrome 服務包一層，純 DPAPI 解不開（要 SYSTEM 權限 / IElevator COM），`chrome_cookies` 遇 v20
-**直接跳過** → Windows 上來源 2 通常收不到料，**一律走來源 1（Google 登入）**。macOS 仍是零點擊。
+## AI 名單怎麼從 Google Sheet 落地成 CSV（走 Service Account，#S134）
+名單是私有 Google Sheet（`AI_LIST_SHEET_ID`，見 settings.py）。**#S134 起走 inventory-sync SA 讀**
+（該表已分享給 SA），與其他所有 Google 表統一——不再需要 Google 個人登入 cookie。
+`sheet_fetcher.fetch_ai_list` 用 `ecommerce_sources.gsheet` + SA 開表 → `get_all_values()` →
+寫 `input/lady_ai_list.csv`（`ai_list_reader.parse_ai_list_csv` 動態表頭對應解析）。
+入口：GUI「⬇️ 更新名單」/ CLI `python main.py fetch-list`。
+（原本兩條 cookie 來源＝Playwright 登入 session + 收割 Chrome cookie，連同
+`google_login.py`/`chrome_cookies.py`/`google-login` 命令/gui「🔑 Google 登入」按鈕已於 #S134 退休。）
 ⚠️ Windows 主控台預設 cp950，輸出 ✓✗/中文會 UnicodeEncodeError → `config/settings.py` 開頭
 把 stdout/stderr `reconfigure(encoding="utf-8")`（main.py 與 gui.py 都早期匯入 settings）。
 ⚠️ 讀舊本機 CSV = 讀到舊資料：實際踩過本機檔停在 2 商品舊版、線上表其實已 48 商品。
-（備用：路 A＝登入 Chrome 開試算表分頁後同源 fetch gviz → Blob 下載到 ~/Downloads，Chrome MCP
-`javascript_tool` 直接回傳 CSV 會被「Cookie/query string data」安全過濾擋掉，只能走 Blob。）
 
 ## 桌面 GUI（gui.py，一條龍、免打指令）
 給非工程使用者的「按幾顆按鈕就上架」全包 App（tkinter，Win/Mac 雙平台）。

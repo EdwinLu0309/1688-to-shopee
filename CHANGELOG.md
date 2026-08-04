@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-04（AI 名單改走 SA，退休 Google 登入 cookie）
+
+### 變更
+- **「AI 上架名單」私有表改走 Service Account 讀**：該表已分享給 inventory-sync SA，`sheet_fetcher.fetch_ai_list` 改用 `ecommerce_sources.gsheet` + SA `get_all_values()` 寫 CSV（介面不變，`fetch-list`/gui「⬇️ 更新名單」無感）。與其他所有 Google 表統一走 SA，不再需要 Google 個人登入 cookie。
+
+### 移除
+- `scraper/google_login.py`、`scraper/chrome_cookies.py`（Google 登入 session + 收割 Chrome cookie，皆無用）。
+- `main.py` 的 `google-login` 命令、`gui.py` 的「🔑 Google 登入」按鈕與 handler。
+- 連帶 cookie-hub 也把 google 移出（8 帳號）。
+
 ## 2026-08-01（reconcile_daemon 看門狗：Playwright 卡死自動了斷重啟）
 
 ### 修復

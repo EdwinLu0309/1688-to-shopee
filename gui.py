@@ -5,17 +5,14 @@
 （🔍 抓取、📦 產出 也可分步個別按；🔑 登入 1688 首次/過期時用。）
 
 按鈕對應：
-  ⬇️ 更新名單  sheet_fetcher.fetch_ai_list（帶 Google 登入 cookie 抓私有 Sheet）
+  ⬇️ 更新名單  sheet_fetcher.fetch_ai_list（#S134：走 Service Account 讀私有 Sheet，不再需要 Google 登入）
   🚀 一鍵完成  勾選商品 → scrape_many（抓）→ run_batch_two_tier（產）一次到底
   🔑 登入 1688 playwright_scraper.save_cookies → config/cookies.json
-  🔑 Google 登入 google_login.save_google_session → config/google_cookies.json（更新名單用）
   🔍 抓取商品  playwright_scraper.scrape_many（去 1688 下載資料/圖）→ output/{id}.json
   📦 產出上架檔 batch_pipeline2.run_batch_two_tier（文案+挑色+影片+蝦皮 Excel）
   📁 素材夾    output/上架素材/（影片+尺寸表，蝦皮 Excel 無影片欄，手動補）
 
-跨平台：GUI 邏輯 Win/Mac 皆可。「更新名單」的登入 cookie：
-  - macOS 可免登入自動收割日常 Chrome 的 Google cookie；
-  - Windows Chrome 用 App-Bound(v20) 加密無法收割 → 按「🔑 Google 登入」登入一次即可（存 session 重複用）。
+跨平台：GUI 邏輯 Win/Mac 皆可。「更新名單」走 inventory-sync SA 讀 AI 上架名單（該表已分享給 SA）。
 """
 import asyncio
 import json
@@ -203,7 +200,6 @@ class App:
             return b
 
         step_btn("🔑 登入 1688", self._on_login)
-        step_btn("🔑 Google 登入", self._on_google_login)
         step_btn("🔍 只抓取", self._on_scrape)
         step_btn("📦 只產出", self._on_run)
         step_btn("📁 素材夾", self._on_open_assets)
@@ -366,12 +362,12 @@ class App:
                 f"{', '.join(gpt)}\n\n要繼續嗎？")
         return True
 
-    # ── ⬇️ 更新名單 ──────────────────────────────
+    # ── ⬇️ 更新名單（走 Service Account 讀私有表；#S134 不再需要 Google 登入）──
     def _on_fetch_list(self) -> None:
         if not self._guard():
             return
         self._busy(True)
-        self._log("連線你 Chrome 的 Google 帳號抓最新名單…（首次會跳鑰匙圈授權，請按允許）")
+        self._log("用 Service Account 抓最新 AI 上架名單…")
         threading.Thread(target=self._fetch_worker, daemon=True).start()
 
     def _fetch_worker(self) -> None:
@@ -384,49 +380,12 @@ class App:
                 self.root.after(0, self._refresh_products)
             else:
                 self._thread_log(f"❌ 抓取失敗：{res.get('error')}")
-                if res.get("need_login"):
-                    self.root.after(0, self._prompt_google_login)
         except Exception as e:  # noqa: BLE001
             import traceback
             traceback.print_exc()
             self._thread_log(f"更新名單錯誤：{e}")
         finally:
             self.root.after(0, self._on_task_done)
-
-    # ── 🔑 Google 登入 ──────────────────────────────
-    def _prompt_google_login(self) -> None:
-        if messagebox.askyesno("需要 Google 登入",
-                               "抓不到名單（沒登入或 session 過期）。\n\n要現在登入 Google 嗎？"):
-            self._on_google_login()
-
-    def _on_google_login(self) -> None:
-        if not self._guard():
-            return
-        if not messagebox.askyesno(
-                "登入 Google",
-                "即將開瀏覽器讓你登入 Google（用來抓私有的 AI 上架名單）。\n"
-                "登入後會自動偵測、存下 session，之後「⬇️ 更新名單」就免再登入。\n\n繼續嗎？"):
-            return
-        self._busy(True)
-        self._log("開瀏覽器登入 Google…（最多等 5 分鐘，登入完成會自動關閉）")
-        threading.Thread(target=self._google_login_worker, daemon=True).start()
-
-    def _google_login_worker(self) -> None:
-        from config.settings import AI_LIST_SHEET_GID, AI_LIST_SHEET_ID
-        from scraper.google_login import save_google_session
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            res = loop.run_until_complete(
-                save_google_session(AI_LIST_SHEET_ID, str(AI_LIST_SHEET_GID)))
-            if res.get("ok"):
-                self._thread_log(f"✅ Google 登入完成（{res['browser']}），存 {res['count']} 個 cookie")
-            else:
-                self._thread_log(f"❌ Google 登入未完成：{res.get('error')}")
-        except Exception as e:  # noqa: BLE001
-            self._thread_log(f"Google 登入錯誤：{e}")
-        finally:
-            loop.close()
             self.root.after(0, self._on_task_done)
 
     # ── 🚀 一鍵完成 ──────────────────────────────
