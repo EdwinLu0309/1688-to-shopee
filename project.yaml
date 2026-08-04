@@ -1,44 +1,41 @@
 name: 1688-to-shopee
-title: 1688→蝦皮 工具集（拆解中，剩 ②③ + 核心）
+title: 1688→蝦皮 上架系統
 layer: 營運工具
-status: 拆解中
-purpose: 原「1688 爬蟲→AI 生圖文→蝦皮批次上架」；六子系統拆解中，5/6 已遷出，現剩 ②③ 訂貨/對帳 + 上架核心
-usage: gui.py 上架 / order_gui.py 訂貨 / reconcile_gui.py 對帳（main.py CLI）
+status: 可用
+purpose: 1688 商品爬取 → AI 生圖文 → 蝦皮「過審二階」批次上架 Excel + 商品資產包（純上架；六子系統拆解已收官）
+usage: gui.py 一條龍上架 GUI；main.py CLI（scrape/generate/batch2/product-cards/sync-assets）
 url:
 launch_mac: run_mac.command
 launch_win: run_windows.bat
 description: |
-  掛在「1688→蝦皮」名下的 Python 桌面工具集（tkinter GUI + main.py CLI，Mac/Windows）。曾長成 6 個子系統，2026-08 拆解中——**5/6 已遷出獨立 repo / 共用套件，本 repo 舊碼已移除**：
+  掛在「1688→蝦皮」名下的**上架系統**（tkinter GUI + main.py CLI，Mac/Windows）。曾長成 6 個子系統，2026-08 拆解**收官（6/6）**，本 repo 收斂為純上架：
   - ✅ ⑤ 蝦皮後台分析 → `shopee-analytics` repo
-  - ✅ ④ Kkren 到貨 → `kkren-sync` repo（③ daemon 已解焊，subprocess 呼叫它）
-  - ✅ ① 1688 抓取 → `ecommerce-sources.alibaba1688`（本 repo scrape 走 playwright_scraper）
-  - ✅ ⑥ AI 素材 → `ecommerce-media`（5 模組；本 repo scraper/{gpt_image_generator,auto_classify,image_host,video_maker,size_chart_maker}.py 為 re-export shim）
+  - ✅ ④ Kkren 到貨 → `kkren-sync` repo
+  - ✅ ① 1688 抓取 → `ecommerce-sources.alibaba1688`（scrape 走 playwright_scraper）
+  - ✅ ⑥ AI 素材 → `ecommerce-media`（本 repo scraper/{gpt_image_generator,auto_classify,image_host,video_maker,size_chart_maker}.py 為 re-export shim）
   - ✅ 讀 Google 表格 → `ecommerce-sources.gsheet`（master_reader 改用）
+  - ✅ **②③ 訂貨/對帳 → 併入 `1688-order`（#S134，本 repo 舊碼已刪 -4723 行）**
 
-  現存本 repo：
-  - **① 爬蟲上架核心**（gui.py 一條龍：更新名單→勾選→抓取→產「過審二階」蝦皮 Excel→素材夾；黃金規則見 CLAUDE.md）。
-  - **② 每日訂貨**（order_gui.py：讀蝦皮匯出→join 訂貨主檔→彙總→驅動 cart_adder 到 1688 加購→核對）。
-  - **③ 金流/到貨對帳**（reconcile_gui.py + reconcile_daemon 常駐：lib.mtop 抓 1688 待付款/到貨→1688_DB，看得出廠商改價；LaunchAgent 勾選觸發）。
+  現存本 repo（純上架）：
+  - **爬蟲上架核心**（gui.py 一條龍：更新名單→勾選→抓取→產「過審二階」蝦皮 Excel→素材夾；黃金規則見 CLAUDE.md）。
+  - **商品資產包**（product-cards / sync-assets：每商品整理成廠商固定事實商品卡 + 圖/影片/raw，寫雲端）。
 
-  ⚠️ ②③ 是下一個拆解目標，計畫整包合進 `1688-order` repo（見 sessions #S132）。
+  ⚠️ 訂貨/對帳（②③）已不在此 repo，改到 1688-order。上架 vs 訂貨是兩件事（#S134）。
 stack: [Python, tkinter, Playwright, Claude, Gemini, OpenAI, Supabase]
-entrypoint: main.py（另有 gui.py / order_gui.py / reconcile_gui.py 多入口）
+entrypoint: main.py（另有 gui.py 上架 GUI）
 repo: EdwinLu0309/1688-to-shopee
 writes_to:
-  - google-sheet:訂貨主檔/明細/彙總 + 1688_DB 對帳表
+  - excel:蝦皮批次上架 Excel（過審二階）
+  - google-drive:商品資產包（{賣場}/商品資產/{編號}/）
   - supabase:圖床（GPT 生圖路線）
 depends_on:
   - ecommerce-sources（alibaba1688 抓取 + gsheet 讀表）
   - ecommerce-media（5 媒體模組 shim）
-  - 1688-order（cart_adder/verifier vendored 來源）
   - Supabase / Claude / Gemini / OpenAI API
 next:
-  - ②③ 訂貨/對帳拆解：整包合進 1688-order（sessions #S132 計畫，階段 3/4 動線上 daemon/GUI 需 Edwin 在場）
-  - 訂貨：首次實跑下單驗規格二尺碼格式；金流：首次 reconcile-refresh --commit 眼睛核對
   - 上架 GUI：Edwin 實機端到端驗證、48 商品整批實跑
-  - 清理：scratch_*.py 污染、5 個 media shim 之後可評估清掉
+  - CLAUDE.md 同步成純上架（移除已遷出的 ②③ 訂貨/對帳描述）
+  - 清理：run_shopee_analytics_install.command（⑤遺留）可清；5 個 media shim 之後可評估清掉
 issues:
-  - 一個 repo 曾裝 6 產品，現剩 ②③ 訂貨/對帳 + ① 上架核心待拆
-  - 訂貨模組與 1688-order 是分裂雙胞胎（cart_adder/verifier 手動同步）→ 合併時消滅
-  - 根目錄有 scratch_*.py / scratchpad_*.log 污染，應清理
+  - CLAUDE.md 尚描述已遷出的 ②③，待同步
 updated: 2026-08-04
