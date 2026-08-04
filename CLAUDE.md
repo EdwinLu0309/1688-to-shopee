@@ -3,12 +3,12 @@
 ## 專案簡介
 1688 商品資訊爬取 → AI 生成蝦皮文案 → 蝦皮批次上架 Excel 自動產生。
 
-## ⚠️ 已遷出的子系統（#S130 清理批次完成）
-六子系統拆解收尾，以下已移到獨立 repo、**本 repo 舊碼已移除**（下方詳細章節僅為歷史參考）：
-- **⑤ 蝦皮後台分析** → `shopee-analytics` repo（原 `scraper/shopee_analytics/` + main.py `shopee-*`/`order-basket` 命令已刪；排程 plist 已指新 repo；`docs/shopee_analytics_api.md` 帶去該 repo）。
-- **④ Kkren 到貨** → `kkren-sync` repo（原 `scraper/ordering/kkren_{scraper,pipeline}.py` + main.py `kkren-refresh` 已刪）。**③ `reconcile_daemon` 的到貨口已解焊**：改 subprocess 呼叫 `kkren-sync` 的 `kkren-refresh --commit`（跑它自己的 venv + cookie-hub token）。
+## ⚠️ 六子系統拆解已收官（#S130/S134）— 本 repo ＝純上架系統
+六子系統全數拆解完畢，**本 repo 只剩「1688 商品→蝦皮上架」本業**（爬取→AI 文案→蝦皮 Excel + 商品資產包）：
+- **⑤ 蝦皮後台分析** → `shopee-analytics` repo（排程 plist 指新 repo；`run_shopee_analytics_install.command` 與孤兒 plist 已於 #S134 清除）。
+- **④ Kkren 到貨** → `kkren-sync` repo。
 - **① 1688 抓取** → `ecommerce-sources.alibaba1688`；**⑥ 素材** → `ecommerce-media`（5 模組，本 repo 為 re-export shim）；**讀表** → `ecommerce-sources.gsheet`。
-- 尚未遷出：**②③ 訂貨/對帳**（`scraper/ordering/` 其餘 + 三個 GUI）仍在本 repo。
+- **②③ 訂貨/對帳** → `1688-order` repo（#S134）。`scraper/ordering/` 整包 + order_gui/reconcile_gui + 訂貨/對帳啟動檔 + main.py 的 order-*/reconcile-refresh 命令全部移除（-4723 行）。**架構原則：上架（本 repo）vs 訂貨（1688-order）是兩件事，「預購」只是橫跨兩者的模式。**
 
 ## 技術棧
 - Python 3.12（.venv；Tk 9.0 深色模式正常）
@@ -26,15 +26,10 @@
 ## 檔案結構
 ```
 ├── gui.py                     # ★桌面 GUI（tkinter，四步：登入→抓取→產Excel→素材夾）
-├── order_gui.py               # ★每日訂貨 GUI（獨立，不動 gui.py）：匯入蝦皮匯出→彙總→下單→核對
-├── reconcile_gui.py           # ★1688 訂單刷新 GUI（獨立）：抓 1688 待付款訂單→覆蓋金流核對表 1688_DB
 ├── run_mac.command            # Mac 啟動 GUI（優先 .venv/bin/python，Tk 9.0 深色正常）
 ├── run_windows.bat            # Windows 啟動 GUI
-├── run_order_mac.command      # Mac 啟動訂貨 GUI（order_gui.py）
-├── run_order_windows.bat      # Windows 啟動訂貨 GUI
-├── run_reconcile_mac.command  # Mac 啟動金流核對 GUI（reconcile_gui.py）
-├── run_reconcile_windows.bat  # Windows 啟動金流核對 GUI
-├── main.py                    # CLI 入口（login/scrape/generate/batch/order-*/reconcile-refresh/kkren-refresh/shopee-login/shopee-collect/shopee-collect-daily）
+├── run_sync_assets_windows.bat # Windows 啟動資產包同步
+├── main.py                    # CLI 入口（login/scrape/generate/generate2/batch/batch2/fetch-list/google-login/product-cards/sync-assets）
 ├── config/
 │   ├── settings.py            # 全域設定（含 Gemini、Google Sheet）
 │   ├── shopee_template.xlsx   # 蝦皮批次上架模板
@@ -59,20 +54,8 @@
 │   ├── video_maker.py         # 蝦皮短影片合成（本機圖→1:1 mp4，ffmpeg）
 │   ├── pipeline.py            # 單商品全流程串接
 │   ├── batch_pipeline.py      # 批次處理（採購表→逐一處理→合併 Excel）
-│   └── ordering/              # ★每日訂貨系統套件
-│       ├── models.py          # OrderLine/MasterEntry/SummaryRow/OrderItem
-│       ├── shopee_export.py   # 解密+讀蝦皮 toship 匯出 → OrderLine
-│       ├── order_sheet.py     # gspread 三分頁讀寫（主檔/明細/彙總 + SA）
-│       ├── pipeline.py        # 匯入→join→明細+彙總→今日總金額（dry-run 預設）
-│       ├── cart_order.py      # 彙總→OrderItem→cart_adder 加購/cart_verifier 核對
-│       ├── cart_adder.py      # vendored 自 1688-order（1688 改版兩邊同步）
-│       ├── cart_verifier.py   # vendored 自 1688-order
-│       ├── pending_scraper.py # ★金流核對：頁內 mtop 抓 1688 待付款訂單 → OrderRecord/1688_DB 26欄
-│       ├── reconcile_db.py    # ★覆蓋金流核對表 1688_DB 分頁（gspread SA）；arrival=50欄到貨版
-│       ├── reconcile_pipeline.py # ★刷新流程：抓訂單→(可選)覆蓋 1688_DB（dry-run 預設）
-│       ├── reconcile_daemon.py # ★常駐監聽 daemon：輪詢各表控制分頁勾選→抓 1688→直寫該表 1688_DB
-│       ├── kkren_scraper.py   # ★抓 Kkren(巧巧郎)已出貨包裹（httpx+Bearer token）→ Kkren_Data 7欄
-│       └── kkren_pipeline.py  # ★Kkren 刷新：抓已出貨→去重 append 中繼表 Kkren_Data（dry-run 預設）
+│   └── product_card.py        # 商品資產包（廠商固定事實商品卡 + 圖/影片/raw）
+│   # （★②③ 訂貨/對帳套件 scraper/ordering/ 已於 #S134 整包遷至 1688-order repo）
 ├── output/                    # 產出目錄（gitignored）
 │   └── {item_id}/
 │       ├── ai_content.json
@@ -246,203 +229,21 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
 2. **商品選項貨號尺碼（O欄 join key）＝純字母**：`build_variants._clean_size_key` 把「M【80-100斤】」清成「M」（貨號只是識別碼、不需含斤；蝦皮匯出欄33 ↔ 訂貨表兩邊一致即可）。
 3. **⚠️ 訂貨表「規格二」(給 cart_adder 在 1688 選規格)＝斤，必須是 1688 原文**（如 `M【80-100斤】`/`S（80~95斤）`）：**來自抓取 JSON 的原始 `sizes`，公斤修正完全沒動它**。建訂貨表時規格二**務必用 JSON 原始 sizes 對回**（別用清過的 key 硬湊，否則像 P14AE12「M【80-100斤】」對不到）。
 
-## ★訂貨系統（3 分頁 Google Sheet + 獨立下單 GUI，2026-07-09 #S070／Phase A+B 已建）
-每天 200-300 預購商品要下單，用一張 Google Sheet（SA `inventory-sync@inventory-sync-493112.iam.gserviceaccount.com` 需被分享為編輯者；SA 無 Drive 容量不能自建檔，要 Edwin 建空白表再分享）。**三分頁**：
-1. **`1_訂貨主檔`**（靜態、隨上架累加）：`商品選項貨號 | 編號 | 商品簡稱 | 1688網址 | 規格一(1688原色) | 規格二(1688尺碼) | 進貨¥`。
-   - **join key＝商品選項貨號**（= 蝦皮 O 欄 `編號_顏色（身高款）_尺碼`，如 `P14AE1_黑色（常規款）_S`；已實測蝦皮會吃、匯出欄33 對得上）。
-   - **規格一/二 = 1688 原始規格**（cart_adder 選規格用）：規格一取 `build_variants` 的 `src_1688`（如 `（升级面料）-黑色-常规款`，**實測與 1688 頁面 `.sku-filter-button .label-name` 逐字相同**）；規格二取 1688 原尺碼字串（如 `S（80~95斤）`，**格式是否與頁面尺碼列逐字相同待 cart_adder 首次實跑驗**）。
-2. **`2_每日訂購彙總`**（訂貨依據，餵 cart_adder）：`日期 | 商品選項貨號 | … | 總數量 | 進貨¥ | 成本小計 | 下單狀態 | 下單時間`。**由分頁3 程式自動聚合，不手填。**
-3. **`3_訂單明細`**（出貨依據，按訂單編號）：`日期 | 訂單編號 | 買家帳號 | 商品選項貨號 | 編號 | 數量 | 出貨狀態`。一列一張蝦皮訂單明細（解「同 SKU 多買家」的一對多：留成多列不塞一格）。到貨後篩 SKU → 知道寄給哪幾張單。
-- **蝦皮匯出**：`Order.toship.YYYYMMDD_*.xlsx` 有密碼（msoffcrypto 解），關鍵欄：欄33 商品選項貨號、欄34 數量、欄0 訂單編號、欄5 買家帳號、欄27 商品選項名稱。
-- **資料流**：蝦皮匯出 → append 分頁3（原始明細）→ 同 SKU 聚合寫分頁2（總量+成本）→ 按下單 cart_adder 跑 → 回寫分頁2 狀態。
-- **下單顆粒度待驗**：分頁2 記到 SKU（色×尺碼）；若 1688 是單軸（只有色-款式無尺碼軸，本商品尺碼列靜態探測不到、待實測）→ 餵 cart_adder 前要再聚合到「色-款式」層。
-- **下單工具（獨立簡易版，已建於 `scraper/ordering/`）**：資料骨幹（Phase A）+ 下單整合（Phase B）都已寫好、Sheet 讀寫實測過；只差**首次實跑下單驗規格二尺碼格式**（要真的有預購訂單 + Edwin 開瀏覽器）。
-  - **套件 `scraper/ordering/`**：
-    - `shopee_export.py`：msoffcrypto 解密 toship 匯出 + calamine 讀，抽欄 0/5/25/27/33/34（訂單編號/買家/商品名/選項名/貨號/數量），含表頭校驗防跑位。
-    - `order_sheet.py`：gspread + inventory-sync SA。`load_master`（分頁1）/`append_details`（分頁3，去重 by 訂單編號+貨號）/`upsert_summary`（分頁2，clear+rewrite 某日 idempotent）/`update_order_status`（回寫分頁2）。
-    - `pipeline.py`：`import_orders`（匯出→join 主檔過濾預購品→建明細→聚合彙總→算今日總金額）。**預設 dry-run，`commit=True` 才寫 live sheet**。純函式 `build_import` 好測。
-    - `cart_order.py`：`build_order_items`（彙總 join 主檔補 1688 網址）→ `place_orders`（驅動 vendored `cart_adder`，按 url 分組加購）→ 回寫狀態；`verify_cart` 驅動 `cart_verifier`。`run_place_orders` 只跑「下單狀態空」的列（防重複下單）。
-    - `cart_adder.py`/`cart_verifier.py`：**vendored 自 `~/projects/1688-order/order/`**（只改 `OrderItem` import 來源）。⚠️ 1688 改版時兩專案的選擇器都要同步。
-  - **CLI**：`python main.py order-import <toship.xlsx> -P <密碼> [-d 日期] [--commit]` / `order-place [-d 日期]` / `order-verify [-d 日期]`。
-  - **GUI**：`order_gui.py`（獨立，不動主 `gui.py`）＝選匯出檔+密碼+日期 → 📥匯入預覽(dry-run 顯示彙總+總金額) → ✅寫入Sheet → 🛒下單 → 🔍核對。啟動：`run_order_mac.command` / `run_order_windows.bat`。
-  - **下單 cookie**：用主 gui.py 的「🔑 登入 1688」產生的 `config/cookies.json`（cart_adder 直接吃）。
-  - 進貨¥ 目前多數主檔列未填 → 成本小計顯示「無進貨¥」，Edwin 補 `1_訂貨主檔` G 欄即計入總金額。
-
-## ★金流核對刷新（1688 訂單→1688_DB，2026-07-13 #S072，取代手動匯出報表）
-解決「每次要用電腦開 1688 待付款→勾選→匯出訂單報表→丟資料夾→匯入 DB」太繁瑣、手機做不到、
-且**廠商偷改價看不出來**的痛點。按一顆按鈕就把當下 1688 訂單撈進金流核對表。
-- **目標表**：`【Nail】2-1. 進貨金額記錄_2026`（`RECONCILE_SHEET_ID`，settings.py；SA=inventory-sync 已有編輯權）。
-  分頁 `1688_DB`（26 欄，＝1688 官方「訂單報表」匯出 xlsx 原樣）存訂單原始資料；各日期核對分頁
-  （`0713` 等）靠 **`卖家公司名`（廠商）** VLOOKUP 帶入 `付款平台訂單編號/訂單費用/總金額/運費`。刷新只動
-  `1688_DB`、不碰核對分頁。
-- **抓取法（去風險定案）**：不刮脆弱的 shadow DOM（air.1688 訂單頁是 Lit q-table 虛擬滾動）、也不打
-  簽章混淆的 mtop——而是 **Playwright 進頁後，在頁內用該站自己的 `lib.mtop` JS 呼叫訂單清單 API**（自動簽章、
-  可翻頁）：`mtop.1688.trading.dataline.service` + `serviceId=OrderListDataLineService.buyerOrderList`，
-  `param={"tradeStatus":"waitbuyerpay","page":N,"pageSize":100}` → `res.data.data.result`(JSON字串)
-  → `{data:{data:[...訂單...],total,pages}}`。改版時改 `pending_scraper.py` 的 `CALL_JS`。
-- **欄位對應**（⚠️ 金額單位是「分」÷100）：`idStr`→訂單編號、`sellerInfo.companyName`→卖家公司名（核對 key）、
-  `sumProductPayment`→货品总价、`carriage`→运费、`sumPayment`→实付款、`gmtCreate`→订单创建时间（格式化 `Y/M/D`）、
-  `orderEntries[]`→品項（productName/price/quantity/productNumber/sourceId=Offer ID/skuId）。折扣＝货总−实付。
-  一訂單多列（首列填訂單級欄+首品項，後續列只填品項欄），比照官方報表格式。清單 API 的收貨地址/電話被遮罩→留空（核對用不到）。
-- **日期篩選**：只留 `gmtCreate >= 核對日期`（預設今天）——今天下的訂貨表就核對今天(含)之後的訂單，不對到舊批。
-- **合併累加語義**（2026-07-29 改，原純覆蓋）：重抓待付款訂單**合併**進 `1688_DB`——仍在待付款的訂單用新值覆蓋
-  （廠商改價→實付款一起更新，這就是「看得出廠商改價」的關鍵），**這次沒抓到的訂單整組保留**。⚠️原因：Edwin 一批下很多單、
-  逐筆核價，會先按付款結掉部分訂單再繼續核剩下的；已付款訂單離開「待付款」→ 純覆蓋會把它連訂單編號一起清掉，就無法出到
-  2-2 到貨表核對（訂單編號對不上）。故改合併保留已付款訂單（純函式 `pending_scraper.merge_order_grid`，與到貨版共用；
-  到貨版多做運單號回填）。⚠️**0 筆時防呆略過寫入**（避免無謂重寫）。
-- **入口**：GUI `reconcile_gui.py`（獨立，不動 gui.py/order_gui.py）＝設核對日期→🔄刷新預覽(dry-run 顯示筆數/實付合計/廠商)
-  →✅寫入 1688_DB。啟動 `run_reconcile_mac.command` / `run_reconcile_windows.bat`。
-  CLI `python main.py reconcile-refresh [-d 日期] [-s 狀態] [--commit]`。cookie 用主 gui.py 的「🔑 登入 1688」產生的 `config/cookies.json`。
-- **✅ 已實跑驗證**（#S084）：美甲帳號＝`jiaorong0826`（**非** joyslunailshop，那是服飾帳號）。抓 31 筆 7/13 真待付款、
-  直接覆蓋 ① 的 `1688_DB`，0713 分頁活公式（`=XLOOKUP(廠商, '1688_DB'!D:D…)`）即時對上（阳东星慕 ¥579.31 與 1688 頁一致）。
-  ⚠️ 折扣欄語義與 1688 原匯出可能略不同，但**实付款＝sumPayment 是權威值**、核對看它。
-
-## ★ERP 式常駐監聽自動化（打勾→Mac 常駐→自動更新，2026-07-14 #S084）
-Edwin 要「在雲端頁面點一下就自動更新」的 ERP 體驗（他 Mac 永遠開機，見全域記憶 [[mac-always-on-host]]）。
-- **架構（去風險定案）＝輪詢式監聽 + 各表直寫**：`reconcile_daemon.py` 常駐輪詢各消費表的「🔄刷新控制」分頁勾選格
-  （SA 每 20s 讀），看到打勾 → 抓 1688 → **直接覆蓋那張表自己的 `1688_DB`** → 清勾 + 回寫「狀態/最後更新」。
-  日期分頁本來就活公式 XLOOKUP 本地 `1688_DB`，故直寫即時生效、**免 IMPORTRANGE 授權、免中央檔**。
-  （原本規劃中央檔 ③【全】1688訂單資料 + IMPORTRANGE，但實測發現：① 各表 SA 都寫得進、② 金額/到貨抓不同狀態沒共用資料
-  → 直寫各表更簡單，中央檔+IMPORTRANGE 棄用；IMPORTRANGE 首連需人工點「允許存取」是它的痛點。）
-- **config 驅動多口去重**：`JOBS`＝帳號 cookie + 抓取 + 寫哪張表 1688_DB + 觸發口清單。多口同 job（金額表+到貨表都要更新）
-  任一打勾只跑一次。新增賣場＝加一列 JOB + 那張表加控制分頁（`setup` 自動建勾選框），不改邏輯、不多開 daemon。
-- **多帳號 cookie 分離**：金流核對＝美甲帳號 `config/cookies_nail.json`（reconcile_gui「🔑登入美甲帳號」按鈕產）；
-  Lady 上架/訂貨仍用 `config/cookies.json`。兩邊不再互相蓋掉。⚠️ 踩坑：Edwin 以為登入美甲了，但 gui.py 登入存到
-  cookies.json 而非 cookies_nail.json，且首次登入沒存成功（mtime 沒變）→ 一直抓到服飾帳號 0 筆。
-- **常駐＝LaunchAgent**：`config/com.joyslu.reconcile-daemon.plist`（開機自啟、KeepAlive、免終端機），
-  雙擊 `run_daemon_install.command` 安裝/重載。日誌 `logs/reconcile_daemon.log`。
-- **入口**：`python -m scraper.ordering.reconcile_daemon setup|once|cookies [probe]|run`。setup 在各口建控制分頁+勾選框；
-  once 跑一輪（測試）；cookies 立即寫 cookie 狀態格（加 probe 連 1688 探測）；run 常駐（LaunchAgent 跑這個）。
-- **★Cookie 過期警報（2026-07-22 #S096，`cookie_health.py`）**：解 Edwin「人在外面 cookie 過期就卡住、打勾當下才發現」
-  的痛點。各控制分頁多一格 **B6「🔑 Cookie 狀態」**，daemon 每 6h 對每個 cookie 做**輕量探測**（帶 cookie 打一次
-  1688 訂單 API `page=1,pageSize=1`）→ 🟢有效／🔴失效，並在打勾抓取遇 `SESSION_EXPIRED` 時**即時標紅**（附「該用哪個
-  程式重登」提示，見 `relogin_hint`）。⚠️**探測才是權威、讀 cookie 檔到期日會誤報**：實測服飾 `cookies.json` 短命 cookie
-  （cookie2 等）名目已過期 -8.7 天，但 1688 伺服器端 session **實打仍有效**（靠長命 cookie 撐）→ 故到期日只當「名目快到期」
-  軟提示，**絕不單憑檔案報紅**。重登入口：美甲＝`run_reconcile_mac.command`「🔑登入美甲帳號」、服飾＝`run_mac.command`
-  「🔑登入1688」、Baby＝登入 luwei03090826（待接專屬按鈕）。
-- **待接**：到貨表（`【Nail】2-2.商品到貨記錄`）的口——抓**待收貨**訂單 + **運單號**（清單 API 遮罩地址/單號，
-  可能要多打物流 API）→ 寫到貨表 50 欄 `1688_DB`。等 Edwin 金額表調好再啟用（JOBS 加一列即可）。還有其他 3 個賣場同模式。
-
-## ★到貨核對 — Kkren(巧巧郎)集運已出貨抓取（2026-07-14 #S085）
-到貨表(2-2)核對要「運送單號→件數/重量/包裹狀態/到貨日」，資料來自集運商 Kkren(巧巧郎)。
-資料流：**Kkren 已出貨 → 中繼表 `181lP`(【中繼】巧巧郎出貨狀態) 的 `Kkren_Data` 分頁 →
-IMPORTRANGE 進 2-2 的 `Kkren_DB` → 到貨日期分頁靠「物流單號」對 `1688_DB!AF 運單號」帶出**。
-⚠️**到貨版 1688_DB 刷新＝合併累加、非整張覆蓋**（2026-07-27）：`ReconcileDB.overwrite(arrival=True)`
-先讀舊 DB，新抓訂單為主、這次缺運單號時**回填舊值**、舊有但這次沒抓到的訂單（已離開待收貨）**整組保留**
-（純函式 `pending_scraper.merge_arrival_grid`）。否則訂單一離開待收貨、運單號從 DB 消失 → 到貨分頁 XLOOKUP 全對不到。
-**故到貨表刷新前不用再手動「凍結成值」**；金額版（2026-07-29 起）也改合併累加、共用 `merge_order_grid`
-（保留已付款訂單、待付款訂單反映最新金額），金額日期分頁核對完仍要凍結成值。
-- **抓取（去風險定案）**：Kkren 是 SPA（`kkren.com.tw`），API 在 `api.jyb.com.tw`，認證＝
-  **localStorage 的 `accessToken`（Bearer）**，非 cookie。Edwin 用 `kkren_probe`（scratch）登入一次
-  存**完整登入態** `config/kkren_state.json`（含 token，⚠️新裝置登入要簡訊驗證碼）；之後 httpx 帶
-  Bearer 直接打 REST，無頭自動、免再登（token 過期才重登）。
-- **已出貨端點**：`GET api.jyb.com.tw/jyo/v1frontend/jyorder/index?...&jyoPayStatus=9&jyoStatus=5`
-  （9=已付款、5=已出貨）。**一訂單多包裹→一列一 `parcels[].trackingNo`（物流單號）**。
-- **欄位對應**（`kkren_scraper.to_parcels`）：oid→訂單編號、createdAt→下單日期、
-  `jyoExtraInfo.schedule.calJycutAt`週幾→結單日(星期X結單)、`.calDelivAt`週幾→預計到貨、
-  **`parcels[].trackingNo`→物流單號**、`parcels[].weight÷1000`→重量(KG，實測1980→1.98)。
-  ⚠️**物流狀態抓 `order.subtnos[].lastTrace`（自派車軌跡，自帶時間戳、出貨後才有）**，靠
-  `jyoExtraInfo.parcelsInfo.estimateSubtnos` 對回各 parcel 物流單號（`_subtno_trace_map`）；沒有才退回
-  `parcels[].statusAt+statusBrief`（＝Kkren 倉庫打包狀態，會凍在「已打包」，**不是**真實貨態，別只抓這欄）。
-  ⚠️到貨日**自帶在每筆訂單** schedule，不用另查行事曆。
-- **去重 append**：比對 `Kkren_Data` 既有「物流單號」(第5欄)，只加新的（Edwin「只抓還沒建立過的」）。
-- **入口**：CLI `python main.py kkren-refresh [-d 天數] [--commit]`；daemon **到貨口**（`also_kkren:True`）
-  打勾時**同時**刷 1688 待收貨 + Kkren 已出貨（一個勾更新 1688_DB + Kkren_Data）。
-  ⚠️**到貨口＝兩段獨立**（2026-07-27，`_run_job` arrival 分支）：1688→1688_DB 與 Kkren→Kkren_Data
-  各自 try、互不阻擋，1688 逾時/0 筆時 Kkren 照樣更新（狀態格分開回報 `1688：…；Kkren：…`）。
-  因 1688 訂單清單 API（`OrderListDataLineService.buyerOrderList`）常態 `TIMEOUT::接口超时`——連待付款也會，
-  屬 1688 端/風控暫時性；`pending_scraper` 已調耐撞（timeout 60s、pageSize 50、退避重試），全逾時時仍需等 1688 恢復、勿狂按刷新。
-- **✅ 端到端驗證**：1688 待收貨運單號（如 79016806016916）＝Kkren 物流單號，兩邊對得上；
-  重量/到貨日與 Edwin 現有 Kkren_Data 逐筆一致。
-
-## ★蝦皮數據中心每日抓取（scraper/shopee_analytics/，2026-07-22 #S098 起、#S100 廣告全層+排程收尾）
-每天全自動抓 6 張表給 Claude 分析（承 #S097：**真相 = Google Sheet（Edwin 可核對）、SQLite 加速副本、raw JSON 原封快照**）。
-API 規格（端點/參數/欄位/report_type 枚舉/限流）全在 **`docs/shopee_analytics_api.md`**，動這模組前先讀它。
-- **認證**：登入 cookie（`SPC_CDS` 同時帶 query）。`shopee-login --shop {nail|lady|baby}` 開瀏覽器登入存
-  `config/shopee_cookies_{shop}.json`（gitignored；實打 API 驗證才算成功）。多賣場同套程式換 cookie。
-- **抓取**：`shopee-collect --shop nail [--date] [--sheet-id] [--no-sheet]`（預設抓昨天；sheet-id 預設查
-  `settings.SHOPEE_ANALYTICS_SHEET_IDS`）。落地順序 raw 快照 → SQLite → Sheet。SA 沿用 inventory-sync
-  （env `GOOGLE_SERVICE_ACCOUNT_JSON`，未設則 fallback `ORDER_SHEET_SA_JSON`；SA 要被分享 Sheet 編輯權）。
-- **⚠️ 三賣場連寫爆 Sheets 讀取配額(429)＝2026-07-29 修**（#S104）：`shopee-collect-daily` 三家背靠背寫 Sheet，
-  一分鐘內對 Sheets 的讀取次數超 60/分 → 429，且**寫到一半中斷會留下部分分頁缺當天資料**（lady 7/27 廣告+自動選品
-  被截）。修法雙保險：① `shopee_collect_daily_cmd` **賣場間隔 30s 分段寫**；② `storage_sheet.save` 內建 **429 退避
-  重試整包**（30/60/90s；`_save_once` 冪等故重試安全）。補歷史漏寫免重抓＝從 SQLite 重建 `DayData` 再 `storage_sheet.save`。
-- **6 個 Sheet 分頁**（同日重跑冪等＝先 batch 刪舊列，⚠️逐列 delete 423 次會炸 429，見 `storage_sheet._delete_day_rows`）：
-  1. `商品日報_YYYYMM`：商品層 `v4/product/performance/`（49 欄，分頁抓全店 ~423/天）
-  2. `規格日報_YYYYMM`：規格層（inline models，994/天）——**「規格名稱」＝成本/毛利月獲利表對帳 key**
-  3. `大盤日報_YYYY`：`sales/overview/funnel/` + `traffic-sources/` + `key-metrics/`（一天一列，尾段有廣告總計欄）
-  4. `廣告日報_YYYYMM`：廣告活動層。`POST pas/v1/homepage/query/`（**兩種 campaign_type 合併**：
-     `cpc_homepage_v3` 手動+自動加碼+賣場 + `product_gms` 自動選品聚合）。⚠️金額欄 ÷100000；只留當天有跑的活動
-  5. `自動選品商品_YYYYMM`：GMV MAX 逐商品（74/天）。自動選品 UI 是黑箱一列，逐商品靠 **export_job flow**
-     （`gms_detail.py`：trigger `product_gms__homepage` → 輪詢 → download 回 CSV 全文）。挑高 ROAS 商品轉手動
-  6. `賣場廣告關鍵字_YYYYMM`：手動賣場廣告逐關鍵字（投放詞×買家搜尋詞，只留有花費/轉換 ~330/天）。
-     `shop_keyword.py` 走同 export_job flow（`shop_manual__single_detail`，帶 campaign_id；從當天廣告日報篩 shop_manual 活動）
-- **⚠️ export_job 限流**（`trigger` 回 `code=200 too many export requests`）：多活動連續匯出必撞 →
-  `gms_detail.run_export_job` 退避重試 15/30/45/60s + 賣場關鍵字活動間 sleep 8s。全域 export helper＝`run_export_job`。
-- **中文表頭**：三分頁欄名全中文（`storage_sheet._CN`/`_cn()`；英文 key 只在 code/SQLite/raw）；`_ensure_ws` 表頭不符自動遷移。
-- **每日排程（#S100 已裝）**：LaunchAgent `com.joyslu.shopee-analytics.plist` 每天 10:30 跑 `shopee-collect-daily`
-  （loop `SHOPEE_ANALYTICS_SHEET_IDS` 所有已登入賣場，缺 cookie 略過、一店掛不影響其他）。
-  裝：雙擊 `run_shopee_analytics_install.command`（同時裝健康點名）。
-- **★數據健康點名（#S100，`health_check.py`）**：解「排程沒跑＝連失敗通知都沒有」的無聲失敗。LaunchAgent
-  `com.joyslu.data-health.plist` 每天 11:00 **驗資料本身**（點名制，非聽作業回報）：蝦皮**同時驗 SQLite + Google Sheet**、
-  ERP 查【全】ERP庫存寬表 H1 欄頭＝今天（`ERP_SHEET_ID`）。結果跳 **macOS 對話框**（`alert_mac` 停螢幕不消失，
-  比橫幅可靠）+ 寫「抓取狀態」分頁（歷史）。異常才補橫幅+提示音。1688 核對 daemon 不點名（主動勾選型）。
-  ⚠️**蝦皮加驗 Sheet＝2026-07-29 修盲點**（#S104）：原本只查 SQLite → 429 漏寫（SQLite 有、Sheet 缺）時**誤報全綠**。
-  現 `_sheet_missing_tabs` 比對「SQLite 有料的分頁」是否也寫進 Sheet（該日該賣場列數 < SQLite 就判 ❌ `Sheet漏寫`）；
-  Sheet 讀不到只註記 `Sheet未驗` 不判死。
-- **★訂單商品聯動 basket（#S101，`order_basket.py`）＝每月一次半自動**（Edwin 定義，不每天抓——
-  basket 是慢變數 + 訂單報表含個資）：Edwin 每月匯出訂單報表（`Order.all.*.xlsx`，msoffcrypto 加密、
-  **密碼＝帳號手機末 6 碼**，美甲＝576137）丟過來 → `order-basket <報表> -P <密碼> --commit`。
-  解密只取訂單/商品/貨號/數量（**不碰個資欄**）、排除不成立單 → 落地 Sheet `訂單明細_累積`（去個資、
-  月 append 去重）+ `商品聯動摘要`（從累積所有月重算：買A配B共現 + 常買多件）。用商品ID 聚合到商品層。
-  ⚠️簡訊驗證只在「觸發下載」那步（Edwin 手機手動），讀已下載檔免簽章。
-- **★三賣場全開（#S102 結案）**：nail/lady/baby 各一份 cookie + 各一張 Sheet（ID 在
-  `SHOPEE_ANALYTICS_SHEET_IDS`，**未填 ID 的賣場自動排除排程**）。實跑三家 0 失敗、資料零串台，
-  健康點名自動變四行（三家+ERP）。⚠️**蝦皮無切換賣場 API**（session 綁登入當下賣場）→ 一賣場一份
-  cookie 是唯一解；企業帳號可用（一組帳密切三次賣場登入）。**簡訊驗證/選賣場只在登入那一次**，
-  之後排程無頭直打 API 免驗證；cookie 長效，過期才重登（健康點名會抓到）。
-- **待接**：model_id ↔ 商品選項貨號 對照（models 沒帶貨號，跟訂貨/庫存 join 需要）。
-
-## ★三賣場數據 AI 分析層（scraper/shopee_analytics/，2026-07-26 #S104）
-把每天抓好的三賣場數據「重新接回去」變成 Edwin 一眼可用的東西。定調（Edwin 拍板）：
-**本質不是做完善 dashboard，是「AI 每天替我讀完三家數據 → 直接給結論和待辦」**＝出錢請的專業店長顧問。
-紀律＝**少而精**、只抓觸發決策的幾個關鍵數，不做每商品多分析點。**先 Google Sheet 版**跑第一版，
-之後才做畫面（要接 personal-os-dashboard 監控層再說）。三塊，都寫進「戰報 Sheet」（3 分頁）：
-- **1. 每日戰報（`daily_report.py`）**：一眼看三賣場。矩陣＝**8 關鍵數**（列）× 三賣場（每家 值/昨比/週比）。
-  8 數（改 `metrics.py` 的 `METRICS` list 即增刪）＝成交額/成交訂單數/成交轉換率/CTR/訪客下單率/廣告花費/廣告ROAS/廣告佔營收比。
-  昨比＝vs 前一天、週比＝vs 7 天前，帶 🟢🔴▲▼（**不靠 Sheet 條件式格式**，手機也一眼）。每次跑覆蓋整頁＝只呈現最新一天。
-- **2. AI 店長顧問（`advisor.py` + `signals.py`）**：每天一則白話＝今天一句話/✅維持/⚠️動作/🔎機會。
-  價值在**跨表交叉**（商品×廣告×大盤）：`signals.py` 抽「銷量爆發/有看沒買/關鍵字燒錢零轉換/高ROAS關鍵字/
-  自動選品高ROAS/廣告佔比過高/轉換·CTR·營收週比驟降」→ digest → Claude（`claude-sonnet-4-6`，同 copywriter）。
-  **無 `ANTHROPIC_API_KEY` 或呼叫失敗 → rule-based fallback**（照樣條列訊號、不開天窗）。冪等：同資料日覆蓋、否則插最上面。
-- **3. 改動追蹤日誌（`change_log.py`）**：閉環「改了什麼→有沒有變好」。一張分頁，左半 Edwin 填
-  （改動日/賣場/對象/類型/改了什麼/想改善的指標）、右半系統每天自動算（改動前後 3/7 天目標指標+變化%+判定）。
-  系統無法自己歸因（看得到 CTR 掉但不知是改了標題）故「改了什麼」要人填。**對象填商品ID＝追該商品、留空＝追整店**；
-  領先指標(CTR/轉換)3-7 天可判、落後指標(營收)拉長，故同時給 3 天與 7 天兩窗。判定門檻在 `change_log.py` 頂端。
-- **orchestrator `analysis.py`**：`run_analysis(day, db_path, sheet_id)` 依序寫三塊。**掛在 `shopee-collect-daily`
-  尾巴**（三家抓完、有任一家成功就跑，讀 SQLite 重算）。也可獨立重跑：`shopee-analyze [--date] [--no-ai] [--sheet-id]`
-  （不重抓，純讀 SQLite 重寫）。
-- **寫哪張表**：`settings.SHOPEE_DASHBOARD_SHEET_ID`（env 可覆蓋）；**留空＝寫進 Nail 數據表**（SA 已有編輯權、
-  第一版即可跑）。之後 Edwin 建一張獨立彙整表分享給同一 SA、填 ID 即改寫過去。
-- **資料源＝本機 SQLite**（`shop_daily`/`product_daily`/`shop_keyword_daily`/`gms_product_daily`，有歷史）：
-  成交額/訪客/廣告花費·ROAS 取 `shop_daily` 官方值（＝Edwin 大盤看到的同一數好核對）；
-  成交訂單數/曝光/點擊 `shop_daily` 沒有 → 用 `product_daily` 全店加總導出（CTR＝Σ點擊/Σ曝光）。
-- **⚠️這台 Windows 無本機蝦皮 SQLite**（daemon+DB 在 Mac）→ 純運算已用合成資料驗過，**真實端到端要在 Mac 跑**
-  （有 AI key + 真資料）：`shopee-collect-daily` 自動帶、或手動 `shopee-analyze`。
-- **待接（#S104 下一步）**：① Edwin 確認 8 個關鍵數要加/拿掉哪些（改 `METRICS`）；② 顧問⚠️動作自動變追蹤日誌一列
-  （閉環再黏緊，現為手填）；③ 跑幾天後對螢幕核對數字；④ 之後接 dashboard 畫面。
+## 已遷出子系統（詳細文件見各自 repo）
+以下曾在本 repo、#S130/S134 已整包遷出，詳細設計/踩坑見對應 repo 的 CLAUDE.md：
+- **②訂貨 / ③金流·到貨對帳（含常駐 reconcile_daemon）** → `1688-order`（每日訂貨小幫手 order_gui + 背景對帳 daemon）。
+- **④ Kkren（巧巧郎）到貨抓取** → `kkren-sync`。
+- **⑤ 蝦皮後台數據抓取 + AI 店長分析層** → `shopee-analytics`。
+（本 repo 只保留「1688→蝦皮上架」本業：爬取→AI 文案→蝦皮 Excel + 商品資產包。）
 
 ## 環境變數
 - `ECOMMERCE_DESIGN_DIR` — 生圖設計規範資料夾。#S130：`scraper/{gpt_image_generator,auto_classify,image_host,video_maker,size_chart_maker}.py` 已改為 re-export shim → 真碼在 `ecommerce-media` 套件。gpt_image_generator shim 會自動把此 env 指回 `config/design_engine`（品牌政策留本 repo），一般不用手動設。
 - `ANTHROPIC_API_KEY` — Claude API key（文案引擎 copywriter.py + 分析層 AI 店長顧問 advisor.py）
-- `SHOPEE_DASHBOARD_SHEET_ID` — 三賣場分析層戰報表 ID（留空＝寫進 Nail 數據表，#S104）
 - `OPENAI_API_KEY` — GPT 生圖（gpt-image-1.5）
 - `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`（`sb_secret_…`）/ `SUPABASE_BUCKET`（預設 `joyslu-images`）
   — GPT 生圖圖床（Supabase Storage public bucket；只 GPT 路線用）。service key 是機密，勿 commit。
 - `GEMINI_API_KEY` — Google Gemini API key（舊文案/生圖，保留備用）
-- `RECONCILE_SHEET_ID` — 金流核對表（【Nail】進貨金額記錄）ID，reconcile-refresh 覆蓋其 `1688_DB` 分頁（預設已寫死；SA 同 inventory-sync）
-- `KKREN_SHEET_ID` — Kkren 中繼表（【中繼】巧巧郎出貨狀態）ID，kkren-refresh append 其 `Kkren_Data` 分頁（預設已寫死）。Kkren 登入態存 `config/kkren_state.json`（機密，gitignored）
-- `SHOPEE_ANALYTICS_SHEET_ID_NAIL` — 【Nail】蝦皮數據中心 Sheet ID（`settings.SHOPEE_ANALYTICS_SHEET_IDS`，預設已寫死；Lady/Baby 之後各加一張）。蝦皮 cookie 存 `config/shopee_cookies_{shop}.json`（機密，gitignored）
+（註：已遷出子系統的 env — RECONCILE_SHEET_ID / KKREN_SHEET_ID / SHOPEE_ANALYTICS_SHEET_ID_* / SHOPEE_DASHBOARD_SHEET_ID — 隨 ②③④⑤ 移到 1688-order / kkren-sync / shopee-analytics，見各 repo。）
 
 ## 顏色/尺寸選項政策（color_policy.py + batch 兩層篩選）
 蝦皮單商品上限 **100 SKU**。SKU = 第一軸 × 尺碼。原則（Edwin 拍板）：

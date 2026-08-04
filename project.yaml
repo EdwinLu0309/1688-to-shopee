@@ -34,8 +34,7 @@ depends_on:
   - Supabase / Claude / Gemini / OpenAI API
 next:
   - 上架 GUI：Edwin 實機端到端驗證、48 商品整批實跑
-  - CLAUDE.md 同步成純上架（移除已遷出的 ②③ 訂貨/對帳描述）
-  - 清理：run_shopee_analytics_install.command（⑤遺留）可清；5 個 media shim 之後可評估清掉
+  - 5 個 media shim 之後可評估清掉（真碼已在 ecommerce-media）
 issues:
-  - CLAUDE.md 尚描述已遷出的 ②③，待同步
+  - config/settings.py 仍留已遷出子系統的常數（ORDER_*/RECONCILE_*/KKREN_* 等），未清但無害
 updated: 2026-08-04
