@@ -52,7 +52,7 @@ function transferToArrival() {
   var NC = HDR.length;   // 16 欄
   ns.getRange(1, 1, 1, NC).setValues([HDR]);
 
-  var out = [], merges = [], ri = 2, i = 0;
+  var out = [], vendMerges = [], dpMerges = [], ri = 2, i = 0;
   while (i < items.length) {
     var j = i;
     while (j < items.length && items[j].vend === items[i].vend && items[j].ono === items[i].ono) j++;
@@ -86,11 +86,24 @@ function transferToArrival() {
       ]);
       ri++;
     }
-    if (numRows > 1) merges.push({ row: first, n: numRows });
+    if (numRows > 1) vendMerges.push({ row: first, n: numRows });   // C 廠商整組合併
+    // D~P（訂單編號＋運送單號＋物流欄）依訂單分塊：每張訂單起一塊，沒訂單的商品列併入上方訂單塊
+    var b = null;
+    for (var rr = 0; rr < numRows; rr++) {
+      if (rr < orders.length) {                                     // 這列是一張訂單 → 收前一塊、起新塊
+        if (b && b.len > 1) dpMerges.push({ row: first + b.start, n: b.len });
+        b = { start: rr, len: 1 };
+      } else {                                                      // 沒訂單的商品列 → 併入上方訂單塊
+        if (!b) b = { start: rr, len: 1 };
+        else b.len++;
+      }
+    }
+    if (b && b.len > 1) dpMerges.push({ row: first + b.start, n: b.len });
     i = j;
   }
   ns.getRange(2, 1, out.length, NC).setValues(out);
-  merges.forEach(function (m) { ns.getRange(m.row, 3, m.n, 1).mergeVertically(); });   // 只合併 C 廠商
+  vendMerges.forEach(function (m) { ns.getRange(m.row, 3, m.n, 1).mergeVertically(); });        // C 廠商
+  dpMerges.forEach(function (m) { ns.getRange(m.row, 4, m.n, NC - 3).mergeVertically(); });     // D~P 依訂單分塊
 
   ns.getRange(1, 1, out.length + 1, NC)
     .setFontFamily("Arial").setFontSize(14).setVerticalAlignment("middle")
@@ -100,5 +113,6 @@ function transferToArrival() {
   ns.setFrozenRows(1);
   tgt.setActiveSheet(ns);
   ui.alert("✅ 已把「" + tag + "」傳到 2-2 到貨記錄，" + out.length + " 列。\n" +
-    "一廠商多訂單已拆成多列，每個訂單編號各自帶運送單號 → 到 2-2「🔄刷新控制」打勾更新待收貨即生效。");
+    "一廠商多訂單已拆成多列、各帶運送單號；沒訂單的商品列併入上方訂單區塊（無空列）。\n" +
+    "到 2-2「🔄刷新控制」打勾更新待收貨即生效。");
 }
