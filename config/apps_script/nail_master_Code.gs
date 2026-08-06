@@ -120,6 +120,8 @@ function exportOrderList(silent) {
 
 // ───────── ④ 廠商訂單 → 進貨金額記錄（一列一商品編號，按廠商排序；2026-08-06 比照 Lady 改 SUMIF 多筆對帳）─────────
 // 廠商層 B付款編號/H總金額/I運費 用 TEXTJOIN+FILTER / SUMIF 對「同廠商多筆訂單」全部加總（原 XLOOKUP 只抓第一筆→金額差距大）。
+// 2026-08-06 頂端加：①E~I 欄位加總（第3列）②對帳筆數（1688待付款總數/核對到/未核對）＋未核對訂單編號清單，
+//   對帳以 1688_DB 卖家公司名 比對本表廠商名稱，抓廠商改名/漏列的訂單讓 Edwin 手動查。
 function snapshotToAmountRecord(silent) {
   var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActiveSpreadsheet();
   var fo = ss.getSheetByName("廠商訂單");
@@ -153,10 +155,17 @@ function snapshotToAmountRecord(silent) {
   var HDR = ["廠商名稱", "付款平台訂單編號", "商品編號", "商品名稱", "訂單金額",
              "訂單金額合計", "訂單費用", "總金額", "運費", "核對", "TW", "付款狀態", "備註"];
   var NC = HDR.length;                                  // 13 欄
-  var out = [["匯率", rate].concat(blanks_(NC - 2)),                        // B1=匯率
-             ["總額", "=SUM(K5:K)"].concat(blanks_(NC - 2)),                // B2=台幣總額(TW=K)
-             ["1688_DB 對應版本", "='1688_DB'!B2"].concat(blanks_(NC - 2)), // B3=DB版本
-             HDR];
+  // 頂端 1~3 列：匯率/總額/DB版本 + 對帳筆數（1688待付款 vs 本表廠商）+ E~I 欄位加總
+  //  對帳：以 1688_DB 卖家公司名(D) 比對本表廠商名稱(A5:A)；比不到＝廠商可能改名或未列 → 列出訂單編號手動查
+  var f_total   = "=SUMPRODUCT(--('1688_DB'!$A$4:$A<>\"\"))";                                                       // 1688待付款總筆數
+  var f_matched = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)>0))";                   // 核對到
+  var f_unmatch = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0))";                   // 未核對
+  var f_unlist  = "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$A$4:$A<>\"\",COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0)),\"（全部核對到 ✅）\")"; // 未核對訂單編號
+  var out = [
+    ["匯率", rate, "1688待付款筆數", f_total, "核對到", f_matched, "⚠️未核對", f_unmatch, "", "", "", "", ""],       // 列1：匯率 + 對帳筆數
+    ["總額", "=SUM(K5:K)", "未核對訂單編號→", f_unlist, "", "", "", "", "", "", "", "", ""],                          // 列2：台幣總額 + 未核對清單
+    ["1688_DB 對應版本", "='1688_DB'!B2", "", "", "=SUM(E5:E)", "=SUM(F5:F)", "=SUM(G5:G)", "=SUM(H5:H)", "=SUM(I5:I)", "", "", "", ""], // 列3：DB版本 + E~I 加總
+    HDR];
   var merges = [];                                       // 每個多品訂單要垂直合併的 {row,n}
   var ri = 5;
   var i = 0;
@@ -200,6 +209,9 @@ function snapshotToAmountRecord(silent) {
   all.setBorder(true, true, true, true, true, true, "#000000", SpreadsheetApp.BorderStyle.SOLID);
   ns.getRange(4, 1, 1, NC).setBackground("#d9ead3").setFontWeight("bold").setHorizontalAlignment("center");
   ns.getRange(1, 1, 3, 2).setBackground("#fce5cd");
+  ns.getRange(1, 3, 1, 6).setBackground("#cfe2f3");                             // C1:H1 對帳筆數區 淺藍
+  ns.getRange(2, 3, 1, 2).setBackground("#cfe2f3");                             // C2:D2 未核對清單標籤
+  ns.getRange(3, 5, 1, 5).setBackground("#fff2cc");                             // E3:I3 欄位加總 淺黃
   ns.getRange(5, 6, Math.max(rows.length, 1), 2).setBackground("#fff2cc");       // F:G(訂單金額合計/訂單費用) 黃底
   ns.getRange(5, 12, Math.max(rows.length, 1), 1).setNumberFormat("yyyy/m/d");  // L 付款狀態=付款日期
    // J 欄核對=「O」→ 綠底（一眼看出已對上的訂單）
@@ -207,8 +219,14 @@ function snapshotToAmountRecord(silent) {
   var oRule = SpreadsheetApp.newConditionalFormatRule()
     .whenTextEqualTo("O").setBackground("#b6d7a8").setFontColor("#274e13")
     .setRanges([jRange]).build();
+  // 有未核對訂單（H1>0）→ ⚠️未核對 與 未核對清單 變紅底，提醒手動查
+  var unmatchRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied("=$H$1>0")
+    .setBackground("#f4cccc").setFontColor("#990000")
+    .setRanges([ns.getRange(1, 7, 1, 2), ns.getRange(2, 3, 1, 2)]).build();     // G1:H1 + C2:D2
   var cfRules = ns.getConditionalFormatRules();
   cfRules.push(oRule);
+  cfRules.push(unmatchRule);
   ns.setConditionalFormatRules(cfRules);
   ns.setFrozenRows(4);
   tgt.setActiveSheet(ns);
