@@ -3,7 +3,7 @@
  *
  * 安裝：新主檔 → 擴充功能 → Apps Script → 貼上 → 儲存 → 重整試算表，
  *       上方出現「🚀 主檔動作」。onEdit 儲存即生效。
- * ★ 先確認 CONFIG 的資料夾 ID / 填 EMP_SHEET_ID。
+ * ★ 先確認 CONFIG 的資料夾 ID。
  *
  * 2026-07-27 併入「⑤ 同步蝦皮處理狀態」：把「蝦皮處理狀態」分頁依商品表以商品編號
  *   為 key 重建（新增/刪除自動對上，手填進度文字不錯位）。
@@ -18,7 +18,6 @@ var OBS_DAYS_CELL = "設定!B6";
 var AMOUNT_SHEET_ID = "1ctZ4tvp6MpW5VXTODwtzAMjjTWD3nqGlyZGbISoTkNE"; // 2-2 進貨金額記錄
 var BACKUP_ORDER_FOLDER_ID = "1NccO0TqNdNMCz7B5yIHkoPEjojS_OE3O";      // 訂貨表備份夾（沿用舊，請確認）
 var ORDERLIST_FOLDER_ID    = "1RXHbIUOI0NGEb8D054hd7ENP2J-QqxxH";      // 到貨核對夾（沿用舊，請確認）
-var EMP_SHEET_ID = "";                                                 // TODO 員工售價表（選配）
 
 var WATCH = { "商品表": ["蝦皮售價"], "SKU表": ["安全存量", "進項成本"] };
 var KEY_HEADER = { "商品表": "商品編號", "SKU表": "品號" };
@@ -34,8 +33,6 @@ function onOpen() {
     .addItem("③ 備份 Order_List → 共用硬碟", "exportOrderList")
     .addItem("④ 廠商訂單 → 進貨金額記錄", "snapshotToAmountRecord")
     .addItem("⑤ 同步蝦皮處理狀態", "syncStatusTab")
-    .addSeparator()
-    .addItem("（選配）推送售價 → 員工表", "pushToEmployeeSheet")
     .addToUi();
 }
 
@@ -300,25 +297,6 @@ function syncStatusTab(silent) {
     if (WANT_COL) dst.getRange(2, WANT_COL, codes.length, 1).insertCheckboxes();
   }
   if (!silent) ss.toast("同步完成：" + codes.length + " 個商品", "⑤ 蝦皮處理狀態", 5);
-}
-
-
-// ───────── （選配）推送售價 → 員工表 ─────────
-function pushToEmployeeSheet() {
-  var ui = SpreadsheetApp.getUi();
-  if (!EMP_SHEET_ID) { ui.alert("尚未設定 EMP_SHEET_ID（員工售價表）"); return; }
-  var src = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("商品表");
-  var data = src.getDataRange().getValues(), header = data[0];
-  var iCode = header.indexOf("商品編號"), iName = header.indexOf("品名"), iPrice = header.indexOf("蝦皮售價");
-  var out = [["商品編號", "品名", "蝦皮售價"]];
-  for (var i = 1; i < data.length; i++) {
-    if (!String(data[i][iCode]).trim()) continue;
-    out.push([data[i][iCode], data[i][iName], data[i][iPrice]]);
-  }
-  var dst = SpreadsheetApp.openById(EMP_SHEET_ID).getSheets()[0];
-  dst.clearContents();
-  dst.getRange(1, 1, out.length, out[0].length).setValues(out);
-  ui.alert("✅ 已推送 " + (out.length - 1) + " 筆售價到員工表。");
 }
 
 
