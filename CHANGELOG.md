@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-08-06（蝦皮處理狀態按層級拆：平台欄 D~L 搬員工協作檔 + syncStatusTab 自動偵測欄範圍）
+
+### 背景
+Edwin 要把商品資料的「平台上架狀態」開放給共用雲的員工帳號雙向共編，但不能曝光成本。因 Google 分享是檔案級的，決定把「蝦皮處理狀態」按層級拆：平台層（D~L）搬到獨立的「員工上架協作檔」，商品層（資產包狀態/要產＝asset_sync 開關）留主表。詳見 AI-Memory #S141。
+
+### 新增
+- **`config/apps_script/upload_collab_sync.gs`**：獨立排程 Apps Script，把商品主表「商品表」的商品清單（編號/分類/品名）同步進共用雲的員工上架協作檔。依商品編號 key-join、依主表順序重建、手填欄以編號帶回不錯位、孤兒移末、時間觸發器（`installSchedule` 每小時，可改）。協作檔另含員工手填的平台狀態欄（蝦皮ID/標題/詳情/圖片/選項圖/影片/優化/備註/折扣）。
+
+### 變更
+- **`syncStatusTab` 改「自動偵測手填欄範圍」**（`nail_master_Code.gs` + `status_sync_addon.gs`）：原寫死 D:N/D:K，改為 D 欄到「表頭最後一個有標題的欄」、以「要產」標題名定位 checkbox 欄。→ 舊版 D:N 與（Nail 拆平台欄後的）精簡版 D:E 同一支通吃，Baby/Lady 未搬前不受影響；並把 資產包狀態/要產 一併按編號帶回（修掉舊版只重建 A/D:K、L:N 不跟著 key 帶回會錯位的隱患）。
+- `master_reader.py` **零改動**：靠表頭名讀 商品編號/要產/資產包狀態，刪 D~L、欄位位移都找得到。
+
+### 待辦（Edwin 手動）
+- Nail 協作檔貼 `upload_collab_sync.gs` 授權跑通 → 換線上 Code.gs 的 `syncStatusTab` 自動偵測版 → 刪主表蝦皮處理狀態 D~L 欄 → 驗證。
+- Lady/Baby 比照搬平台欄後，三賣場一起把「蝦皮處理狀態」分頁改名（同步 `master_reader.STATUS_TAB_TITLE` + 4 支 .gs 的 `STATUS_TAB`）。
+
 ## 2026-08-04（AI 名單改走 SA，退休 Google 登入 cookie）
 
 ### 變更
