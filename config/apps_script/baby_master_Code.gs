@@ -1,25 +1,23 @@
 /**
- * 【Baby】商品主檔 — 綁定 Apps Script（選單 + onEdit 自動記錄）
+ * 【Baby】商品主檔 — 綁定 Apps Script（選單 4 按鈕 + onEdit 自動記錄）
  *
- * 由 nail_master/Code.gs 改成 Baby 版：
- *   - 名稱【Nail】→【Baby】；分級標籤 #N_* → #BM_*（無品牌維度）。
- *   - 資料夾/檔案 ID 是 Nail 的 → 下面 CONFIG 標 ★TODO 的請 Edwin 換成 Baby 的，
- *     或先留空（留空時對應選單動作會提示未設定，不會誤寫到 Nail 的夾子）。
+ * 2026-08-06 比照 Nail 最新版全面升級（nail_master_Code.gs 571b5ea）：
+ *   - ④ 進貨金額記錄改 13 欄新欄序 + 1688_DB SUMIF/TEXTJOIN「同廠商多筆訂單」全加總
+ *     + 頂端 E~I 欄位加總 / 1688待付款對帳筆數 / 未核對訂單編號清單（紅底提醒）。
+ *   - ⑤ 同步蝦皮處理狀態改「自動偵測欄範圍」版（D 欄到表頭最後一欄；「要產」欄按標題名找）。
+ *   - 移除選配「推送售價→員工表」（比照 Nail 改用員工參考檔 IMPORTRANGE 唯讀）。
  *
- * 安裝：Baby 副本 → 擴充功能 → Apps Script → 貼上 → 儲存 → 重整試算表，
+ * 安裝：Baby 主檔 → 擴充功能 → Apps Script → 貼上取代全部 → 儲存 → 重整試算表，
  *       上方出現「🚀 主檔動作」。onEdit 儲存即生效。
- *
- * 2026-07-27 併入「⑤ 同步蝦皮處理狀態」：把「蝦皮處理狀態」分頁依商品表以商品編號
- *   為 key 重建（新增/刪除自動對上，手填進度文字不錯位）。
+ * ★ BACKUP/ORDERLIST 資料夾 ID 未設定時 ②③ 會提示、不會誤寫到 Nail 的夾子。
  */
 
 // ───────── CONFIG ─────────
 var TZ = "Asia/Taipei";
 var OBS_DAYS_CELL = "設定!B6";
 var AMOUNT_SHEET_ID = "1Agsc87285Epdnr4rInaF6eafvtn8ewEFrQr_zdodt48";  // 【Baby】2-1 進貨金額記錄
-var BACKUP_ORDER_FOLDER_ID = "";  // Baby 訂單完成備份夾
-var ORDERLIST_FOLDER_ID    = "";  // Baby 商品訂貨(到貨核對)夾
-var EMP_SHEET_ID = "";            // Baby 員工售價表（跳過，留空）
+var BACKUP_ORDER_FOLDER_ID = "";  // ★TODO Baby 訂單完成備份夾（留空＝②提示未設定）
+var ORDERLIST_FOLDER_ID    = "";  // ★TODO Baby 商品訂貨(到貨核對)夾（留空＝③提示未設定）
 
 var WATCH = { "商品表": ["蝦皮售價"], "SKU表": ["安全存量", "進項成本"] };
 var KEY_HEADER = { "商品表": "商品編號", "SKU表": "品號" };
@@ -35,8 +33,6 @@ function onOpen() {
     .addItem("③ 備份 Order_List → 共用硬碟", "exportOrderList")
     .addItem("④ 廠商訂單 → 進貨金額記錄", "snapshotToAmountRecord")
     .addItem("⑤ 同步蝦皮處理狀態", "syncStatusTab")
-    .addSeparator()
-    .addItem("（選配）推送售價 → 員工表", "pushToEmployeeSheet")
     .addToUi();
 }
 
@@ -124,10 +120,13 @@ function exportOrderList(silent) {
 }
 
 
-// ───────── ④ 廠商訂單 → 進貨金額記錄 ─────────
+// ───────── ④ 廠商訂單 → 進貨金額記錄（一列一商品編號，按廠商排序；2026-08-06 比照 Nail 最新版）─────────
+// 廠商層 B付款編號/H總金額/I運費 用 TEXTJOIN+FILTER / SUMIF 對「同廠商多筆訂單」全部加總（原 XLOOKUP 只抓第一筆→金額差距大）。
+// 頂端加：①E~I 欄位加總（第3列）②對帳筆數（1688待付款總數/核對到/未核對）＋未核對訂單編號清單，
+//   對帳以 1688_DB 卖家公司名 比對本表廠商名稱，抓廠商改名/漏列的訂單讓 Edwin 手動查。
 function snapshotToAmountRecord(silent) {
   var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (!AMOUNT_SHEET_ID) { if (silent) throw new Error("未設定 AMOUNT_SHEET_ID"); ui.alert("尚未設定 Baby 進貨金額記錄表 ID（沒有此表可略過此動作）"); return; }
+  if (!AMOUNT_SHEET_ID) { if (silent) throw new Error("未設定 AMOUNT_SHEET_ID"); ui.alert("尚未設定 Baby 進貨金額記錄表 ID"); return; }
   var fo = ss.getSheetByName("廠商訂單");
   if (!fo) { if (silent) throw new Error("找不到 廠商訂單"); ui.alert("找不到 廠商訂單"); return; }
   var d = fo.getDataRange().getValues(), h = d[0];
@@ -147,31 +146,53 @@ function snapshotToAmountRecord(silent) {
   var tag = Utilities.formatDate(new Date(), TZ, "MMdd");
   var ex = tgt.getSheetByName(tag);
   if (ex) {
-    if (!silent && ui.alert("已有分頁「" + tag + "」，覆蓋？", ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+    if (!silent && ui.alert("2-1 已有分頁「" + tag + "」，覆蓋？", ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
     tgt.deleteSheet(ex);
   }
   var ns = tgt.insertSheet(tag);
   var rate = Number(ss.getRange("設定!B2").getValue()) || 4.9;
-  var HDR = ["商品編號", "商品名稱", "訂單金額", "訂單金額合計", "廠商名稱", "付款平台訂單編號",
-             "訂單費用", "總金額", "運費", "核對", "TW", "付款狀態", "備註"];
-  var NC = HDR.length;
-  var out = [["匯率", "", rate].concat(blanks_(NC - 3)),
-             ["總額", "", "=SUM(K5:K)"].concat(blanks_(NC - 3)),
-             ["", "", ""].concat(blanks_(NC - 3)),
-             HDR];
-  var merges = [];
-  var ri = 5, i = 0;
+  // 新欄序（Edwin 2026-07-14 調整：廠商名稱+付款平台訂單編號移到最前，好核對）：
+  // A廠商名稱 B付款平台訂單編號 C商品編號 D商品名稱 E訂單金額
+  // F訂單金額合計 G訂單費用 H總金額 I運費 J核對 K TW L付款狀態 M備註
+  // 訂單層(A,B,F~M)每個訂單垂直合併；C~E 為逐商品編號列。上方三列：標籤在A、數值在B。
+  var HDR = ["廠商名稱", "付款平台訂單編號", "商品編號", "商品名稱", "訂單金額",
+             "訂單金額合計", "訂單費用", "總金額", "運費", "核對", "TW", "付款狀態", "備註"];
+  var NC = HDR.length;                                  // 13 欄
+  // 頂端 1~3 列：匯率/總額/DB版本 + 對帳筆數（1688待付款 vs 本表廠商）+ E~I 欄位加總
+  //  對帳：以 1688_DB 卖家公司名(D) 比對本表廠商名稱(A5:A)；比不到＝廠商可能改名或未列 → 列出訂單編號手動查
+  var f_total   = "=SUMPRODUCT(--('1688_DB'!$A$4:$A<>\"\"))";                                                       // 1688待付款總筆數
+  var f_matched = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)>0))";                   // 核對到
+  var f_unmatch = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0))";                   // 未核對
+  var f_unlist  = "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$A$4:$A<>\"\",COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0)),\"（全部核對到 ✅）\")"; // 未核對訂單編號
+  var out = [
+    ["匯率", rate, "1688待付款筆數", f_total, "核對到", f_matched, "⚠️未核對", f_unmatch, "", "", "", "", ""],       // 列1：匯率 + 對帳筆數
+    ["總額", "=SUM(K5:K)", "未核對訂單編號→", f_unlist, "", "", "", "", "", "", "", "", ""],                          // 列2：台幣總額 + 未核對清單
+    ["1688_DB 對應版本", "='1688_DB'!B2", "", "", "=SUM(E5:E)", "=SUM(F5:F)", "=SUM(G5:G)", "=SUM(H5:H)", "=SUM(I5:I)", "", "", "", ""], // 列3：DB版本 + E~I 加總
+    HDR];
+  var merges = [];                                       // 每個多品訂單要垂直合併的 {row,n}
+  var ri = 5;
+  var i = 0;
   while (i < rows.length) {
     var j = i;
-    while (j < rows.length && String(rows[j][2]) === String(rows[i][2])) j++;
+    while (j < rows.length && String(rows[j][2]) === String(rows[i][2])) j++;  // 同廠商=同訂單
     var n = j - i, first = ri, lastRow = ri + n - 1;
     for (var g = i; g < j; g++) {
-      if (g === i) {
-        out.push([rows[g][0], rows[g][1], rows[g][3],
-          "=SUM(C" + first + ":C" + lastRow + ")", rows[g][2],
-          "", "", "", "", "", "=IF($H" + first + "=\"\",\"\",$H" + first + "*$C$1)", "", ""]);
+      if (g === i) {  // 群組第一列：廠商層對帳(A,B,F~M，1688_DB 用 SUMIF 對廠商含多筆訂單全加總) + 逐品(C,D,E)
+        out.push([
+          rows[g][2],                                                         // A 廠商名稱
+          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$D$4:$D=$A" + first + ")),\"\")",              // B 付款編號（同廠商多筆全列）
+          rows[g][0], rows[g][1], rows[g][3],                                 // C商品編號 D商品名稱 E訂單金額
+          "=SUM(E" + first + ":E" + lastRow + ")",                            // F 訂單金額合計
+          "=IF($H" + first + "=\"\",\"\",$H" + first + "-$I" + first + ")",   // G 訂單費用=總金額-運費（折後實付貨款）
+          "=IF(COUNTIF('1688_DB'!$D:$D,$A" + first + ")=0,\"\",SUMIF('1688_DB'!$D:$D,$A" + first + ",'1688_DB'!$I:$I))",   // H 總金額=Σ实付款（同廠商多筆加總）
+          "=IF(COUNTIF('1688_DB'!$D:$D,$A" + first + ")=0,\"\",SUMIF('1688_DB'!$D:$D,$A" + first + ",'1688_DB'!$G:$G))",   // I 運費=Σ运费（同廠商多筆加總）
+          "=IF(AND($F" + first + "<>\"\",$F" + first + "<>0,$G" + first + "<>\"\",$G" + first + "<=$F" + first + "),\"O\",\"\")", // J 核對: 訂單費用≤合計
+          "=IF($H" + first + "=\"\",\"\",$H" + first + "*$B$1)",                                           // K TW=總金額×匯率
+          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$L$4:$L,'1688_DB'!$D$4:$D=$A" + first + ")),\"\")",              // L 付款狀態（同廠商多筆全列；待付款＝空白）
+          ""                                                                  // M 備註
+        ]);
       } else {
-        out.push([rows[g][0], rows[g][1], rows[g][3]].concat(blanks_(NC - 3)));
+        out.push(["", "", rows[g][0], rows[g][1], rows[g][3]].concat(blanks_(NC - 5)));
       }
       ri++;
     }
@@ -180,31 +201,55 @@ function snapshotToAmountRecord(silent) {
   }
   var last = out.length;
   ns.getRange(1, 1, last, NC).setValues(out);
-  merges.forEach(function (m) { ns.getRange(m.row, 4, m.n, NC - 3).mergeVertically(); });
+  // 訂單層垂直合併：A~B(廠商/訂單編號) 與 F~M(金額欄)；C~E 逐商品不合併
+  merges.forEach(function (m) {
+    ns.getRange(m.row, 1, m.n, 2).mergeVertically();        // A~B
+    ns.getRange(m.row, 6, m.n, NC - 5).mergeVertically();   // F~M
+  });
+  // 版面
   var all = ns.getRange(1, 1, last, NC);
   all.setFontFamily("Arial").setFontSize(14).setVerticalAlignment("middle");
   all.setBorder(true, true, true, true, true, true, "#000000", SpreadsheetApp.BorderStyle.SOLID);
   ns.getRange(4, 1, 1, NC).setBackground("#d9ead3").setFontWeight("bold").setHorizontalAlignment("center");
-  ns.getRange(1, 1, 3, 3).setBackground("#fce5cd");
+  ns.getRange(1, 1, 3, 2).setBackground("#fce5cd");
+  ns.getRange(1, 3, 1, 6).setBackground("#cfe2f3");                             // C1:H1 對帳筆數區 淺藍
+  ns.getRange(2, 3, 1, 2).setBackground("#cfe2f3");                             // C2:D2 未核對清單標籤
+  ns.getRange(3, 5, 1, 5).setBackground("#fff2cc");                             // E3:I3 欄位加總 淺黃
+  ns.getRange(5, 6, Math.max(rows.length, 1), 2).setBackground("#fff2cc");       // F:G(訂單金額合計/訂單費用) 黃底
+  ns.getRange(5, 12, Math.max(rows.length, 1), 1).setNumberFormat("yyyy/m/d");  // L 付款狀態=付款日期
+   // J 欄核對=「O」→ 綠底（一眼看出已對上的訂單）
+  var jRange = ns.getRange(5, 10, Math.max(rows.length, 1), 1);                 // J 欄(第10欄)資料區
+  var oRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("O").setBackground("#b6d7a8").setFontColor("#274e13")
+    .setRanges([jRange]).build();
+  // 有未核對訂單（H1>0）→ ⚠️未核對 與 未核對清單 變紅底，提醒手動查
+  var unmatchRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied("=$H$1>0")
+    .setBackground("#f4cccc").setFontColor("#990000")
+    .setRanges([ns.getRange(1, 7, 1, 2), ns.getRange(2, 3, 1, 2)]).build();     // G1:H1 + C2:D2
+  var cfRules = ns.getConditionalFormatRules();
+  cfRules.push(oRule);
+  cfRules.push(unmatchRule);
+  ns.setConditionalFormatRules(cfRules);
   ns.setFrozenRows(4);
   tgt.setActiveSheet(ns);
-  if (!silent) ui.alert("✅ 已建立「" + tag + "」，" + rows.length + " 個商品編號。");
+  if (!silent) ui.alert("✅ 已建立「" + tag + "」，" + rows.length + " 個商品編號。\n" +
+    "已自動帶入 1688_DB 對帳（廠商 SUMIF、同廠商多筆訂單自動加總 B付款編號/H總金額/I運費）；核對 O＝訂單費用 ≤ 訂貨合計，綠底。");
 }
 
 function blanks_(n) { var a = []; for (var i = 0; i < n; i++) a.push(""); return a; }
 
 
 // ───────── ⑤ 同步蝦皮處理狀態（依商品表，以商品編號為 key 重建）─────────
-// 手填欄（蝦皮ID/標題/詳情/圖片/選項圖/影片/優化/備註，全文字）以編號為 key 帶回，
-// 新編號補空白、消失的移除，永不錯位。B/C（分類/品名）是 MAP 公式跟著 A 欄 live。
+// 手填/狀態欄以商品編號為 key 帶回、新編號補空白、消失的移除，永不錯位。B/C（分類/品名）MAP 公式跟著 A 欄 live。
+// ※ 手填欄範圍「自動偵測」：D 欄到表頭最後一個有標題的欄；「要產」欄（checkbox）以標題名找 → 舊版 D:N
+//   或把平台欄搬到協作檔後的精簡版 D:E（資產包狀態/要產）同一支都適用、不必改常數。
 function syncStatusTab(silent) {
   var ui = SpreadsheetApp.getUi();
   var STATUS_TAB = "蝦皮處理狀態";
   var SRC_TAB = "商品表";
-  var MANUAL_START = 4;               // D 欄起（蝦皮ID）
-  var MANUAL_END = 11;                // 到 K 欄（備註）
-  var WIDTH = MANUAL_END - MANUAL_START + 1;   // 8 欄手填
-  var EMPTY_MANUAL = ["", "", "", "", "", "", "", ""];  // 全文字，預設空白
+  var MANUAL_START = 4;               // D 欄起（B/C＝分類/品名是 MAP 公式，不算手填）
+  var WANT_HEADER = "要產";           // 要產欄用「標題名」找（checkbox 欄），不寫死欄號
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var src = ss.getSheetByName(SRC_TAB);
@@ -214,6 +259,20 @@ function syncStatusTab(silent) {
     ui.alert("找不到「" + SRC_TAB + "」或「" + STATUS_TAB + "」分頁"); return;
   }
 
+  // 0) 自動偵測手填欄範圍：讀表頭 → D 欄到最後一個有標題的欄；要產欄以標題名定位
+  var lastCol = dst.getLastColumn();
+  var header = lastCol >= 1 ? dst.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  var MANUAL_END = MANUAL_START - 1;   // 找不到手填欄時 < MANUAL_START（WIDTH=0）
+  for (var h = lastCol; h >= MANUAL_START; h--) {
+    if (String(header[h - 1]).trim() !== "") { MANUAL_END = h; break; }
+  }
+  var WIDTH = Math.max(MANUAL_END - MANUAL_START + 1, 0);
+  var WANT_COL = 0;
+  for (var w = MANUAL_START; w <= MANUAL_END; w++) {
+    if (String(header[w - 1]).trim() === WANT_HEADER) { WANT_COL = w; break; }
+  }
+
+  // 1) 商品表 唯一編號（依出現順序，忽略空白與重複）
   var codes = [], seen = {};
   var srcLast = src.getLastRow();
   if (srcLast >= 2) {
@@ -224,9 +283,10 @@ function syncStatusTab(silent) {
     }
   }
 
+  // 2) 既有手填/狀態資料 → 以編號為 key 存起來（D..MANUAL_END）
   var store = {};
   var dstLast = dst.getLastRow();
-  if (dstLast >= 2) {
+  if (dstLast >= 2 && WIDTH > 0) {
     var keys = dst.getRange(2, 1, dstLast - 1, 1).getValues();
     var man = dst.getRange(2, MANUAL_START, dstLast - 1, WIDTH).getValues();
     for (var k = 0; k < keys.length; k++) {
@@ -235,41 +295,28 @@ function syncStatusTab(silent) {
     }
   }
 
+  // 3) 依商品表順序重建（手填/狀態以 key 帶回，永不錯位）
+  var emptyMan = [];
+  for (var e = 0; e < WIDTH; e++) emptyMan.push("");
   var aVals = [], mVals = [];
   codes.forEach(function (code) {
     aVals.push([code]);
-    mVals.push(store[code] ? store[code] : EMPTY_MANUAL.slice());
+    if (WIDTH > 0) mVals.push(store[code] ? store[code] : emptyMan.slice());
   });
 
+  // 4) 先清舊資料區（A 與 D:MANUAL_END，B/C 是 MAP 公式不動），再寫新的
   var clearRows = Math.max(dstLast - 1, codes.length) + 5;
   if (clearRows > 0) {
-    dst.getRange(2, 1, clearRows, 1).clearContent();
-    dst.getRange(2, MANUAL_START, clearRows, WIDTH).clearContent();
+    dst.getRange(2, 1, clearRows, 1).clearContent();                                // A
+    if (WIDTH > 0) dst.getRange(2, MANUAL_START, clearRows, WIDTH).clearContent();   // D:MANUAL_END
   }
   if (codes.length) {
-    dst.getRange(2, 1, codes.length, 1).setValues(aVals);
-    dst.getRange(2, MANUAL_START, codes.length, WIDTH).setValues(mVals);
+    dst.getRange(2, 1, codes.length, 1).setValues(aVals);                           // A
+    if (WIDTH > 0) dst.getRange(2, MANUAL_START, codes.length, WIDTH).setValues(mVals);
+    // 要產欄重補勾選框：空字串→未勾、帶回的 true/false 維持（新編號預設未勾）
+    if (WANT_COL) dst.getRange(2, WANT_COL, codes.length, 1).insertCheckboxes();
   }
   if (!silent) ss.toast("同步完成：" + codes.length + " 個商品", "⑤ 蝦皮處理狀態", 5);
-}
-
-
-// ───────── （選配）推送售價 → 員工表 ─────────
-function pushToEmployeeSheet() {
-  var ui = SpreadsheetApp.getUi();
-  if (!EMP_SHEET_ID) { ui.alert("尚未設定 EMP_SHEET_ID（員工售價表）"); return; }
-  var src = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("商品表");
-  var data = src.getDataRange().getValues(), header = data[0];
-  var iCode = header.indexOf("商品編號"), iName = header.indexOf("品名"), iPrice = header.indexOf("蝦皮售價");
-  var out = [["商品編號", "品名", "蝦皮售價"]];
-  for (var i = 1; i < data.length; i++) {
-    if (!String(data[i][iCode]).trim()) continue;
-    out.push([data[i][iCode], data[i][iName], data[i][iPrice]]);
-  }
-  var dst = SpreadsheetApp.openById(EMP_SHEET_ID).getSheets()[0];
-  dst.clearContents();
-  dst.getRange(1, 1, out.length, out[0].length).setValues(out);
-  ui.alert("✅ 已推送 " + (out.length - 1) + " 筆售價到員工表。");
 }
 
 
