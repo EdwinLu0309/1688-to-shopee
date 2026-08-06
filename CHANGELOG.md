@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-06（Nail 進貨金額記錄 ④ 比照 Lady 改 SUMIF 多筆對帳）
+
+### 變更
+- **`nail_master_Code.gs` 的 ④ `snapshotToAmountRecord` 廠商層公式改加總版**（比照 Lady 2026-07-30 已改的版本，本次補上 Nail）：
+  - B 付款編號：`XLOOKUP`（只抓第一筆）→ `TEXTJOIN(", ",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$D$4:$D=$A{first}))`（同廠商多筆全列）
+  - H 總金額 / I 運費：`XLOOKUP` 單筆 → `SUMIF('1688_DB'!$D:$D,$A{first},'1688_DB'!$I:$I / $G:$G)`（同廠商多筆加總）
+  - L 付款狀態：`XLOOKUP` 單筆 → `TEXTJOIN+FILTER`（同廠商多筆全列）
+  - G 訂單費用改依 H（總金額）非空判斷（原依 B 非空）
+- **根因**：一個廠商含 4~5 張 1688 訂單時，舊 `XLOOKUP` 只帶第一張訂單編號、H/I 也只算第一張 → 訂單費用（總金額−運費）金額嚴重失真（Edwin 指出 Nail 某列差距極大）。Lady 已是加總版，本次讓 Nail 一致。
+
 ## 2026-08-06（蝦皮處理狀態按層級拆：平台欄 D~L 搬員工協作檔 + syncStatusTab 自動偵測欄範圍）
 
 ### 背景

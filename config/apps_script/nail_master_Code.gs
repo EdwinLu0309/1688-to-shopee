@@ -121,7 +121,8 @@ function exportOrderList(silent) {
 }
 
 
-// ───────── ④ 廠商訂單 → 進貨金額記錄（一列一商品編號，按廠商排序）─────────
+// ───────── ④ 廠商訂單 → 進貨金額記錄（一列一商品編號，按廠商排序；2026-08-06 比照 Lady 改 SUMIF 多筆對帳）─────────
+// 廠商層 B付款編號/H總金額/I運費 用 TEXTJOIN+FILTER / SUMIF 對「同廠商多筆訂單」全部加總（原 XLOOKUP 只抓第一筆→金額差距大）。
 function snapshotToAmountRecord(silent) {
   var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActiveSpreadsheet();
   var fo = ss.getSheetByName("廠商訂單");
@@ -167,19 +168,19 @@ function snapshotToAmountRecord(silent) {
     while (j < rows.length && String(rows[j][2]) === String(rows[i][2])) j++;  // 同廠商=同訂單
     var n = j - i, first = ri, lastRow = ri + n - 1;
     for (var g = i; g < j; g++) {
-      if (g === i) {  // 群組第一列：填訂單層公式(A,B,F~M) + 逐品(C,D,E)；其餘列僅 C~E
+      if (g === i) {  // 群組第一列：廠商層對帳(A,B,F~M，1688_DB 用 SUMIF 對廠商含多筆訂單全加總) + 逐品(C,D,E)
         out.push([
-          rows[g][2],                                                     // A 廠商名稱
-          "=IFERROR(XLOOKUP($A" + first + ",'1688_DB'!$D:$D,'1688_DB'!$A:$A,\"\"),\"\")",                 // B 訂單編號←廠商
-          rows[g][0], rows[g][1], rows[g][3],                             // C商品編號 D商品名稱 E訂單金額
-          "=SUM(E" + first + ":E" + lastRow + ")",                        // F 訂單金額合計
-          "=IF($B" + first + "=\"\",\"\",H" + first + "-I" + first + ")",                                  // G 訂單費用=總金額-運費
-          "=IFERROR(IF($B" + first + "<>\"\",XLOOKUP($B" + first + ",'1688_DB'!$A:$A,'1688_DB'!$I:$I,\"\"),\"\"),\"\")", // H 總金額(实付款)
-          "=IFERROR(IF($B" + first + "<>\"\",XLOOKUP($B" + first + ",'1688_DB'!$A:$A,'1688_DB'!$G:$G,\"\"),\"\"),\"\")", // I 運費
+          rows[g][2],                                                         // A 廠商名稱
+          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$D$4:$D=$A" + first + ")),\"\")",              // B 付款編號（同廠商多筆全列）
+          rows[g][0], rows[g][1], rows[g][3],                                 // C商品編號 D商品名稱 E訂單金額
+          "=SUM(E" + first + ":E" + lastRow + ")",                            // F 訂單金額合計
+          "=IF($H" + first + "=\"\",\"\",$H" + first + "-$I" + first + ")",   // G 訂單費用=總金額-運費（折後實付貨款）
+          "=IF(COUNTIF('1688_DB'!$D:$D,$A" + first + ")=0,\"\",SUMIF('1688_DB'!$D:$D,$A" + first + ",'1688_DB'!$I:$I))",   // H 總金額=Σ实付款（同廠商多筆加總）
+          "=IF(COUNTIF('1688_DB'!$D:$D,$A" + first + ")=0,\"\",SUMIF('1688_DB'!$D:$D,$A" + first + ",'1688_DB'!$G:$G))",   // I 運費=Σ运费（同廠商多筆加總）
           "=IF(AND($F" + first + "<>\"\",$F" + first + "<>0,$G" + first + "<>\"\",$G" + first + "<=$F" + first + "),\"O\",\"\")", // J 核對: 訂單費用≤合計
           "=IF($H" + first + "=\"\",\"\",$H" + first + "*$B$1)",                                           // K TW=總金額×匯率
-          "=IFERROR(IF($B" + first + "<>\"\",XLOOKUP($B" + first + ",'1688_DB'!$A:$A,'1688_DB'!$L:$L,\"\"),\"\"),\"\")", // L 付款狀態
-          ""                                                              // M 備註
+          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$L$4:$L,'1688_DB'!$D$4:$D=$A" + first + ")),\"\")",              // L 付款狀態（同廠商多筆全列；待付款＝空白）
+          ""                                                                  // M 備註
         ]);
       } else {
         out.push(["", "", rows[g][0], rows[g][1], rows[g][3]].concat(blanks_(NC - 5)));
@@ -214,7 +215,7 @@ function snapshotToAmountRecord(silent) {
   ns.setFrozenRows(4);
   tgt.setActiveSheet(ns);
   if (!silent) ui.alert("✅ 已建立「" + tag + "」，" + rows.length + " 個商品編號。\n" +
-           "同廠商(同訂單)已垂直合併：F=訂單金額合計，核對用「訂單費用 ≤ 合計」比對；B2=台幣總額。");
+    "已自動帶入 1688_DB 對帳（廠商 SUMIF、同廠商多筆訂單自動加總 B付款編號/H總金額/I運費）；核對 O＝訂單費用 ≤ 訂貨合計，綠底。");
 }
 
 function blanks_(n) { var a = []; for (var i = 0; i < n; i++) a.push(""); return a; }
