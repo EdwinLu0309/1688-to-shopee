@@ -16,8 +16,8 @@
 var TZ = "Asia/Taipei";
 var OBS_DAYS_CELL = "設定!B6";
 var AMOUNT_SHEET_ID = "1Agsc87285Epdnr4rInaF6eafvtn8ewEFrQr_zdodt48";  // 【Baby】2-1 進貨金額記錄
-var BACKUP_ORDER_FOLDER_ID = "";  // ★TODO Baby 訂單完成備份夾（留空＝②提示未設定）
-var ORDERLIST_FOLDER_ID    = "";  // ★TODO Baby 商品訂貨(到貨核對)夾（留空＝③提示未設定）
+var BACKUP_ORDER_FOLDER_ID = "1LQMIO0ZqpVgIs0EJ7L7tHKncpDmWBnHx";  // Baby 訂單完成備份夾
+var ORDERLIST_FOLDER_ID    = "1A7CoehmdVkU29ANipLXaU6WSQjzSrMs5";  // Baby 商品訂貨(到貨核對)夾
 
 var WATCH = { "商品表": ["蝦皮售價"], "SKU表": ["安全存量", "進項成本"] };
 var KEY_HEADER = { "商品表": "商品編號", "SKU表": "品號" };
