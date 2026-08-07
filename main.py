@@ -468,12 +468,17 @@ def product_cards(ctx: click.Context, shop: str, json_dir: str, out_base: str | 
 def sync_assets_cmd(shop: str, out_base: str | None, run_all: bool,
                     no_analyze: bool, headless: bool, sa_json: str | None) -> None:
     """一鍵同步商品資產包：讀主表勾選 → 抓取+產卡+寫雲端 → 回寫主表狀態。"""
-    from config.settings import ASSET_CLOUD_BASE
+    from config.settings import ASSET_CLOUD_BASES
     from scraper.asset_sync import sync_assets
 
+    resolved_base = out_base or ASSET_CLOUD_BASES.get(shop)
+    if not resolved_base:
+        click.echo(f"  ❌ {shop} 沒有預設商品資產夾：請設環境變數 "
+                   f"ASSET_CLOUD_BASE_{shop.upper()} 或帶 --out-base 指定。")
+        sys.exit(1)
     res = sync_assets(
         shop=shop,
-        out_base=out_base or ASSET_CLOUD_BASE,
+        out_base=resolved_base,
         sa_json=sa_json,
         only_missing=run_all,
         analyze=not no_analyze,
