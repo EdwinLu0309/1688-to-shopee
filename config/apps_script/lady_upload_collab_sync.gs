@@ -21,7 +21,7 @@
 
 var MASTER_ID  = '1SsRfXyh65ViZ0x8TYj1wLq9SCDFvGiDtkMdpuggE7ps';  // 【Lady】商品主表(1-1)
 var MASTER_TAB = '商品表';                                        // 商品識別來源分頁
-var COLLAB_ID  = '★TODO_貼上Lady協作檔ID';   // 【Lady】員工上架協作檔（Edwin 建檔後把 /d/ 後那串貼進來）
+var COLLAB_ID  = '1sSvGL2jSXOXqJln5W99MrddoNlDCSoGTSpQI-ydPvBg';   // 【Lady】員工上架協作檔
 var COLLAB_TAB = '蝦皮狀態';                                      // 協作檔的分頁名
 
 var IDENTITY_WIDTH = 3;   // A商品編號 / B分類 / C品名（由程式同步）
