@@ -15,7 +15,7 @@
 // ───────── CONFIG ─────────
 var TZ = "Asia/Taipei";
 var OBS_DAYS_CELL = "設定!B6";
-var AMOUNT_SHEET_ID = "1ctZ4tvp6MpW5VXTODwtzAMjjTWD3nqGlyZGbISoTkNE"; // 2-2 進貨金額記錄
+var AMOUNT_SHEET_ID = "1ctZ4tvp6MpW5VXTODwtzAMjjTWD3nqGlyZGbISoTkNE"; // 【Nail】2-1 進貨金額記錄
 var BACKUP_ORDER_FOLDER_ID = "1NccO0TqNdNMCz7B5yIHkoPEjojS_OE3O";      // 訂貨表備份夾（沿用舊，請確認）
 var ORDERLIST_FOLDER_ID    = "1RXHbIUOI0NGEb8D054hd7ENP2J-QqxxH";      // 到貨核對夾（沿用舊，請確認）
 
@@ -79,6 +79,7 @@ function applyRedBordersByNamePrefix(silent) {
 // ───────── ② 訂單完成備份 → 共用硬碟（訂貨表 + 訂貨彙總，轉純值）─────────
 function backupOrderSheet(silent) {
   var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!BACKUP_ORDER_FOLDER_ID) { if (silent) throw new Error("未設定 BACKUP_ORDER_FOLDER_ID"); ui.alert("尚未設定 Nail 訂貨備份夾 ID"); return; }
   var tag = Utilities.formatDate(new Date(), TZ, "yyyyMMdd");
   try {
     var newSs = SpreadsheetApp.create("【Nail】訂單完成備份_" + tag);
@@ -101,6 +102,7 @@ function backupOrderSheet(silent) {
 // ───────── ③ 備份 Order_List → 共用硬碟（到貨核對）─────────
 function exportOrderList(silent) {
   var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ORDERLIST_FOLDER_ID) { if (silent) throw new Error("未設定 ORDERLIST_FOLDER_ID"); ui.alert("尚未設定 Nail 到貨核對夾 ID"); return; }
   var src = ss.getSheetByName("Order_List");
   if (!src) { if (silent) throw new Error("找不到 Order_List"); ui.alert("找不到 Order_List"); return; }
   var tag = Utilities.formatDate(new Date(), TZ, "yyyyMMdd");
@@ -143,7 +145,7 @@ function snapshotToAmountRecord(silent) {
   var tag = Utilities.formatDate(new Date(), TZ, "MMdd");
   var ex = tgt.getSheetByName(tag);
   if (ex) {
-    if (!silent && ui.alert("2-2 已有分頁「" + tag + "」，覆蓋？", ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+    if (!silent && ui.alert("2-1 已有分頁「" + tag + "」，覆蓋？", ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
     tgt.deleteSheet(ex);
   }
   var ns = tgt.insertSheet(tag);
