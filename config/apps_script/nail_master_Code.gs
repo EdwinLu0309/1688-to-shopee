@@ -158,12 +158,13 @@ function snapshotToAmountRecord(silent) {
   // ★對帳日期區間（2026-08-09 修）：1688_DB 是「合併累加」的待付款快照（#S072 起保留舊訂單），
   //  只用廠商名 SUMIF 會把「別批還沒付款的舊單」一起灌進本分頁（實測 0808 分頁 26 列中 14 列被 7/27
   //  舊批污染、多算 ¥10,326、核對只剩 10 個 O）。故所有對帳公式都加 1688_DB!K(訂單創建時間) 區間條件。
-  //  預設區間＝建表日 ±1 天（跨夜下的單 1688 會記到隔天）；Edwin 可直接改 J1/L1 兩格微調。
+  //  預設區間＝建表日 ±3 天（Edwin 定：不設太緊，跨夜/隔天補單都要涵蓋）；可直接改 J1/L1 兩格微調。
+  //  ⚠️ 前提是兩批訂貨相隔 > 6 天（實際約每月一批）；若某天要補的批次離上一批太近，把 J1 手動縮回來。
   // ⚠️ 一定要用「當日 00:00 的 Date 物件」：1688_DB!K 是純日期(00:00)，若 J1 帶了時分
   //    （如 14:30），當天的訂單 00:00 >= 14:30 為 false 會被整批漏掉。
   var _t = new Date();
-  var dFrom = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate() - 1);
-  var dTo   = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate() + 1);
+  var dFrom = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate() - 3);
+  var dTo   = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate() + 3);
   var KRNG = "'1688_DB'!$K$4:$K", KCOL = "'1688_DB'!$K:$K";
   var INRNG = "(" + KRNG + ">=$J$1)*(" + KRNG + "<=$L$1)";            // SUMPRODUCT 用
   var KCRIT = KCOL + ",\">=\"&$J$1," + KCOL + ",\"<=\"&$L$1";        // SUMIFS/COUNTIFS 用
@@ -249,7 +250,7 @@ function snapshotToAmountRecord(silent) {
   tgt.setActiveSheet(ns);
   if (!silent) ui.alert("✅ 已建立「" + tag + "」，" + rows.length + " 個商品編號。\n" +
     "已自動帶入 1688_DB 對帳（廠商 SUMIFS、同廠商多筆訂單自動加總 B付款編號/H總金額/I運費）；核對 O＝訂單費用 ≤ 訂貨合計，綠底。\n" +
-    "⚠️ 只對帳 J1~L1 區間內（預設今天±1天）建立的 1688 訂單，避免把別批未付款的舊單算進來；區間可直接改 J1/L1。");
+    "⚠️ 只對帳 J1~L1 區間內（預設今天±3天）建立的 1688 訂單，避免把別批未付款的舊單算進來；區間可直接改 J1/L1。");
 }
 
 function blanks_(n) { var a = []; for (var i = 0; i < n; i++) a.push(""); return a; }
