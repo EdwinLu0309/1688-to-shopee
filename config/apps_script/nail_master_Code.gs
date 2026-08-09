@@ -155,14 +155,27 @@ function snapshotToAmountRecord(silent) {
   var HDR = ["廠商名稱", "付款平台訂單編號", "商品編號", "商品名稱", "訂單金額",
              "訂單金額合計", "訂單費用", "總金額", "運費", "核對", "TW", "付款狀態", "備註"];
   var NC = HDR.length;                                  // 13 欄
+  // ★對帳日期區間（2026-08-09 修）：1688_DB 是「合併累加」的待付款快照（#S072 起保留舊訂單），
+  //  只用廠商名 SUMIF 會把「別批還沒付款的舊單」一起灌進本分頁（實測 0808 分頁 26 列中 14 列被 7/27
+  //  舊批污染、多算 ¥10,326、核對只剩 10 個 O）。故所有對帳公式都加 1688_DB!K(訂單創建時間) 區間條件。
+  //  預設區間＝建表日 ±1 天（跨夜下的單 1688 會記到隔天）；Edwin 可直接改 J1/L1 兩格微調。
+  // ⚠️ 一定要用「當日 00:00 的 Date 物件」：1688_DB!K 是純日期(00:00)，若 J1 帶了時分
+  //    （如 14:30），當天的訂單 00:00 >= 14:30 為 false 會被整批漏掉。
+  var _t = new Date();
+  var dFrom = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate() - 1);
+  var dTo   = new Date(_t.getFullYear(), _t.getMonth(), _t.getDate() + 1);
+  var KRNG = "'1688_DB'!$K$4:$K", KCOL = "'1688_DB'!$K:$K";
+  var INRNG = "(" + KRNG + ">=$J$1)*(" + KRNG + "<=$L$1)";            // SUMPRODUCT 用
+  var KCRIT = KCOL + ",\">=\"&$J$1," + KCOL + ",\"<=\"&$L$1";        // SUMIFS/COUNTIFS 用
+  var KFLT  = KRNG + ">=$J$1," + KRNG + "<=$L$1";                    // FILTER 用
   // 頂端 1~3 列：匯率/總額/DB版本 + 對帳筆數（1688待付款 vs 本表廠商）+ E~I 欄位加總
   //  對帳：以 1688_DB 卖家公司名(D) 比對本表廠商名稱(A5:A)；比不到＝廠商可能改名或未列 → 列出訂單編號手動查
-  var f_total   = "=SUMPRODUCT(--('1688_DB'!$A$4:$A<>\"\"))";                                                       // 1688待付款總筆數
-  var f_matched = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)>0))";                   // 核對到
-  var f_unmatch = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0))";                   // 未核對
-  var f_unlist  = "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$A$4:$A<>\"\",COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0)),\"（全部核對到 ✅）\")"; // 未核對訂單編號
+  var f_total   = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*" + INRNG + ")";                                                       // 1688待付款總筆數
+  var f_matched = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*" + INRNG + "*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)>0))";                   // 核對到
+  var f_unmatch = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*" + INRNG + "*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0))";                   // 未核對
+  var f_unlist  = "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$A$4:$A<>\"\"," + KFLT + ",COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0)),\"（全部核對到 ✅）\")"; // 未核對訂單編號
   var out = [
-    ["匯率", rate, "1688待付款筆數", f_total, "核對到", f_matched, "⚠️未核對", f_unmatch, "", "", "", "", ""],       // 列1：匯率 + 對帳筆數
+    ["匯率", rate, "1688待付款筆數", f_total, "核對到", f_matched, "⚠️未核對", f_unmatch, "對帳起日", dFrom, "對帳訖日", dTo, ""], // 列1：匯率 + 對帳筆數 + 對帳日期區間
     ["總額", "=SUM(K5:K)", "未核對訂單編號→", f_unlist, "", "", "", "", "", "", "", "", ""],                          // 列2：台幣總額 + 未核對清單
     ["1688_DB 對應版本", "='1688_DB'!B2", "", "", "=SUM(E5:E)", "=SUM(F5:F)", "=SUM(G5:G)", "=SUM(H5:H)", "=SUM(I5:I)", "", "", "", ""], // 列3：DB版本 + E~I 加總
     HDR];
@@ -177,15 +190,15 @@ function snapshotToAmountRecord(silent) {
       if (g === i) {  // 群組第一列：廠商層對帳(A,B,F~M，1688_DB 用 SUMIF 對廠商含多筆訂單全加總) + 逐品(C,D,E)
         out.push([
           rows[g][2],                                                         // A 廠商名稱
-          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$D$4:$D=$A" + first + ")),\"\")",              // B 付款編號（同廠商多筆全列）
+          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$D$4:$D=$A" + first + "," + KFLT + ")),\"\")",  // B 付款編號（同廠商、區間內多筆全列）
           rows[g][0], rows[g][1], rows[g][3],                                 // C商品編號 D商品名稱 E訂單金額
           "=SUM(E" + first + ":E" + lastRow + ")",                            // F 訂單金額合計
           "=IF($H" + first + "=\"\",\"\",$H" + first + "-$I" + first + ")",   // G 訂單費用=總金額-運費（折後實付貨款）
-          "=IF(COUNTIF('1688_DB'!$D:$D,$A" + first + ")=0,\"\",SUMIF('1688_DB'!$D:$D,$A" + first + ",'1688_DB'!$I:$I))",   // H 總金額=Σ实付款（同廠商多筆加總）
-          "=IF(COUNTIF('1688_DB'!$D:$D,$A" + first + ")=0,\"\",SUMIF('1688_DB'!$D:$D,$A" + first + ",'1688_DB'!$G:$G))",   // I 運費=Σ运费（同廠商多筆加總）
+          "=IF(COUNTIFS('1688_DB'!$D:$D,$A" + first + "," + KCRIT + ")=0,\"\",SUMIFS('1688_DB'!$I:$I,'1688_DB'!$D:$D,$A" + first + "," + KCRIT + "))", // H 總金額=Σ实付款（同廠商、區間內多筆加總）
+          "=IF(COUNTIFS('1688_DB'!$D:$D,$A" + first + "," + KCRIT + ")=0,\"\",SUMIFS('1688_DB'!$G:$G,'1688_DB'!$D:$D,$A" + first + "," + KCRIT + "))", // I 運費=Σ运费（同廠商、區間內多筆加總）
           "=IF(AND($F" + first + "<>\"\",$F" + first + "<>0,$G" + first + "<>\"\",$G" + first + "<=$F" + first + "),\"O\",\"\")", // J 核對: 訂單費用≤合計
           "=IF($H" + first + "=\"\",\"\",$H" + first + "*$B$1)",                                           // K TW=總金額×匯率
-          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$L$4:$L,'1688_DB'!$D$4:$D=$A" + first + ")),\"\")",              // L 付款狀態（同廠商多筆全列；待付款＝空白）
+          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$L$4:$L,'1688_DB'!$D$4:$D=$A" + first + "," + KFLT + ")),\"\")",  // L 付款狀態＝付款日期（同廠商、區間內多筆；待付款＝空白）
           ""                                                                  // M 備註
         ]);
       } else {
@@ -211,6 +224,10 @@ function snapshotToAmountRecord(silent) {
   ns.getRange(1, 1, 3, 2).setBackground("#fce5cd");
   ns.getRange(1, 3, 1, 6).setBackground("#cfe2f3");                             // C1:H1 對帳筆數區 淺藍
   ns.getRange(2, 3, 1, 2).setBackground("#cfe2f3");                             // C2:D2 未核對清單標籤
+  ns.getRange(1, 9, 1, 4).setBackground("#d9d2e9");                             // I1:L1 對帳日期區間 淺紫
+  ns.getRange("J1").setNumberFormat("yyyy/m/d");                                // 對帳起日
+  ns.getRange("L1").setNumberFormat("yyyy/m/d");                                // 對帳訖日
+  ns.getRange("B3").setNumberFormat("yyyy/m/d hh:mm");                          // DB 版本＝時間戳（否則顯示序號）
   ns.getRange(3, 5, 1, 5).setBackground("#fff2cc");                             // E3:I3 欄位加總 淺黃
   ns.getRange(5, 6, Math.max(rows.length, 1), 2).setBackground("#fff2cc");       // F:G(訂單金額合計/訂單費用) 黃底
   ns.getRange(5, 12, Math.max(rows.length, 1), 1).setNumberFormat("yyyy/m/d");  // L 付款狀態=付款日期
@@ -231,7 +248,8 @@ function snapshotToAmountRecord(silent) {
   ns.setFrozenRows(4);
   tgt.setActiveSheet(ns);
   if (!silent) ui.alert("✅ 已建立「" + tag + "」，" + rows.length + " 個商品編號。\n" +
-    "已自動帶入 1688_DB 對帳（廠商 SUMIF、同廠商多筆訂單自動加總 B付款編號/H總金額/I運費）；核對 O＝訂單費用 ≤ 訂貨合計，綠底。");
+    "已自動帶入 1688_DB 對帳（廠商 SUMIFS、同廠商多筆訂單自動加總 B付款編號/H總金額/I運費）；核對 O＝訂單費用 ≤ 訂貨合計，綠底。\n" +
+    "⚠️ 只對帳 J1~L1 區間內（預設今天±1天）建立的 1688 訂單，避免把別批未付款的舊單算進來；區間可直接改 J1/L1。");
 }
 
 function blanks_(n) { var a = []; for (var i = 0; i < n; i++) a.push(""); return a; }
