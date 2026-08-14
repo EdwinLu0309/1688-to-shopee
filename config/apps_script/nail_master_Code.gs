@@ -173,10 +173,15 @@ function snapshotToAmountRecord(silent) {
   var KFLT  = KRNG + ">=$J$1," + KRNG + "<=$L$1";                    // FILTER 用
   // 頂端 1~3 列：匯率/總額/DB版本 + 對帳筆數（1688待付款 vs 本表廠商）+ E~I 欄位加總
   //  對帳：以 1688_DB 卖家公司名(D) 比對本表廠商名稱(A5:A)；比不到＝廠商可能改名或未列 → 列出訂單編號手動查
-  var f_total   = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*" + INRNG + ")";                                                       // 1688待付款總筆數
-  var f_matched = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*" + INRNG + "*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)>0))";                   // 核對到
-  var f_unmatch = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*" + INRNG + "*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0))";                   // 未核對
-  var f_unlist  = "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$A$4:$A<>\"\"," + KFLT + ",COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0)),\"（全部核對到 ✅）\")"; // 未核對訂單編號
+  // ★交易關閉的訂單自 2026-08-14 起「保留＋標記」不再從 1688_DB 剔除（J=交易关闭、
+  //  运费/实付款已由 daemon 清空）——Edwin 要在 L 欄看得到「這張單被關了」，不能默默消失。
+  //  對帳筆數/未核對清單要排除它們（帳上不存在的單不算）；B 付款編號、L 狀態照樣列出。
+  var NOTCL  = "('1688_DB'!$J$4:$J<>\"交易关闭\")";
+  var JCRIT  = "'1688_DB'!$J:$J,\"<>交易关闭\"";
+  var f_total   = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*" + INRNG + "*" + NOTCL + ")";                                             // 1688待付款總筆數（不含已關閉）
+  var f_matched = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*" + INRNG + "*" + NOTCL + "*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)>0))";        // 核對到
+  var f_unmatch = "=SUMPRODUCT(('1688_DB'!$A$4:$A<>\"\")*" + INRNG + "*" + NOTCL + "*(COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0))";        // 未核對
+  var f_unlist  = "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$A$4:$A,'1688_DB'!$A$4:$A<>\"\"," + KFLT + ",'1688_DB'!$J$4:$J<>\"交易关闭\",COUNTIF($A$5:$A,'1688_DB'!$D$4:$D)=0)),\"（全部核對到 ✅）\")"; // 未核對訂單編號（不含已關閉）
   var out = [
     ["匯率", rate, "1688待付款筆數", f_total, "核對到", f_matched, "⚠️未核對", f_unmatch, "對帳起日", dFrom, "對帳訖日", dTo, ""], // 列1：匯率 + 對帳筆數 + 對帳日期區間
     ["總額", "=SUM(K5:K)", "未核對訂單編號→", f_unlist, "", "", "", "", "", "", "", "", ""],                          // 列2：台幣總額 + 未核對清單
@@ -197,11 +202,11 @@ function snapshotToAmountRecord(silent) {
           rows[g][0], rows[g][1], rows[g][3],                                 // C商品編號 D商品名稱 E訂單金額
           "=SUM(E" + first + ":E" + lastRow + ")",                            // F 訂單金額合計
           "=IF($H" + first + "=\"\",\"\",$H" + first + "-$I" + first + ")",   // G 訂單費用=總金額-運費（折後實付貨款）
-          "=IF(COUNTIFS('1688_DB'!$D:$D,$A" + first + "," + KCRIT + ")=0,\"\",SUMIFS('1688_DB'!$I:$I,'1688_DB'!$D:$D,$A" + first + "," + KCRIT + "))", // H 總金額=Σ实付款（同廠商、區間內多筆加總）
-          "=IF(COUNTIFS('1688_DB'!$D:$D,$A" + first + "," + KCRIT + ")=0,\"\",SUMIFS('1688_DB'!$G:$G,'1688_DB'!$D:$D,$A" + first + "," + KCRIT + "))", // I 運費=Σ运费（同廠商、區間內多筆加總）
+          "=IF(COUNTIFS('1688_DB'!$D:$D,$A" + first + "," + KCRIT + "," + JCRIT + ")=0,\"\",SUMIFS('1688_DB'!$I:$I,'1688_DB'!$D:$D,$A" + first + "," + KCRIT + "," + JCRIT + "))", // H 總金額=Σ实付款（同廠商、區間內多筆；不含交易关闭）
+          "=IF(COUNTIFS('1688_DB'!$D:$D,$A" + first + "," + KCRIT + "," + JCRIT + ")=0,\"\",SUMIFS('1688_DB'!$G:$G,'1688_DB'!$D:$D,$A" + first + "," + KCRIT + "," + JCRIT + "))", // I 運費=Σ运费（同廠商、區間內多筆；不含交易关闭）
           "=IF(AND($F" + first + "<>\"\",$F" + first + "<>0,$G" + first + "<>\"\",$G" + first + "<=$F" + first + "),\"O\",\"\")", // J 核對: 訂單費用≤合計
           "=IF($H" + first + "=\"\",\"\",$H" + first + "*$B$1)",                                           // K TW=總金額×匯率
-          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$L$4:$L,'1688_DB'!$D$4:$D=$A" + first + "," + KFLT + ")),\"\")",  // L 付款狀態＝付款日期（同廠商、區間內多筆；待付款＝空白）
+          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$J$4:$J,'1688_DB'!$D$4:$D=$A" + first + "," + KFLT + ")),\"\")",  // L 付款狀態＝1688 订单状态（等待买家付款/待发货/交易成功/交易关闭…；每次刷新回填現況）
           ""                                                                  // M 備註
         ]);
       } else {
@@ -233,7 +238,7 @@ function snapshotToAmountRecord(silent) {
   ns.getRange("B3").setNumberFormat("yyyy/m/d hh:mm");                          // DB 版本＝時間戳（否則顯示序號）
   ns.getRange(3, 5, 1, 5).setBackground("#fff2cc");                             // E3:I3 欄位加總 淺黃
   ns.getRange(5, 6, Math.max(rows.length, 1), 2).setBackground("#fff2cc");       // F:G(訂單金額合計/訂單費用) 黃底
-  ns.getRange(5, 12, Math.max(rows.length, 1), 1).setNumberFormat("yyyy/m/d");  // L 付款狀態=付款日期
+  // L 付款狀態改顯示 1688 订单状态（文字，非日期）→ 不設日期格式
    // J 欄核對=「O」→ 綠底（一眼看出已對上的訂單）
   var jRange = ns.getRange(5, 10, Math.max(rows.length, 1), 1);                 // J 欄(第10欄)資料區
   var oRule = SpreadsheetApp.newConditionalFormatRule()
@@ -244,9 +249,15 @@ function snapshotToAmountRecord(silent) {
     .whenFormulaSatisfied("=$H$1>0")
     .setBackground("#f4cccc").setFontColor("#990000")
     .setRanges([ns.getRange(1, 7, 1, 2), ns.getRange(2, 3, 1, 2)]).build();     // G1:H1 + C2:D2
+  // L 欄出現「交易关闭」→ 紅底（有單被 1688 關閉：金額不計，但要記得重下）
+  var closedRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextContains("交易关闭")
+    .setBackground("#f4cccc").setFontColor("#990000")
+    .setRanges([ns.getRange(5, 12, Math.max(rows.length, 1), 1)]).build();
   var cfRules = ns.getConditionalFormatRules();
   cfRules.push(oRule);
   cfRules.push(unmatchRule);
+  cfRules.push(closedRule);
   ns.setConditionalFormatRules(cfRules);
   ns.setFrozenRows(4);
   tgt.setActiveSheet(ns);
