@@ -1,6 +1,11 @@
 # TODO
 
 ## 高優先
+- [ ] 2026-08-14 #S165 ★三賣場化收尾（程式已就位，缺三個外部件，詳見 docs/三賣場上架依據.md §7）：
+  ① ~~下載三賣場蝦皮模板~~ ✅ 2026-08-15 全數到位（nail/lady/baby 三份都驗證過，物流定案公版 6 個）
+  ② ~~建 Nail/Baby「AI 上架名單」表~~ ✅ 2026-08-15 兩表已建（表頭複製自 Lady）、SA 讀取實測通、`.env` 已填
+  ③ Edwin 確認 Nail/Baby 物流組合＋校閱 SOP 草案（`config/sop/{nail,baby}/`）與標題規則
+- [ ] 2026-08-14 #S165 新賣場首跑紀律：各先勾 1-2 筆試上傳確認蝦皮吃檔（O 欄商品選項貨號是已知風險模式）再放量
 - [x] 2026-08-01 #S119 ★`reconcile_daemon` 補可靠性：看門狗（單一 job 逾 `JOB_HARD_TIMEOUT`=8min → `os._exit` 讓 launchd 拉起乾淨新 process）+ 啟動清孤兒瀏覽器。**再犯確認**：daemon 又凍死 2 天 10h（PID 24210，卡在 Playwright 睡眠/喚醒後斷線的 CDP pipe、client timeout 沒觸發、堆 18 個孤兒 chromium）→ Nail 金額核對打勾沒反應。診斷＝log 最後寫入時間 vs now；救急＝`launchctl kickstart -k gui/$(id -u)/com.joyslu.reconcile-daemon`。看門狗獨立執行緒 + os._exit，即使主緒整個凍在 node driver 也了斷得掉。（尚未做：per-request 網路 timeout — 看門狗已覆蓋此失敗模式，優先度降低）
 - [ ] 2026-07-30 #S119 確認 Lady 2-2 到貨這次真的抓進 `1688_DB`（daemon 已重啟恢復、當下 1688 頁慢在重試）
 - [ ] 2026-07-30 #S119 cookie 近期重登：美甲 jiaorong0826（`cookies_nail` 名目剩 0.1 天）、Baby luwei03090826（`cookies_baby` 尚未登入）

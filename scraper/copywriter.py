@@ -1,15 +1,15 @@
 """
-文案引擎：用 Claude + JoysLu Lady SOP 生成蝦皮上架文案。
+文案引擎：用 Claude + 各賣場 SOP 生成蝦皮上架文案（#S165 三賣場化）。
 
 輸入：extract_1688.js 抓的兩軸商品資料 + 採購表脈絡（編號 / 售價 / 訂貨需求 / 分類）
 輸出：商品簡稱 / 蝦皮標題 / 詳情頁 8 區塊 / 繁體顏色對照 / 尺碼標籤 / flags
       （變體選項名稱「編號_簡稱_顏色」由 build_variants() 用程式拼，不交給 LLM 確保精準）
 
-SOP 來源（config/sop/）：
-- 03f_女裝通用SOP_v1.0.md     女裝品類規則（A-* 適用）
-- JoysLu_Lady_詳情頁規範_系統化版_v2.4.md  母規範（字典/固定文案/8區塊/檢查）
+賣場差異（品牌標籤/受眾詞/SOP 檔/尺碼規則/子品類）全部由 scraper/shops.py 的
+profile 提供，generate_listing 帶 shop 參數；SOP 全文塞 system（config/sop/ 下 per-shop）。
 
 大 SOP 走 Anthropic prompt cache（system 陣列 + cache_control），多商品連跑省 input。
+⚠️ 同一批次混跑多賣場會讓 cache 失效（system 不同），批次請一次跑一個賣場。
 """
 import json
 import os
@@ -23,18 +23,13 @@ load_dotenv(override=True)
 SOP_DIR = Path(__file__).parent.parent / "config" / "sop"
 MODEL = "claude-sonnet-4-6"
 
-_ROLE = """你是 JoysLu Lady 蝦皮（台灣站）女裝賣場的上架文案專家。
-嚴格遵守下方兩份規範產出文案。核心心法：廠商有寫就用、沒寫套 fallback 或省略、
+# system prompt 用「字串拼接」組（不用 .format）：SOP 全文若含大括號，.format 會炸。
+_ROLE_HEAD = """你是{shop_desc}的上架文案專家。
+嚴格遵守下方規範產出文案。核心心法：廠商有寫就用、沒寫套 fallback 或省略、
 不腦補機能、不過度承諾、抓 80% 完整即可。所有文字一律繁體中文、台灣用語
 （不可出現中國用語與簡體字，依字典轉換）。
 
 下面是規範（務必遵守）：
-
-=== 03f 女裝通用 SOP ===
-{sop_03f}
-
-=== 母規範 v2.4（字典 / 固定文案 / 8 區塊 / 檢查）===
-{sop_v24}
 """
 
 _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文案。
@@ -59,14 +54,12 @@ _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文
    - 備註指定某款式（例：「只要長褲」）→ 只留該款式選項。
    - 備註空白或「全款式 / 全部顏色 / 全部」→ 第一軸「全部」原樣列入 style_kept。
    - style_kept 內容必須是第一軸的「原始選項名（簡體、照原文一字不差）」，不要改寫。
-1. 判子品類（上衣/外套/下身/裙裝/連身類）
+1. 判子品類（{subcategory_line}）
 2. 商品簡稱：依商品名濃縮成 2-5 字繁體台灣用語（如「冰丝阔腿裤」→「冰絲寬褲」）
-3. 蝦皮標題：依 SOP §11 / 標題規則，含【JoysLu Lady】+ 核心關鍵字 +「女裝」+ 編號，57-60 字寬內
-4. 完整詳情頁（通用 8 區塊全文，套母規範固定文案：賣場介紹/退換貨/推薦三款）
+3. 蝦皮標題：{title_rule}
+4. 完整詳情頁（通用 8 區塊全文，套規範固定文案：賣場介紹/退換貨/推薦三款）
 5. 顏色簡繁對照：把每個第一軸顏色轉成繁體乾淨名（去掉廠商括號贅字，如「米白色【长裤】」→「米白色」；款式差異若需保留另說）
-6. 尺碼標籤：每個尺碼配廠商有給的數據（體重/身高/三圍）；廠商沒給就只放尺碼字母，不硬湊。
-   ★體重單位一律用「公斤(kg)」：廠商標「斤」時務必 ÷2 換算（1斤=0.5kg，如 80-95斤→40-47.5kg）。
-   標籤只寫 kg、**絕對不可出現「斤」字**，也不要「斤 ‧ kg」並列。格式範例：「S（40-47.5kg）」
+{size_rule}
 7. flags：字典待擴充的新顏色/材質詞、廠商備註、疑似違規詞、子品類不確定、尺碼數據缺漏
 
 【只回傳這個 JSON，不要任何其他文字】
@@ -82,36 +75,50 @@ _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文
 }}"""
 
 
-def _load_sop() -> tuple[str, str]:
-    f03f = SOP_DIR / "03f_女裝通用SOP_v1.0.md"
-    fv24 = SOP_DIR / "JoysLu_Lady_詳情頁規範_系統化版_v2.4.md"
-    return f03f.read_text(encoding="utf-8"), fv24.read_text(encoding="utf-8")
+def _build_system(sp) -> str:
+    """組 system prompt：角色 + 該賣場全部 SOP 全文（字串拼接，SOP 含大括號也安全）。"""
+    parts = [_ROLE_HEAD.format(shop_desc=sp.shop_desc)]
+    for name, text in sp.sop_texts():
+        parts.append(f"\n=== {name} ===\n{text}\n")
+    return "".join(parts)
 
 
-def generate_listing(product_data: dict, sheet_ctx: dict) -> dict:
+def _title_rule(sp) -> str:
+    aud = f"+「{sp.audience_word}」" if sp.audience_word else ""
+    rule = f"依 SOP 標題規則，含{sp.brand_tag}+ 核心關鍵字 {aud}+ 編號，57-60 字寬內。"
+    return rule + (sp.title_extra or "")
+
+
+def generate_listing(product_data: dict, sheet_ctx: dict, shop: str = "lady") -> dict:
     """
     生成單一商品的蝦皮上架文案。
 
     Args:
         product_data: extract_1688.js 抓的 JSON（含 attributes/sku_images/sizes/price_cny）
         sheet_ctx: {"code","selling_price","demand","category"}
+        shop: 賣場 key（nail/lady/baby）→ 決定品牌標籤/SOP/尺碼規則（scraper/shops.py）
 
     Returns:
         dict（上面 JSON 結構）；失敗時 flags 帶錯誤、其餘空。
     """
     import anthropic
 
+    from scraper.shops import get_shop
+
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         logger.error("缺少 ANTHROPIC_API_KEY")
         return {"error": "no_api_key", "flags": ["缺少 ANTHROPIC_API_KEY"]}
 
-    sop_03f, sop_v24 = _load_sop()
-    system_text = _ROLE.format(sop_03f=sop_03f, sop_v24=sop_v24)
+    sp = get_shop(shop)
+    system_text = _build_system(sp)
 
     colors = list(product_data.get("sku_images", {}).keys()) or \
         [s.get("attributes", {}).get("规格", "") for s in product_data.get("skus", [])]
     task = _TASK.format(
+        subcategory_line=sp.subcategory_line,
+        title_rule=_title_rule(sp),
+        size_rule=sp.size_rule,
         code=sheet_ctx.get("code", ""),
         price=sheet_ctx.get("selling_price", ""),
         demand=sheet_ctx.get("demand", ""),

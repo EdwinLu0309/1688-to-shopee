@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-15 #S165（上架系統三賣場化：Nail / Lady / Baby）
+
+### 新增
+- **`scraper/shops.py`**：三賣場設定單一正本（ShopProfile：品牌標籤/名單 Sheet/模板/cookie key/
+  分類對照/文案 SOP/選項政策/物流/規格軸名），其他模組帶 `shop` 參數查表。
+- **`docs/三賣場上架依據.md`**：每個賣場怎麼跑的依據正本（標題公式/選項政策/物流定案/草案狀態）。
+- **`config/sop/{nail,baby}/…草案v0.md`**：兩賣場文案 SOP 草案（結構比照 Lady 8 區塊）。
+- **三賣場模板全數到位**：`config/shopee_template_{nail,lady,baby}.xlsx`（MD5 原封安裝＋
+  byte 級不變性驗證＋產檔煙霧測試；Nail 44 欄/Lady 43 欄/Baby 41 欄，印證模板不可跨賣場共用）。
+- **Nail/Baby AI 上架名單表**：表頭複製自 Lady、SA 讀取實測通、`.env` 填 `AI_LIST_SHEET_ID_{SHOP}`。
+
+### 變更
+- GUI 加「⓪ 賣場」下拉（名單/登入帳號/模板/SOP 跟著換、記住選擇）；CLI `fetch-list`/`batch2` 加 `--shop`。
+- 文案引擎 per-shop（`_build_system` 字串拼接組 system——SOP 含大括號不再炸 .format）；
+  選項政策分流：lady=`clothing`（中性色 ≤5 不變）、nail/baby=`cap_only`（不砍色只守 100 SKU）。
+- **物流定案（Edwin 2026-08-15）**：三賣場一律公版 6 頻道（新竹/全家/7-11/店到家/店到店/嘉里），
+  各賣場後台多開通的一概不理。
+- 產出檔名 per-shop：`output/shopee_batch_upload_{shop}.xlsx`。
+- Lady 迴歸驗證：P14AE1 重產與單賣場版一致（4 底色×6 尺碼=72 SKU、標題/分類/軸名不變）。
+
 ## 2026-08-09（三賣場 ④ 進貨金額記錄：對帳公式加「訂單日期區間」，修跨批灌帳）
 
 ### 變更（修 bug）

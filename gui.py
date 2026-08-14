@@ -32,15 +32,22 @@ load_dotenv(BASE_DIR / ".env", override=True)
 sys.path.insert(0, str(BASE_DIR))
 
 from config.settings import OUTPUT_DIR  # noqa: E402
-from scraper.playwright_scraper import COOKIE_PATH  # noqa: E402
+from scraper.shops import SHOPS, get_shop  # noqa: E402
 
 STATE_PATH = BASE_DIR / "config" / "gui_state.json"
 DEFAULT_CSV = BASE_DIR / "input" / "lady_ai_list.csv"
 ASSETS_DIR = Path(OUTPUT_DIR) / "上架素材"
 
-_CAT_NAME = {"100358": "長褲", "100103": "牛仔褲", "100360": "短褲",
-             "100361": "褲裙", "100102": "裙裝", "100352": "上衣",
-             "100356": "上衣", "100353": "襯衫", "": "❌無分類"}
+# 賣場下拉選單顯示名（key → 顯示）
+_SHOP_LABELS = {"lady": "Lady 女裝", "nail": "Nail 美甲", "baby": "Baby 母嬰"}
+
+
+def _cat_names(shop: str) -> dict[str, str]:
+    """分類 ID → 顯示文字（從該賣場 profile 的 category_map 反查，先到先得）。"""
+    out = {"": "❌無分類"}
+    for text, cid in get_shop(shop).category_map.items():
+        out.setdefault(cid, text)
+    return out
 
 # ── 字體（整體放大，看得清楚）──
 F_TITLE = ("Arial", 24, "bold")
@@ -83,6 +90,7 @@ class App:
 
         self.running = False
         self.cancel_event = threading.Event()
+        self.shop_var = tk.StringVar(value=self._load_last_shop())
         self.csv_path = tk.StringVar(value=str(self._load_last_csv()))
         self.make_video = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="就緒")
@@ -99,6 +107,19 @@ class App:
         self._center_window()
 
     # ── 狀態記憶 ──────────────────────────────
+    def _shop(self):
+        return get_shop(self.shop_var.get())
+
+    def _load_last_shop(self) -> str:
+        if STATE_PATH.exists():
+            try:
+                s = json.loads(STATE_PATH.read_text(encoding="utf-8")).get("shop", "")
+                if s in SHOPS:
+                    return s
+            except Exception:  # noqa: BLE001
+                pass
+        return "lady"
+
     def _load_last_csv(self) -> Path:
         if STATE_PATH.exists():
             try:
@@ -107,16 +128,27 @@ class App:
                     return Path(p)
             except Exception:  # noqa: BLE001
                 pass
-        return DEFAULT_CSV
+        return self._shop().csv_path if self.shop_var.get() != "lady" else DEFAULT_CSV
 
     def _save_state(self) -> None:
         STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
         try:
             STATE_PATH.write_text(
-                json.dumps({"csv_path": self.csv_path.get()}, ensure_ascii=False, indent=2),
+                json.dumps({"csv_path": self.csv_path.get(), "shop": self.shop_var.get()},
+                           ensure_ascii=False, indent=2),
                 encoding="utf-8")
         except Exception:  # noqa: BLE001
             pass
+
+    def _on_shop_change(self, *_):
+        """切賣場：名單路徑換成該賣場預設、重載清單、更新 cookie 狀態。"""
+        sp = self._shop()
+        # lady 舊檔名向後相容：存在就用舊的 lady_ai_list.csv
+        self.csv_path.set(str(DEFAULT_CSV if (sp.key == "lady" and DEFAULT_CSV.exists())
+                              else sp.csv_path))
+        self._save_state()
+        self._refresh_cookie_status()
+        self._refresh_products()
 
     # ── UI ──────────────────────────────
     def _build_ui(self) -> None:
@@ -124,6 +156,18 @@ class App:
 
         tk.Label(self.root, text="1688 → 蝦皮 上架小幫手",
                  font=F_TITLE, pady=10, bg=BG, fg=FG).pack()
+
+        # ── 賣場選擇 ──
+        shop_frame = tk.Frame(self.root, padx=24, pady=4, bg=BG)
+        shop_frame.pack(fill="x")
+        tk.Label(shop_frame, text="⓪ 賣場：", font=F_LBL_B, bg=BG, fg=FG).pack(side="left")
+        self._shop_label_var = tk.StringVar(value=_SHOP_LABELS[self.shop_var.get()])
+        shop_menu = tk.OptionMenu(shop_frame, self._shop_label_var, *_SHOP_LABELS.values(),
+                                  command=self._on_shop_pick)
+        shop_menu.config(font=F_BTN_SM)
+        shop_menu.pack(side="left", padx=4)
+        tk.Label(shop_frame, text="（換賣場會切換名單/登入帳號/模板/文案規範）",
+                 font=F_HINT, fg="#888", bg=BG).pack(side="left", padx=6)
 
         # ── 名單 + 更新 ──
         csv_frame = tk.Frame(self.root, padx=24, pady=4, bg=BG)
@@ -229,6 +273,12 @@ class App:
                  wraplength=560, justify="left", anchor="w").pack(side="left", fill="x", expand=True)
         tk.Frame(self.root, height=8, bg=BG).pack()
 
+    def _on_shop_pick(self, label: str) -> None:
+        """OptionMenu 顯示的是中文標籤 → 轉回 shop key 再套用。"""
+        key = next((k for k, v in _SHOP_LABELS.items() if v == label), "lady")
+        self.shop_var.set(key)
+        self._on_shop_change()
+
     def _center_window(self) -> None:
         self.root.update_idletasks()
         w, h = self.root.winfo_reqwidth(), self.root.winfo_reqheight()
@@ -248,11 +298,12 @@ class App:
             return
         try:
             from scraper.ai_list_reader import parse_ai_list_csv
-            self.products = parse_ai_list_csv(csv)
+            self.products = parse_ai_list_csv(csv, shop=self.shop_var.get())
         except Exception as e:  # noqa: BLE001
             self.count_var.set(f"名單解析失敗：{e}")
             return
 
+        cat_names = _cat_names(self.shop_var.get())
         for p in self.products:
             sel_var = tk.BooleanVar(value=False)
             gpt_var = tk.BooleanVar(value=False)
@@ -260,7 +311,7 @@ class App:
             self.route_vars.append(gpt_var)
             row = tk.Frame(self.checks_frame, bg="#ffffff")
             row.pack(fill="x", anchor="w")
-            cat = _CAT_NAME.get(p.get("category", ""), p.get("category", ""))
+            cat = cat_names.get(p.get("category", ""), p.get("category", ""))
             warn = "" if p.get("category") else " ⚠️"
             label = f"{p['code']}　[{cat}{warn}]　{p.get('name','')[:18]}"
             tk.Checkbutton(row, text="✨GPT", variable=gpt_var, font=("Arial", 12),
@@ -311,14 +362,18 @@ class App:
             b.config(state=state)
 
     def _refresh_cookie_status(self) -> None:
-        if COOKIE_PATH.exists():
+        cookie = self._shop().cookie_path
+        if cookie.exists():
             try:
-                n = len(json.loads(COOKIE_PATH.read_text(encoding="utf-8")))
-                self.cookie_status.config(text=f"✅ 已登入（{n} 筆）", fg="#1a7f37")
+                n = len(json.loads(cookie.read_text(encoding="utf-8")))
+                self.cookie_status.config(
+                    text=f"✅ {_SHOP_LABELS[self.shop_var.get()]} 已登入（{n} 筆）", fg="#1a7f37")
             except Exception:  # noqa: BLE001
                 self.cookie_status.config(text="⚠️ cookie 檔壞了", fg="#cf222e")
         else:
-            self.cookie_status.config(text="❌ 未登入（先按「🔑 登入 1688」）", fg="#cf222e")
+            self.cookie_status.config(
+                text=f"❌ {_SHOP_LABELS[self.shop_var.get()]} 未登入（先按「🔑 登入 1688」）",
+                fg="#cf222e")
 
     def _busy(self, on: bool, cancellable: bool = False) -> None:
         self.running = on
@@ -374,7 +429,7 @@ class App:
         try:
             from scraper.sheet_fetcher import fetch_ai_list
             out = Path(self.csv_path.get()) if self.csv_path.get() else None
-            res = fetch_ai_list(out_path=out)
+            res = fetch_ai_list(out_path=out, shop=self.shop_var.get())
             if res.get("ok"):
                 self._thread_log(f"✅ 名單已更新（來源 {res['profile']}，{res['bytes']} bytes）")
                 self.root.after(0, self._refresh_products)
@@ -392,8 +447,9 @@ class App:
     def _on_run_all(self) -> None:
         if not self._guard():
             return
-        if not COOKIE_PATH.exists():
-            messagebox.showerror("錯誤", "還沒登入 1688，請先按「🔑 登入 1688」")
+        if not self._shop().cookie_path.exists():
+            messagebox.showerror("錯誤", f"{_SHOP_LABELS[self.shop_var.get()]} 還沒登入 1688，"
+                                 "請先按「🔑 登入 1688」")
             return
         sel = self._guard_selection()
         if sel is None:
@@ -410,6 +466,7 @@ class App:
     def _run_all_worker(self, products: list[dict]) -> None:
         from scraper.playwright_scraper import scrape_many
         from scraper.batch_pipeline2 import run_batch_two_tier
+        shop = self.shop_var.get()
         try:
             # ① 抓取
             ids = [p["item_id"] for p in products]
@@ -418,7 +475,7 @@ class App:
             asyncio.set_event_loop(loop)
             try:
                 res = loop.run_until_complete(scrape_many(
-                    ids, cookie_path=COOKIE_PATH, out_dir=Path(OUTPUT_DIR),
+                    ids, cookie_path=self._shop().cookie_path, out_dir=Path(OUTPUT_DIR),
                     headless=False, progress_cb=self._thread_log,
                     cancel_check=self.cancel_event.is_set))
             finally:
@@ -435,7 +492,8 @@ class App:
             # ② 產出（run_batch_two_tier 內部自帶 asyncio.run，須無 running loop）
             self._thread_log(f"② 產出 {len(products)} 商品（文案+挑色+影片+Excel）…")
             res2 = run_batch_two_tier(json_dir=Path(OUTPUT_DIR),
-                                      make_video=self.make_video.get(), products=products)
+                                      make_video=self.make_video.get(), products=products,
+                                      shop=shop)
             self._report_batch(res2)
         except Exception as e:  # noqa: BLE001
             import traceback
@@ -468,14 +526,14 @@ class App:
         threading.Thread(target=self._login_worker, daemon=True).start()
 
     def _login_worker(self) -> None:
-        # #S134 階段4：登入改由 cookie-hub 警衛室統一處理（subprocess 呼叫 refresh 1688_lady，
-        # 開瀏覽器登入服飾帳號並存進標準庫）；本 repo 不再自帶 1688 登入碼。
+        # #S134 階段4：登入改由 cookie-hub 警衛室統一處理（subprocess 呼叫 refresh 1688_{shop}，
+        # 開瀏覽器登入該賣場帳號並存進標準庫）；本 repo 不再自帶 1688 登入碼。
         import subprocess
         from pathlib import Path
         cookie_hub = Path.home() / "projects" / "cookie-hub" / "cookie_hub.py"
         try:
             proc = subprocess.run(
-                [sys.executable, str(cookie_hub), "refresh", "1688_lady"],
+                [sys.executable, str(cookie_hub), "refresh", self._shop().cookie_hub_key],
                 capture_output=True, text=True, timeout=360,
             )
             out = (proc.stdout or "") + (proc.stderr or "")
@@ -490,8 +548,9 @@ class App:
     def _on_scrape(self) -> None:
         if not self._guard():
             return
-        if not COOKIE_PATH.exists():
-            messagebox.showerror("錯誤", "還沒登入，請先按「🔑 登入 1688」")
+        if not self._shop().cookie_path.exists():
+            messagebox.showerror("錯誤", f"{_SHOP_LABELS[self.shop_var.get()]} 還沒登入，"
+                                 "請先按「🔑 登入 1688」")
             return
         sel = self._guard_selection()
         if sel is None:
@@ -508,7 +567,7 @@ class App:
         asyncio.set_event_loop(loop)
         try:
             res = loop.run_until_complete(scrape_many(
-                item_ids, cookie_path=COOKIE_PATH, out_dir=Path(OUTPUT_DIR),
+                item_ids, cookie_path=self._shop().cookie_path, out_dir=Path(OUTPUT_DIR),
                 headless=False, progress_cb=self._thread_log,
                 cancel_check=self.cancel_event.is_set))
             self._thread_log(
@@ -554,7 +613,8 @@ class App:
         from scraper.batch_pipeline2 import run_batch_two_tier
         try:
             res = run_batch_two_tier(json_dir=Path(OUTPUT_DIR),
-                                     make_video=self.make_video.get(), products=products)
+                                     make_video=self.make_video.get(), products=products,
+                                     shop=self.shop_var.get())
             self._report_batch(res)
         except Exception as e:  # noqa: BLE001
             import traceback

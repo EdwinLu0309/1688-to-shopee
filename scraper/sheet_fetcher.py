@@ -46,10 +46,19 @@ def fetch_sheet_csv(sheet_id: str, gid: str, out_path: Path, profile=None) -> di
             "error": "", "need_login": False}
 
 
-def fetch_ai_list(out_path: Path | None = None, profile=None) -> dict:
-    """抓「【Lady】AI 上架名單」→ input/lady_ai_list.csv（用 settings 的 SHEET_ID/GID）。"""
-    from config.settings import AI_LIST_SHEET_GID, AI_LIST_SHEET_ID
+def fetch_ai_list(out_path: Path | None = None, profile=None, shop: str = "lady") -> dict:
+    """抓該賣場的「AI 上架名單」→ input/{shop}_ai_list.csv。
 
+    Sheet ID/GID 由 scraper/shops.py 的 profile 決定（.env AI_LIST_SHEET_ID_<SHOP>）；
+    該賣場未設定名單表時回 ok=False + 明確缺件訊息（不會誤讀別賣場的表）。
+    """
+    from scraper.shops import get_shop
+
+    sp = get_shop(shop)
+    try:
+        sheet_id, gid = sp.ai_list_sheet()
+    except RuntimeError as e:
+        return {"ok": False, "profile": "SA", "bytes": 0, "error": str(e), "need_login": False}
     if out_path is None:
-        out_path = Path(__file__).resolve().parent.parent / "input" / "lady_ai_list.csv"
-    return fetch_sheet_csv(AI_LIST_SHEET_ID, str(AI_LIST_SHEET_GID), Path(out_path), profile)
+        out_path = sp.csv_path
+    return fetch_sheet_csv(sheet_id, gid, Path(out_path), profile)

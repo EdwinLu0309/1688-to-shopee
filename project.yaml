@@ -2,8 +2,8 @@ name: 1688-to-shopee
 title: 1688→蝦皮 上架系統
 layer: 營運工具
 status: 可用
-purpose: 1688 商品爬取 → AI 生圖文 → 蝦皮「過審二階」批次上架 Excel + 商品資產包（純上架；六子系統拆解已收官）
-usage: gui.py 一條龍上架 GUI；main.py CLI（scrape/generate/batch2/product-cards/sync-assets）
+purpose: 1688 商品爬取 → AI 生圖文 → 蝦皮「過審二階」批次上架 Excel + 商品資產包（純上架；#S165 起支援 Nail/Lady/Baby 三賣場）
+usage: gui.py 一條龍上架 GUI（⓪ 賣場下拉切換）；main.py CLI（scrape/generate/batch2 --shop/fetch-list --shop/product-cards/sync-assets）
 url:
 launch_mac: run_mac.command
 launch_win: run_windows.bat
@@ -33,8 +33,9 @@ depends_on:
   - ecommerce-media（5 媒體模組 shim）
   - Supabase / Claude / Gemini / OpenAI API
 next:
+  - 三賣場首跑：Nail/Baby 名單填商品 → 各勾 1-2 筆試上傳確認過審再放量；SOP 草案（config/sop/{nail,baby}/）校閱升版
   - 上架 GUI：Edwin 實機端到端驗證、48 商品整批實跑
   - 5 個 media shim 之後可評估清掉（真碼已在 ecommerce-media）
 issues:
   - config/settings.py 仍留已遷出子系統的常數（ORDER_*/RECONCILE_*/KKREN_* 等），未清但無害
-updated: 2026-08-04
+updated: 2026-08-15

@@ -362,11 +362,12 @@ def build_two_tier_rows(
             row[COL["price"]] = str(int(round(float(price))))
             row[COL["stock"]] = str(int(round(float(stock))))
             # 規格欄位：每行都填；識別碼相同 → 歸成同一商品
+            # 軸名依賣場（config 帶入；lady=顏色/尺碼、nail=顏色/規格，見 scraper/shops.py）
             row[COL["var_id"]] = str(int(var_group_id))
-            row[COL["var_name_1"]] = "顏色"
+            row[COL["var_name_1"]] = config.get("axis1_name") or "顏色"
             row[COL["var_option_1"]] = color_opt
             if s["option_name"]:
-                row[COL["var_name_2"]] = "尺碼"
+                row[COL["var_name_2"]] = config.get("axis2_name") or "尺碼"
                 row[COL["var_option_2"]] = _clip20(_zh_tw(s["option_name"]))
             # 商品選項貨號（O 欄 ps_sku_short）＝編號_顏色_尺碼（各司其職：買家選項不顯貨號、
             # 貨號不顯商品名，供庫存系統以此解析到 SKU 層）。

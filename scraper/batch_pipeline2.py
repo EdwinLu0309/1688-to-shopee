@@ -42,7 +42,7 @@ from config.settings import OUTPUT_DIR
 from scraper.color_policy import base_color, select_first_axis
 from scraper.copywriter import build_variants, generate_listing
 from scraper.downloader import download_product_images_from_json
-from scraper.shopee_excel import TEMPLATE_PATH, generate_batch_two_tier_excel
+from scraper.shopee_excel import generate_batch_two_tier_excel
 from scraper.video_maker import collect_images, make_product_video
 
 
@@ -110,8 +110,11 @@ def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], 
     return selected, color_map
 
 
-def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
+def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady") -> dict | None:
     """把一個 manifest 商品項處理成 generate_batch_two_tier_excel 需要的 dict。"""
+    from scraper.shops import get_shop
+
+    sp = get_shop(shop)
     item_id = str(entry["item_id"])
     code = entry.get("code", item_id)
 
@@ -137,7 +140,7 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
             "demand": entry.get("demand", ""),
             "category": entry.get("category", ""),
             "style_note": entry.get("style_filter", ""),  # 第一層：Edwin 的款式備註
-        })
+        }, shop=shop)
         if ai_content.get("error"):
             logger.error(f"[{code}] 文案生成失敗：{ai_content.get('error')}")
             return None
@@ -157,28 +160,39 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
         selected_sizes = [s.strip() for s in str(sizes_spec).split(",") if s.strip()]
     n_sizes = max(1, len(selected_sizes))
 
-    # ── 顏色：明確 colors 覆寫 > 兩層篩選（款式備註 → 中性色 ≤5）──
+    # ── 顏色：明確 colors 覆寫 > 賣場政策 ──
+    # lady（clothing）＝兩層篩選（款式備註 → 中性色 ≤5）；
+    # nail/baby（cap_only）＝色號/花色是商品本體不砍色，只守 SKU 上限（超過從尾端截）。
     color_flag = None
     if entry.get("colors"):
-        # 手動指定顏色（如舊 P-a1 --colors）→ 照填，不套中性政策
+        # 手動指定顏色（如舊 P-a1 --colors）→ 照填，不套政策
         selected_colors, color_map = _parse_colors(entry["colors"], color_map)
     else:
         # 第一層：Claude 依款式備註留下的第一軸選項（沒有就全部）
         all_keys = list(color_map.keys())
         kept = ai_content.get("style_kept") or []
         kept = [k for k in kept if k in color_map] or all_keys  # 對不上就退回全部
-        # 第二層：第一軸＝顏色×身高款；身高款當尺寸全留，只砍底色到中性 ≤5，100 保底。
-        pick = select_first_axis(kept, color_map, n_sizes, max_base_colors=5, sku_cap=100)
-        selected_colors = pick["selected"]
-        color_flag = pick["flag"]
-        if pick["dropped_fashion"]:
-            logger.info(f"[{code}] 丟亮色系（不進貨）：{sorted({base_color_of(color_map, k) for k in pick['dropped_fashion']})}")
-        if pick["dropped_overflow"]:
-            logger.info(f"[{code}] 熱門底色超額砍：{sorted({base_color_of(color_map, k) for k in pick['dropped_overflow']})}")
-        if color_flag:
-            logger.warning(f"[{code}] {color_flag}")
-            if not selected_colors:  # 0 中性色 → 保底留原始前幾個（仍標記人工覆核）
-                selected_colors = kept[:5]
+        if sp.color_policy == "clothing":
+            # 第二層：第一軸＝顏色×身高款；身高款當尺寸全留，只砍底色到中性 ≤N，sku_cap 保底。
+            pick = select_first_axis(kept, color_map, n_sizes,
+                                     max_base_colors=sp.max_base_colors, sku_cap=sp.sku_cap)
+            selected_colors = pick["selected"]
+            color_flag = pick["flag"]
+            if pick["dropped_fashion"]:
+                logger.info(f"[{code}] 丟亮色系（不進貨）：{sorted({base_color_of(color_map, k) for k in pick['dropped_fashion']})}")
+            if pick["dropped_overflow"]:
+                logger.info(f"[{code}] 熱門底色超額砍：{sorted({base_color_of(color_map, k) for k in pick['dropped_overflow']})}")
+            if color_flag:
+                logger.warning(f"[{code}] {color_flag}")
+                if not selected_colors:  # 0 中性色 → 保底留原始前幾個（仍標記人工覆核）
+                    selected_colors = kept[:5]
+        else:  # cap_only
+            max_colors = max(1, sp.sku_cap // n_sizes)
+            selected_colors = kept[:max_colors]
+            if len(kept) > max_colors:
+                color_flag = (f"選項 {len(kept)} × {n_sizes} 尺碼超過 {sp.sku_cap} SKU 上限，"
+                              f"只留前 {max_colors} 個（要挑哪些請在名單 colors 欄指定）")
+                logger.warning(f"[{code}] {color_flag}")
 
     variants = build_variants(code, short_name, color_map,
                               selected_colors, size_labels, selected_sizes)
@@ -211,6 +225,10 @@ def _prepare_product(entry: dict, json_dir: Path) -> dict | None:
             "image_skip": entry.get("image_skip", []),          # 排除的主圖 index（如有簡體字）
             "pre_order_days": entry.get("pre_order_days"),       # AP 較長備貨天數
             "image_urls": image_urls,                            # ✨ GPT 生圖圖床 URL（有=覆蓋 1688）
+            # 賣場差異（shops.py）：規格軸名 + 啟用的物流頻道
+            "axis1_name": sp.axis1_name,
+            "axis2_name": sp.axis2_name,
+            "enabled_channels": set(sp.enabled_channels),
         },
         "_meta": {"code": code, "item_id": item_id,
                   "sku_count": sku_count,
@@ -302,30 +320,37 @@ def run_batch_two_tier(
     make_video: bool = True,
     video_n: int = 9,
     products: list[dict] | None = None,
+    shop: str = "lady",
 ) -> dict:
     """逐商品處理（文案+變體，選配影片）→ 合併蝦皮二階 Excel。
 
     輸入二擇一：manifest_path（JSON 檔）或 products（清單，如 ai_list_reader 的輸出）。
+    shop 決定：模板檔（各賣場自己下載的那份，hash 不同不可混用）、文案 SOP、
+    選項政策、物流頻道、輸出檔名（scraper/shops.py）。
     """
+    from scraper.shops import get_shop
+
+    sp = get_shop(shop)
     if products is not None:
         entries = products
-        tpl = template_path or TEMPLATE_PATH
+        tpl = template_path or sp.template_path()   # 缺該賣場模板時這裡直接報清楚
     else:
         manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
         entries = manifest.get("products", [])
         tpl = template_path or (
-            Path(manifest["template"]) if manifest.get("template") else TEMPLATE_PATH
+            Path(manifest["template"]) if manifest.get("template") else sp.template_path()
         )
     if not entries:
         logger.warning("沒有商品可處理")
         return {"total": 0, "success": 0, "failed": 0, "excel_path": None, "failures": []}
+    logger.info(f"賣場：{shop}（模板 {tpl.name}）")
 
     prepared, failures = [], []
     for entry in entries:
         code = entry.get("code", entry.get("item_id"))
         logger.info(f"{'='*50}\n處理 {code} (item_id: {entry.get('item_id')})")
         try:
-            p = _prepare_product(entry, json_dir)
+            p = _prepare_product(entry, json_dir, shop=shop)
             if p is None:
                 failures.append({"code": code, "error": "缺 JSON 或文案失敗"})
             else:
@@ -344,7 +369,7 @@ def run_batch_two_tier(
                 "excel_path": None, "failures": failures}
 
     if output_path is None:
-        output_path = Path(OUTPUT_DIR) / "shopee_batch_upload.xlsx"
+        output_path = Path(OUTPUT_DIR) / sp.excel_name   # per-shop 檔名，多賣場不互相覆蓋
     generate_batch_two_tier_excel(prepared, Path(output_path), tpl)
 
     summary = {

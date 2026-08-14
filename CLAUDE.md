@@ -10,6 +10,22 @@
 - **① 1688 抓取** → `ecommerce-sources.alibaba1688`；**⑥ 素材** → `ecommerce-media`（5 模組，本 repo 為 re-export shim）；**讀表** → `ecommerce-sources.gsheet`。
 - **②③ 訂貨/對帳** → `1688-order` repo（#S134）。`scraper/ordering/` 整包 + order_gui/reconcile_gui + 訂貨/對帳啟動檔 + main.py 的 order-*/reconcile-refresh 命令全部移除（-4723 行）。**架構原則：上架（本 repo）vs 訂貨（1688-order）是兩件事，「預購」只是橫跨兩者的模式。**
 
+## ★三賣場化（#S165，2026-08-14）— 上架支援 Nail / Lady / Baby
+上架 pipeline 從 Lady 單賣場版改為三賣場：**賣場設定單一正本＝`scraper/shops.py`**（ShopProfile：
+品牌標籤/名單 Sheet/模板/cookie key/分類對照/SOP/選項政策/物流/軸名），其他模組帶 `shop` 參數查表。
+**規則依據與草案狀態見 `docs/三賣場上架依據.md`**（標題公式、per-shop 選項政策、Edwin 待辦）。
+- GUI 最上方「⓪ 賣場」下拉切換（名單/登入帳號/模板/SOP 全跟著換）；CLI `fetch-list`/`batch2` 加 `--shop`。
+- **模板 per-shop**：`config/shopee_template_{shop}.xlsx`（模板藏版本 hash＋物流欄位是賣場設定，
+  絕不可跨賣場共用；lady 暫 fallback 舊檔 `shopee_template.xlsx`）。缺件明確報錯，不靜默用錯賣場的。
+- **名單 per-shop**：`.env` 設 `AI_LIST_SHEET_ID_{SHOP}`（表分享給 inventory-sync SA）→ `input/{shop}_ai_list.csv`。
+- **選項政策分流**：lady=`clothing`（中性色 ≤5 底色政策不變）；nail/baby=`cap_only`（色號/花色是商品
+  本體不砍色，只守 100 SKU 上限）。分類 ID 三賣場共用同一套分類樹（模板分類表 2012 個全品類），
+  各賣場的 category_map/name_rules ID 皆取自模板真實 ID。
+- 文案 system prompt 改字串拼接組裝（SOP 含大括號不會炸 .format）；Nail/Baby SOP 為草案
+  （`config/sop/{shop}/…草案v0.md`），校準後升版。⚠️ 批次一次跑一個賣場（混跑會讓 prompt cache 失效）。
+- 產出檔名 per-shop：`output/shopee_batch_upload_{shop}.xlsx`。Lady 行為已迴歸驗證與單賣場版一致
+  （P14AE1：4 底色×6 尺碼=72 SKU、標題/分類/軸名不變）。
+
 ## 技術棧
 - Python 3.12（.venv；Tk 9.0 深色模式正常）
 - tkinter（桌面 GUI，gui.py，Win/Mac 雙平台）

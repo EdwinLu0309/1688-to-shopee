@@ -43,6 +43,20 @@ GOOGLE_SHEET_GID = "823737836"
 AI_LIST_SHEET_ID = "1D7qBDG3WEeUrMPKa2K3yeqmarJ7aKFDThSaWJBk0wcc"
 AI_LIST_SHEET_GID = "0"
 
+# 三賣場 AI 上架名單（#S165 三賣場化）：Nail/Baby 各建一張、分享給 inventory-sync SA 後，
+# 在 .env 設 AI_LIST_SHEET_ID_<SHOP>（分頁非第一頁另設 AI_LIST_SHEET_GID_<SHOP>）。
+# 沒設的賣場跑「更新名單」會明確報缺件（scraper/shops.py ai_list_sheet()），不會誤讀別賣場的表。
+AI_LIST_SHEETS = {
+    "lady": {"id": os.environ.get("AI_LIST_SHEET_ID_LADY", AI_LIST_SHEET_ID),
+             "gid": os.environ.get("AI_LIST_SHEET_GID_LADY", AI_LIST_SHEET_GID)},
+    "nail": {"id": os.environ.get("AI_LIST_SHEET_ID_NAIL",
+                                  "1FOmWsjuCtl5-qSylERadiXfhjeP-p-KNYOgrNSHq-1M"),
+             "gid": os.environ.get("AI_LIST_SHEET_GID_NAIL", "0")},
+    "baby": {"id": os.environ.get("AI_LIST_SHEET_ID_BABY",
+                                  "1tZz0FCCl5cE-VSjzv_-M2hS8GNj1PFtk1nodHXDTpB4"),
+             "gid": os.environ.get("AI_LIST_SHEET_GID_BABY", "0")},
+}
+
 # 商品資產包「一鍵同步」雲端輸出根（Google Drive Desktop 掛的路徑；因機器而異，用 env 覆蓋）。
 # sync-assets 的 --out-base 預設用 ASSET_CLOUD_BASES[shop]。
 ASSET_CLOUD_BASE = os.environ.get(

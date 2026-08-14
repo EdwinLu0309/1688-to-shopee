@@ -21,45 +21,20 @@ from pathlib import Path
 
 from loguru import logger
 
-# 蝦皮分類文字（「分類」欄）→ 分類 ID（在模板「較長備貨天數範圍」sheet 查）。
-# Edwin 有填「分類」欄時優先用這張表；填的字要對得上 key。
-CATEGORY_MAP = {
-    "長褲": "100358",   # 女生衣著/長褲 / 緊身褲/長褲（P-a1 實測過審用此 ID）
-    "褲子": "100358",
-    "闊腿褲": "100358",
-    "寬褲": "100358",
-    "牛仔褲": "100103",  # 女生衣著/牛仔褲
-    "短褲": "100360",   # 女生衣著/短褲/短褲
-    "褲裙": "100361",   # 女生衣著/短褲/褲裙
-    "裙裝": "100102",   # 女生衣著/裙裝
-    "半身裙": "100102",
-    "裙子": "100102",
-    "T恤": "100352",    # 女生衣著/上衣/T恤
-    "上衣": "100356",   # 女生衣著/上衣/其他上衣
-    "短袖": "100352",
-    "襯衫": "100353",   # 女生衣著/上衣/襯衫
-}
+# 分類對照 / 商品名推斷規則：#S165 三賣場化後移到 scraper/shops.py 的各賣場 profile
+# （category_map / name_rules），本模組帶 shop 參數查表。下面兩個模組層名稱保留＝Lady 的
+# （向後相容：舊呼叫端 import CATEGORY_MAP 仍可用）。
+from scraper.shops import get_shop
 
-# 「分類」欄空白時，從商品名（1688 原名，多為簡體）關鍵詞推斷分類 ID。
-# 順序＝由具體到籠統（先攔「裙褲/牛仔」再到籠統「褲」），第一個命中就用。
-# 只用真實存在的蝦皮 ID（讀 config/shopee_template.xlsx「較長備貨天數範圍」sheet 得來）。
-_NAME_CATEGORY_RULES = [
-    (["裙裤", "裙褲", "褲裙", "裤裙"], "100361"),                 # 褲裙
-    (["牛仔"], "100103"),                                        # 牛仔褲
-    (["半身裙", "花苞裙", "伞裙", "傘裙", "碎花裙", "a字裙", "连衣裙",
-      "連衣裙", "长裙", "長裙", "短裙", "裙"], "100102"),          # 裙裝
-    (["短裤", "短褲", "五分裤", "五分褲"], "100360"),             # 短褲
-    (["阔腿", "闊腿", "西装裤", "西裝褲", "工装", "工裝", "运动裤",
-      "運動褲", "山本", "弯刀", "彎刀", "喇叭", "直筒", "哈伦", "哈倫",
-      "西裤", "西褲", "长裤", "長褲", "裤", "褲"], "100358"),      # 長褲
-    (["t恤", "短袖", "上衣", "衬衫", "襯衫", "polo"], "100352"),   # 上衣/T恤
-]
+CATEGORY_MAP = get_shop("lady").category_map
+_NAME_CATEGORY_RULES = get_shop("lady").name_rules
 
 
-def _infer_category_from_name(name: str) -> str:
-    """分類欄空白時，用商品名關鍵詞推斷蝦皮分類 ID；推不出回空字串。"""
+def _infer_category_from_name(name: str, rules=None) -> str:
+    """分類欄空白時，用商品名關鍵詞推斷蝦皮分類 ID（由具體到籠統，第一個命中就用）；
+    推不出回空字串。rules 預設 Lady（向後相容），三賣場請由 parse_ai_list_csv 帶 shop。"""
     low = (name or "").lower()
-    for keywords, cid in _NAME_CATEGORY_RULES:
+    for keywords, cid in (rules if rules is not None else _NAME_CATEGORY_RULES):
         if any(k in low for k in keywords):
             return cid
     return ""
@@ -128,14 +103,17 @@ def _price_from_row(row: list[str], colmap: dict[str, int]) -> int:
     return 0
 
 
-def parse_ai_list_csv(csv_path: Path, stock_default: int = 10) -> list[dict]:
+def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady") -> list[dict]:
     """解析 AI 名單 CSV → batch2 manifest 的 products 清單（欄位靠表頭名稱對應）。
 
     每筆：{item_id, code, price, stock, category, style_filter, sizes,
            demand, name, _category_text}
-    - category 查不到 ID → 留空字串並 flag（跑 batch 時會擋，需人工補 CATEGORY_MAP）
+    - 分類對照/推斷規則依 shop 查 scraper/shops.py（查不到 ID → 留空並 flag，
+      跑 batch 時會擋，需補該賣場 profile 的 category_map）
     - colors 交給 style_filter（如「三色長褲」），在 batch 端配合抓到的色卡挑
     """
+    sp = get_shop(shop)
+    category_map, name_rules = sp.category_map, sp.name_rules
     with open(csv_path, encoding="utf-8") as f:
         rows = list(csv.reader(f))
     if not rows:
@@ -161,14 +139,15 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10) -> list[dict]:
             continue
 
         cat_text = _cell(r, colmap.get("category"))
-        cat_id = CATEGORY_MAP.get(cat_text, "")
+        cat_id = category_map.get(cat_text, "")
         cat_src = "分類欄" if cat_id else ""
         if not cat_id:  # 分類欄空/對不上 → 從商品名推斷
-            cat_id = _infer_category_from_name(name)
+            cat_id = _infer_category_from_name(name, name_rules)
             if cat_id:
                 cat_src = "商品名推斷"
         if not cat_id:
-            logger.warning(f"[{code}] 分類「{cat_text}」查無 ID、商品名也推不出，請補分類或 CATEGORY_MAP")
+            logger.warning(f"[{code}] 分類「{cat_text}」查無 ID、商品名也推不出，"
+                           f"請補分類欄或 shops.py [{shop}] 的 category_map")
 
         price = _price_from_row(r, colmap)
         style = _cell(r, colmap.get("style"))
