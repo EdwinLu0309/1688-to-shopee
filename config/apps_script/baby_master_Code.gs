@@ -153,11 +153,13 @@ function snapshotToAmountRecord(silent) {
   var rate = Number(ss.getRange("設定!B2").getValue()) || 4.9;
   // 新欄序（Edwin 2026-07-14 調整：廠商名稱+付款平台訂單編號移到最前，好核對）：
   // A廠商名稱 B付款平台訂單編號 C商品編號 D商品名稱 E訂單金額
-  // F訂單金額合計 G訂單費用 H總金額 I運費 J核對 K TW L付款狀態 M備註
-  // 訂單層(A,B,F~M)每個訂單垂直合併；C~E 為逐商品編號列。上方三列：標籤在A、數值在B。
+  // F訂單金額合計 G訂單費用 H總金額 I運費 J核對 K TW L付款日 M付款狀態 N備註
+  // 訂單層(A,B,F~N)每個訂單垂直合併；C~E 為逐商品編號列。上方三列：標籤在A、數值在B。
+  // ⚠️ 資料區要加欄一律往 N 之後加，**絕不可插在中間**：L1 放的是「對帳訖日」，
+  //    全表 SUMIFS/COUNTIFS/FILTER 都引用 $L$1 當日期上界，第 1~3 列的欄位配置一位移就散了。
   var HDR = ["廠商名稱", "付款平台訂單編號", "商品編號", "商品名稱", "訂單金額",
-             "訂單金額合計", "訂單費用", "總金額", "運費", "核對", "TW", "付款狀態", "備註"];
-  var NC = HDR.length;                                  // 13 欄
+             "訂單金額合計", "訂單費用", "總金額", "運費", "核對", "TW", "付款日", "付款狀態", "備註"];
+  var NC = HDR.length;                                  // 14 欄
   // ★對帳日期區間（2026-08-09 修）：1688_DB 是「合併累加」的待付款快照（#S072 起保留舊訂單），
   //  只用廠商名 SUMIF 會把「別批還沒付款的舊單」一起灌進本分頁（實測 0808 分頁 26 列中 14 列被 7/27
   //  舊批污染、多算 ¥10,326、核對只剩 10 個 O）。故所有對帳公式都加 1688_DB!K(訂單創建時間) 區間條件。
@@ -187,7 +189,9 @@ function snapshotToAmountRecord(silent) {
     ["匯率", rate, "1688待付款筆數", f_total, "核對到", f_matched, "⚠️未核對", f_unmatch, "對帳起日", dFrom, "對帳訖日", dTo, ""], // 列1：匯率 + 對帳筆數 + 對帳日期區間
     ["總額", "=SUM(K5:K)", "未核對訂單編號→", f_unlist, "", "", "", "", "", "", "", "", ""],                          // 列2：台幣總額 + 未核對清單
     ["1688_DB 對應版本", "='1688_DB'!B2", "", "", "=SUM(E5:E)", "=SUM(F5:F)", "=SUM(G5:G)", "=SUM(H5:H)", "=SUM(I5:I)", "", "", "", ""], // 列3：DB版本 + E~I 加總
-    HDR];
+    HDR].map(function (r) { while (r.length < NC) r.push(""); return r; });  // 補齊到 NC 欄
+  //   ↑ setValues 要求每列等長。頂端三列是手寫字面陣列，往後加欄一定會忘記補 ——
+  //     這裡自動補，就不會再因為「加了一欄」而整支掛在 setValues。
   var merges = [];                                       // 每個多品訂單要垂直合併的 {row,n}
   var ri = 5;
   var i = 0;
@@ -207,8 +211,13 @@ function snapshotToAmountRecord(silent) {
           "=IF(COUNTIFS('1688_DB'!$D:$D,$A" + first + "," + KCRIT + "," + JCRIT + ")=0,\"\",SUMIFS('1688_DB'!$G:$G,'1688_DB'!$D:$D,$A" + first + "," + KCRIT + "," + JCRIT + "))", // I 運費=Σ运费（同廠商、區間內多筆；不含交易关闭）
           "=IF(AND($F" + first + "<>\"\",$F" + first + "<>0,$G" + first + "<>\"\",$G" + first + "<=$F" + first + "),\"O\",\"\")", // J 核對: 訂單費用≤合計
           "=IF($H" + first + "=\"\",\"\",$H" + first + "*$B$1)",                                           // K TW=總金額×匯率
-          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$J$4:$J,'1688_DB'!$D$4:$D=$A" + first + "," + KFLT + ")),\"\")",  // L 付款狀態＝1688 订单状态（等待买家付款/待发货/交易成功/交易关闭…；每次刷新回填現況）
-          ""                                                                  // M 備註
+          // L 付款日＝1688_DB!L 订单付款时间。⚠️ 不直接用 TEXTJOIN：那一定回文字，日期就死了
+          //   （不能排序、不能算「付了幾天還沒出貨」）。但也不能只取第一筆——同一廠商在對帳
+          //   區間內可能有多張單。折衷＝只有一張時回真日期，多張才退成 "8/14, 8/15" 文字。
+          //   先濾掉還沒付款的空白，否則「1 張付了 + 1 張沒付」會被誤判成單張而抓到空格。
+          "=IFERROR(LET(d,FILTER('1688_DB'!$L$4:$L,'1688_DB'!$D$4:$D=$A" + first + "," + KFLT + "),p,FILTER(d,d<>\"\"),IF(COUNT(p)=1,INDEX(p,1),TEXTJOIN(\", \",TRUE,ARRAYFORMULA(TEXT(p,\"m/d\"))))),\"\")",  // L 付款日
+          "=IFERROR(TEXTJOIN(\", \",TRUE,FILTER('1688_DB'!$J$4:$J,'1688_DB'!$D$4:$D=$A" + first + "," + KFLT + ")),\"\")",  // M 付款狀態＝1688 订单状态（等待买家付款/待发货/交易成功/交易关闭…；每次刷新回填現況）
+          ""                                                                  // N 備註
         ]);
       } else {
         out.push(["", "", rows[g][0], rows[g][1], rows[g][3]].concat(blanks_(NC - 5)));
@@ -239,7 +248,17 @@ function snapshotToAmountRecord(silent) {
   ns.getRange("B3").setNumberFormat("yyyy/m/d hh:mm");                          // DB 版本＝時間戳（否則顯示序號）
   ns.getRange(3, 5, 1, 5).setBackground("#fff2cc");                             // E3:I3 欄位加總 淺黃
   ns.getRange(5, 6, Math.max(rows.length, 1), 2).setBackground("#fff2cc");       // F:G(訂單金額合計/訂單費用) 黃底
-  // L 付款狀態改顯示 1688 订单状态（文字，非日期）→ 不設日期格式
+  // ── 幣別數字格式（Edwin 2026-08-16 定案）：RMB 兩位小數、台幣不要小數 ──
+  // 判準不是「看起來像錢就套」：G 訂單費用要拿來跟 F 訂單金額合計比對，兩者必須同幣別
+  //（G＝H總金額−I運費，源頭是 1688 的实付款/运费）→ E~I 全是 RMB。
+  // K TW 是唯一乘過匯率的欄，連同它的加總 B2 才是台幣。B1 是匯率不是金額，不可套。
+  var nData = Math.max(rows.length, 1);
+  ns.getRange(5, 5, nData, 5).setNumberFormat("#,##0.00");   // E~I 資料區（RMB）
+  ns.getRange(3, 5, 1, 5).setNumberFormat("#,##0.00");       // E3:I3 加總（RMB）
+  ns.getRange(5, 11, nData, 1).setNumberFormat("#,##0");     // K TW（台幣）
+  ns.getRange("B2").setNumberFormat("#,##0");                // B2 總額（台幣）
+  ns.getRange(5, 12, nData, 1).setNumberFormat("yyyy/m/d");  // L 付款日
+  ns.getRange(5, 13, nData, 1).setNumberFormat("@");         // M 付款狀態＝純文字（別被當日期解析）
    // J 欄核對=「O」→ 綠底（一眼看出已對上的訂單）
   var jRange = ns.getRange(5, 10, Math.max(rows.length, 1), 1);                 // J 欄(第10欄)資料區
   var oRule = SpreadsheetApp.newConditionalFormatRule()
@@ -250,15 +269,26 @@ function snapshotToAmountRecord(silent) {
     .whenFormulaSatisfied("=$H$1>0")
     .setBackground("#f4cccc").setFontColor("#990000")
     .setRanges([ns.getRange(1, 7, 1, 2), ns.getRange(2, 3, 1, 2)]).build();     // G1:H1 + C2:D2
-  // L 欄出現「交易关闭」→ 紅底（有單被 1688 關閉：金額不計，但要記得重下）
-  var closedRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains("交易关闭")
-    .setBackground("#f4cccc").setFontColor("#990000")
-    .setRanges([ns.getRange(5, 12, Math.max(rows.length, 1), 1)]).build();
+  // M 付款狀態四色（Edwin 2026-08-16）：顏色對應「要不要你動手」，不是對應流程順序。
+  //   紅=交易关闭(要重下) 橘=待付款(要去付錢) 綠=交易成功(結案) 藍=待发货(等出貨)
+  //   待收货 留白 —— 它是最大宗的正常狀態，滿頁都上色就等於沒上色。
+  // ⚠️ 陣列順序＝優先權：一個廠商多張單時 M 欄是「待发货, 交易关闭」這種合併字串，
+  //    兩條規則都會中、先命中的贏 → 最該被看見的排最前面，否則單被關了卻顯示藍色。
+  var mRange = ns.getRange(5, 13, Math.max(rows.length, 1), 1);
+  var STATUS_COLORS = [
+    ["交易关闭", "#f4cccc", "#990000"],
+    ["待付款",   "#fce5cd", "#b45f06"],
+    ["交易成功", "#d9ead3", "#38761d"],
+    ["待发货",   "#cfe2f3", "#0b5394"]
+  ];
   var cfRules = ns.getConditionalFormatRules();
+  STATUS_COLORS.forEach(function (c) {
+    cfRules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextContains(c[0]).setBackground(c[1]).setFontColor(c[2])
+      .setRanges([mRange]).build());
+  });
   cfRules.push(oRule);
   cfRules.push(unmatchRule);
-  cfRules.push(closedRule);
   ns.setConditionalFormatRules(cfRules);
   ns.setFrozenRows(4);
   tgt.setActiveSheet(ns);
