@@ -274,13 +274,22 @@ function snapshotToAmountRecord(silent) {
   // ⚠️ 陣列順序＝優先權：一個廠商多張單時 M 欄是「待发货, 交易关闭」這種合併字串，
   //    兩條規則都會中、先命中的贏 → 最該被看見的排最前面，否則單被關了卻顯示藍色。
   var mRange = ns.getRange(5, 13, Math.max(rows.length, 1), 1);
+  // ⚠️ 交易关闭**不可以**用「包含」判斷（2026-08-19 實例）：被關的單重下之後，同一個廠商
+  //    在對帳區間內同時有舊關閉單與新單，M 欄會變成「待收货, 交易关闭」兩個狀態並存 →
+  //    用「包含」那一列會永遠紅著，事情早就處理完了卻還在喊，紅色就此失去意義。
+  //    改成自訂公式：**只有「這格沒有任何活單」時才紅**（活單＝待付款/待发货/待收货/交易成功）
+  //    → 重下並抓到新單後自動退紅，改由新單自己的狀態上色。
+  var closedRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND(ISNUMBER(SEARCH("交易关闭",$M5)),NOT(ISNUMBER(SEARCH("待",$M5))),NOT(ISNUMBER(SEARCH("交易成功",$M5))))')
+    .setBackground("#f4cccc").setFontColor("#990000")
+    .setRanges([mRange]).build();
   var STATUS_COLORS = [
-    ["交易关闭", "#f4cccc", "#990000"],
     ["待付款",   "#fce5cd", "#b45f06"],
     ["交易成功", "#d9ead3", "#38761d"],
     ["待发货",   "#cfe2f3", "#0b5394"]
   ];
   var cfRules = ns.getConditionalFormatRules();
+  cfRules.push(closedRule);
   STATUS_COLORS.forEach(function (c) {
     cfRules.push(SpreadsheetApp.newConditionalFormatRule()
       .whenTextContains(c[0]).setBackground(c[1]).setFontColor(c[2])
