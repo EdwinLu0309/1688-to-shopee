@@ -8,7 +8,9 @@
 - 「款式」(三色長褲…)     → 挑色 hint（style_filter，配合抓到的色卡挑）
 - 「尺寸」(全尺寸/S-XL…)  → 挑尺碼
 - 「售價」(998)          → 蝦皮售價
-- 「訂貨需求」(預購/現貨)  → 預購標記
+- 「訂貨需求」(預購/現貨)  → 預購標記（也決定建檔走預購或正式，見 master_staging）
+- 「子分類」(b. 內衣…)    → 1-1 商品表 C 子分類（2026-08-28 新增）
+- 「標籤」(#LM_1st…)      → 1-1 SKU表 D 標籤（2026-08-28 新增；預購品由程式蓋成 #PO_Sale）
 
 ⚠️ 欄位用「表頭名稱」動態對應，不寫死欄號——因為 Edwin 會在表裡插欄/搬欄
 （實際踩過：插了一個「廠商」欄，害款式/尺寸/售價整排右移一格，寫死欄號全錯位）。
@@ -45,6 +47,9 @@ _HEADER_ALIASES = {
     "url": ["進貨網址", "进货网址"],
     "name": ["商品or品牌名稱", "商品or品牌名称", "商品名稱", "商品名称", "品牌名稱"],
     "category": ["分類", "分类"],
+    # 2026-08-28 新增：直接餵 1-1 建檔用（商品表 C 子分類 / SKU表 D 標籤）
+    "subcategory": ["子分類", "子分类", "子類別", "子类别"],
+    "tag": ["標籤", "标签"],
     "style": ["款式"],
     "sizes": ["尺寸", "尺碼", "尺码"],
     "demand": ["訂貨需求", "订货需求"],
@@ -163,6 +168,8 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
             "style_filter": style,       # 「三色長褲」等 → batch 端配合色卡挑
             "sizes": "all" if ("全" in size_text or not size_text) else size_text,
             "demand": demand,
+            "subcategory": _cell(r, colmap.get("subcategory")),   # → 商品表 C
+            "tag": _cell(r, colmap.get("tag")),                   # → SKU表 D
             # 預購品填較長備貨天數（AP 欄）；現貨留空
             "pre_order_days": 10 if "預購" in demand else None,
             "name": name,

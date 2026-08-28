@@ -232,7 +232,7 @@ class App:
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
                        activebackground=BG).pack(anchor="w", padx=24, pady=(2, 0))
         tk.Checkbutton(self.root,
-                       text="🆕 正式新品：同時產 1-1「_待貼新品」分頁（人補編號後貼進商品表/SKU表，接訂貨）",
+                       text="🆕 建檔：同時產 1-1「_待貼新品」分頁（正式/預購都走這條，貼進商品表+SKU表即接上訂貨）",
                        variable=self.make_staging,
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
                        activebackground=BG).pack(anchor="w", padx=24, pady=(0, 4))

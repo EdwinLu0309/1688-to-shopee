@@ -242,7 +242,7 @@ def batch(ctx: click.Context, sheet: str | None, download_sheet: bool,
 @click.option("--video/--no-video", default=True, help="每商品順便合成短影片（預設開；缺圖會先下載）")
 @click.option("--video-n", type=int, default=9, help="影片挑幾張圖")
 @click.option("--staging/--no-staging", default=False,
-              help="正式新品：同時把商品寫進該賣場 1-1 的「_待貼新品」分頁（接訂貨流程）")
+              help="建檔：同時把商品寫進該賣場 1-1 的「_待貼新品」分頁（正式與預購都走這條，接訂貨流程）")
 @click.option("--staging-force", is_flag=True, default=False,
               help="_待貼新品 還有上一批未貼走時直接覆蓋（預設會拒絕）")
 @click.pass_context

@@ -224,6 +224,10 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady") -> dict | 
             "size_chart_url": entry.get("size_chart_url", ""),  # Q 欄圖片尺寸表
             "image_skip": entry.get("image_skip", []),          # 排除的主圖 index（如有簡體字）
             "pre_order_days": entry.get("pre_order_days"),       # AP 較長備貨天數
+            # 1-1 建檔用（master_staging 讀）：AI 名單新增的兩欄 + 預購/現貨
+            "subcategory": entry.get("subcategory", ""),          # → 商品表 C 子分類
+            "tag": entry.get("tag", ""),                          # → SKU表 D 標籤
+            "demand": entry.get("demand", ""),                    # 預購/現貨 → 決定標籤與建檔分支
             "image_urls": image_urls,                            # ✨ GPT 生圖圖床 URL（有=覆蓋 1688）
             # 賣場差異（shops.py）：規格軸名 + 啟用的物流頻道
             "axis1_name": sp.axis1_name,
