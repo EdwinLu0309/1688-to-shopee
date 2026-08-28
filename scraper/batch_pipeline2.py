@@ -321,12 +321,16 @@ def run_batch_two_tier(
     video_n: int = 9,
     products: list[dict] | None = None,
     shop: str = "lady",
+    make_staging: bool = False,
+    staging_force: bool = False,
 ) -> dict:
     """逐商品處理（文案+變體，選配影片）→ 合併蝦皮二階 Excel。
 
     輸入二擇一：manifest_path（JSON 檔）或 products（清單，如 ai_list_reader 的輸出）。
     shop 決定：模板檔（各賣場自己下載的那份，hash 不同不可混用）、文案 SOP、
     選項政策、物流頻道、輸出檔名（scraper/shops.py）。
+    make_staging=True（正式新品）：Excel 之外，另把商品寫進該賣場 1-1 的
+    「_待貼新品」暫存分頁（master_staging），供人補編號後貼進商品表/SKU表。
     """
     from scraper.shops import get_shop
 
@@ -372,6 +376,14 @@ def run_batch_two_tier(
         output_path = Path(OUTPUT_DIR) / sp.excel_name   # per-shop 檔名，多賣場不互相覆蓋
     generate_batch_two_tier_excel(prepared, Path(output_path), tpl)
 
+    staging_result = None
+    if make_staging:
+        from scraper.master_staging import write_staging
+        # 失敗不吞：Excel 已產好，但正式新品少了待貼分頁＝訂貨鏈路斷頭，要大聲讓人知道
+        staging_result = write_staging(shop, prepared, force=staging_force)
+        logger.info(f"待貼分頁：{staging_result['written']} 商品 / "
+                    f"{staging_result['sku_rows']} SKU 列 → 1-1「{staging_result['tab']}」")
+
     summary = {
         "total": len(entries),
         "success": len(prepared),
@@ -379,6 +391,7 @@ def run_batch_two_tier(
         "excel_path": Path(output_path),
         "failures": failures,
         "products": [p["_meta"] for p in prepared],
+        "staging": staging_result,
     }
     logger.info(f"{'='*50}\n批次完成：{summary['success']}/{summary['total']} 成功"
                 f"，Excel：{output_path}")

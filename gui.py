@@ -93,6 +93,7 @@ class App:
         self.shop_var = tk.StringVar(value=self._load_last_shop())
         self.csv_path = tk.StringVar(value=str(self._load_last_csv()))
         self.make_video = tk.BooleanVar(value=True)
+        self.make_staging = tk.BooleanVar(value=False)  # 正式新品：產 1-1「_待貼新品」分頁
         self.status_var = tk.StringVar(value="就緒")
 
         self.products: list[dict] = []
@@ -229,7 +230,12 @@ class App:
 
         tk.Checkbutton(self.root, text="產出時順便合成短影片（缺圖自動下載）", variable=self.make_video,
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
-                       activebackground=BG).pack(anchor="w", padx=24, pady=(2, 4))
+                       activebackground=BG).pack(anchor="w", padx=24, pady=(2, 0))
+        tk.Checkbutton(self.root,
+                       text="🆕 正式新品：同時產 1-1「_待貼新品」分頁（人補編號後貼進商品表/SKU表，接訂貨）",
+                       variable=self.make_staging,
+                       font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
+                       activebackground=BG).pack(anchor="w", padx=24, pady=(0, 4))
 
         # ── 分步 / 其他 ──
         tk.Label(self.root, text="分步執行（需要時才個別按）：", font=F_HINT, fg="#666",
@@ -417,6 +423,30 @@ class App:
                 f"{', '.join(gpt)}\n\n要繼續嗎？")
         return True
 
+    def _staging_precheck(self) -> tuple[bool, bool] | None:
+        """回 (make_staging, staging_force)；None＝使用者取消執行。
+
+        開跑前在主執行緒就把「上一批還沒貼走」的對話框處理掉，
+        背景執行緒不跳 UI。預檢連線失敗就照常跑（write_staging 端還有同一道防線）。
+        """
+        if not self.make_staging.get():
+            return (False, False)
+        shop = self.shop_var.get()
+        try:
+            from scraper.master_staging import staging_has_leftover
+            leftover = staging_has_leftover(shop)
+        except Exception as e:  # noqa: BLE001
+            self._log(f"⚠️ 待貼分頁預檢失敗（{e}），照常執行")
+            return (True, False)
+        if leftover:
+            if not messagebox.askyesno(
+                "待貼分頁還有上一批",
+                "1-1「_待貼新品」還留著上一批沒貼走的資料。\n\n"
+                "要覆蓋嗎？（選「否」取消執行；先把上一批貼進商品表/SKU表再跑）"):
+                return None
+            return (True, True)
+        return (True, False)
+
     # ── ⬇️ 更新名單（走 Service Account 讀私有表；#S134 不再需要 Google 登入）──
     def _on_fetch_list(self) -> None:
         if not self._guard():
@@ -458,12 +488,16 @@ class App:
             return
         if not self._warn_gpt(sel):
             return
+        staging = self._staging_precheck()
+        if staging is None:
+            return
         self._busy(True, cancellable=True)
         self.cancel_event.clear()
         self._log(f"🚀 一鍵完成：{len(sel)} 商品（① 抓取 → ② 產出）…")
-        threading.Thread(target=self._run_all_worker, args=(sel,), daemon=True).start()
+        threading.Thread(target=self._run_all_worker, args=(sel, *staging), daemon=True).start()
 
-    def _run_all_worker(self, products: list[dict]) -> None:
+    def _run_all_worker(self, products: list[dict], make_staging: bool = False,
+                        staging_force: bool = False) -> None:
         from scraper.playwright_scraper import scrape_many
         from scraper.batch_pipeline2 import run_batch_two_tier
         shop = self.shop_var.get()
@@ -493,7 +527,8 @@ class App:
             self._thread_log(f"② 產出 {len(products)} 商品（文案+挑色+影片+Excel）…")
             res2 = run_batch_two_tier(json_dir=Path(OUTPUT_DIR),
                                       make_video=self.make_video.get(), products=products,
-                                      shop=shop)
+                                      shop=shop, make_staging=make_staging,
+                                      staging_force=staging_force)
             self._report_batch(res2)
         except Exception as e:  # noqa: BLE001
             import traceback
@@ -509,6 +544,10 @@ class App:
             self._thread_log(f"    ✓ {m['code']}: {m['sku_count']} SKU{vtag} | {m['title'][:24]}")
         for f in res.get("failures", []):
             self._thread_log(f"    ✗ {f['code']}: {f['error']}")
+        st = res.get("staging")
+        if st:
+            self._thread_log(f"🆕 待貼分頁：{st['written']} 商品 / {st['sku_rows']} SKU 列 → "
+                             f"1-1「{st['tab']}」（補黃底欄後貼進商品表/SKU表）")
         excel = res.get("excel_path")
         if excel:
             self._thread_log(f"📄 蝦皮 Excel：{excel}")
@@ -605,16 +644,21 @@ class App:
             return
         if not self._warn_gpt(sel):
             return
+        staging = self._staging_precheck()
+        if staging is None:
+            return
         self._busy(True)
         self._log(f"開始產出（{len(sel)} 個勾選商品，影片={'開' if self.make_video.get() else '關'}）…")
-        threading.Thread(target=self._run_worker, args=(sel,), daemon=True).start()
+        threading.Thread(target=self._run_worker, args=(sel, *staging), daemon=True).start()
 
-    def _run_worker(self, products: list[dict]) -> None:
+    def _run_worker(self, products: list[dict], make_staging: bool = False,
+                    staging_force: bool = False) -> None:
         from scraper.batch_pipeline2 import run_batch_two_tier
         try:
             res = run_batch_two_tier(json_dir=Path(OUTPUT_DIR),
                                      make_video=self.make_video.get(), products=products,
-                                     shop=self.shop_var.get())
+                                     shop=self.shop_var.get(), make_staging=make_staging,
+                                     staging_force=staging_force)
             self._report_batch(res)
         except Exception as e:  # noqa: BLE001
             import traceback

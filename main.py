@@ -241,9 +241,14 @@ def batch(ctx: click.Context, sheet: str | None, download_sheet: bool,
 @click.option("--template", "-t", type=click.Path(exists=True), default=None, help="蝦皮模板（預設用該賣場的 config/shopee_template_{shop}.xlsx）")
 @click.option("--video/--no-video", default=True, help="每商品順便合成短影片（預設開；缺圖會先下載）")
 @click.option("--video-n", type=int, default=9, help="影片挑幾張圖")
+@click.option("--staging/--no-staging", default=False,
+              help="正式新品：同時把商品寫進該賣場 1-1 的「_待貼新品」分頁（接訂貨流程）")
+@click.option("--staging-force", is_flag=True, default=False,
+              help="_待貼新品 還有上一批未貼走時直接覆蓋（預設會拒絕）")
 @click.pass_context
 def batch2(ctx: click.Context, manifest: str | None, ai_list: str | None, shop: str, json_dir: str,
-           output: str | None, template: str | None, video: bool, video_n: int) -> None:
+           output: str | None, template: str | None, video: bool, video_n: int,
+           staging: bool, staging_force: bool) -> None:
     """批次過審二階路徑：manifest / AI 名單 → 逐商品 Claude 文案 + 變體（+影片）→ 合併一個蝦皮 Excel。"""
     from scraper.batch_pipeline2 import run_batch_two_tier
 
@@ -265,6 +270,8 @@ def batch2(ctx: click.Context, manifest: str | None, ai_list: str | None, shop: 
         video_n=video_n,
         products=products,
         shop=shop,
+        make_staging=staging,
+        staging_force=staging_force,
     )
 
     click.echo("")
@@ -274,6 +281,9 @@ def batch2(ctx: click.Context, manifest: str | None, ai_list: str | None, shop: 
         click.echo(f"    ✓ {m['code']}: {m['sku_count']} SKU{vtag} | {m['title'][:40]}")
     for f in result.get("failures", []):
         click.echo(f"    ✗ {f['code']}: {f['error']}")
+    st = result.get("staging")
+    if st:
+        click.echo(f"  🆕 待貼分頁：{st['written']} 商品 / {st['sku_rows']} SKU 列 → 1-1「{st['tab']}」")
     if result.get("excel_path"):
         click.echo(f"  蝦皮 Excel: {result['excel_path']}")
     click.echo("")
