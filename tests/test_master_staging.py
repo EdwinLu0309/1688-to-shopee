@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scraper.master_staging import (  # noqa: E402
     PREORDER_SAFETY_STOCK, PREORDER_TAG, PRODUCT_HEADERS, SKU_HEADERS,
-    MasterContext, build_blocks, is_preorder,
+    HeaderMismatch, MasterContext, build_blocks, is_preorder, verify_headers,
 )
 
 FAILED = []
@@ -81,11 +81,56 @@ def test_is_preorder():
     check("空白 → False", not is_preorder(""))
 
 
-def test_headers_match_live():
-    print("\n[2] 表頭欄數要對得上線上（商品表 21 / SKU表 17）")
+def test_headers_are_the_three_shop_contract():
+    print("\n[2] 表頭＝三家共通契約（商品表 A~U 21 欄 / SKU表 A~P 16 欄）")
     eq("商品表 21 欄", len(PRODUCT_HEADERS), 21)
-    eq("SKU表 17 欄", len(SKU_HEADERS), 17)
-    eq("SKU 最後一欄是 #S180 加的 Q", SKU_HEADERS[16], "單件重量(g)")
+    eq("SKU表 只到 P（16 欄）", len(SKU_HEADERS), 16)
+    eq("最後一欄是對應檢查", SKU_HEADERS[-1], "對應檢查")
+    check("⚠️ 不可含單件重量(g)——那是 Lady 專屬的 Q 欄，Nail Q 是到貨前庫存",
+          "單件重量(g)" not in SKU_HEADERS)
+
+
+class _FakeWS:
+    def __init__(self, hdr): self.hdr = hdr
+    def get(self, rng): return [self.hdr]
+
+
+class _FakeSH:
+    def __init__(self, prod, sku): self.m = {"商品表": _FakeWS(prod), "SKU表": _FakeWS(sku)}
+    def worksheet(self, t): return self.m[t]
+
+
+def test_header_mismatch_aborts():
+    print("\n[2b] 表頭不符一定要中止（貼錯欄不會報錯，是最貴的靜默錯）")
+    ok = _FakeSH(list(PRODUCT_HEADERS), list(SKU_HEADERS))
+    try:
+        verify_headers(ok, "lady"); check("契約相符 → 通過", True)
+    except HeaderMismatch as e:
+        check("契約相符 → 通過", False, str(e))
+
+    # 三家 Q 之後不同，但契約範圍相同 → 必須通過（這正是修這題的原因）
+    nail = _FakeSH(list(PRODUCT_HEADERS),
+                   list(SKU_HEADERS) + ["0824到貨前庫存", "AI建議訂購", "AI建議安全存量", "銷速來源"])
+    try:
+        verify_headers(nail, "nail"); check("Nail 多 4 欄仍通過（只驗 A~P）", True)
+    except HeaderMismatch as e:
+        check("Nail 多 4 欄仍通過（只驗 A~P）", False, str(e))
+
+    bad = _FakeSH(list(PRODUCT_HEADERS), ["品號", "品名", "分類", "標籤", "狀態", "進項成本",
+                                          "幣別", "安全存量", "裝箱數/訂貨倍數", "選項註記",
+                                          "1688網址", "1688規格一", "1688規格二", "備註",
+                                          "廠商", "❌被改掉的欄名"])
+    try:
+        verify_headers(bad, "nail"); check("契約被改動 → 必須拋錯", False, "竟然通過了")
+    except HeaderMismatch as e:
+        check("契約被改動 → 必須拋錯", True)
+        check("錯誤訊息要指出是哪一欄", "第16欄(P)" in str(e), str(e)[:120])
+
+    short = _FakeSH(list(PRODUCT_HEADERS), SKU_HEADERS[:10])
+    try:
+        verify_headers(short, "x"); check("欄數不足 → 必須拋錯", False)
+    except HeaderMismatch:
+        check("欄數不足 → 必須拋錯", True)
 
 
 def test_category_derivation():
@@ -193,7 +238,8 @@ if __name__ == "__main__":
     print("=" * 56)
     print("_待貼新品 產生器回歸測試")
     print("=" * 56)
-    for fn in (test_is_preorder, test_headers_match_live, test_category_derivation,
+    for fn in (test_is_preorder, test_headers_are_the_three_shop_contract,
+               test_header_mismatch_aborts, test_category_derivation,
                test_product_row_machine_filled, test_special_order_ratio_is_one_not_hundred,
                test_subcategory_from_list_wins, test_preorder_branch, test_formal_branch,
                test_sku_row_fields, test_new_color_gets_new_code,

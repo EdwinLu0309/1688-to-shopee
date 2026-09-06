@@ -11,7 +11,9 @@
 
 分頁版型（上下兩區塊，各自鏡射目標分頁欄序、都從 A 欄對齊）：
   上區塊 → 貼到「商品表」：一商品一列，欄序 A~U 與商品表相同。
-  下區塊 → 貼到「SKU表」：一規格一列，欄序 A~Q 與 SKU表相同。
+  下區塊 → 貼到「SKU表」：一規格一列，欄序 A~P 與 SKU表相同。
+  ⚠️ **只寫到 P**——Q 之後三家完全不同（Lady 重量／Nail 到貨前庫存／Baby AI建議），
+     寫死一份拿去跑別家會貼錯欄且不報錯。每次執行都先 `verify_headers` 驗契約，不符即中止。
   區塊右側外掛「(勿貼)」輔助欄：1688ID／名單編號／規格顯示，貼上時不要選進去。
 
 機器填（2026-08-28 起人工介入降到 0 欄）：
@@ -21,7 +23,8 @@
   直接寫值不用公式）／C 分類（依字母推導）／D 標籤（預購＝`#PO_Sale`，正式＝名單「標籤」欄）
   ／G 幣別／H 安全存量（預購＝200）／L·M 1688 規格一二（**原文逐字，絕不轉繁**）
 公式欄留白：商品表 F/H/I/R~U、SKU表 K/O/P 都是正表整欄陣列公式，貼上後自動長出。
-黃底＝**機器抓不到、要人補**（成本／廠商／重量；現行抓取器覆蓋率低，見 TODO V1.1）。
+黃底＝**機器抓不到、要人補**（成本／廠商；現行抓取器覆蓋率低，見 TODO V1.1）。
+SKU 單件重量不在契約範圍內，另由 `1688-order/order/weight_scraper.py` 補。
 
 ⚠️ `商品表 J 特殊訂貨%` 在正表是 PERCENT 格式（顯示 100%、實值 1）→ 這裡寫 1 並把該欄
    也設成 PERCENT，正常貼上與「僅貼上值」兩種貼法都不會跑掉。寫 100 會讓當期存量
@@ -39,21 +42,26 @@ from scraper.sku_code import UnsupportedShop, allocate, collect_existing
 
 STAGING_TAB = "_待貼新品"
 
-# 目標分頁表頭（2026-08-28 對線上逐欄比對：商品表 21 欄 A~U、SKU表 17 欄 A~Q）
+# 契約表頭：商品表 A~U（21 欄）、SKU表 A~P（16 欄）——2026-09-07 三家逐欄比對確認一致。
+# 三家 Q 之後各不相同（Lady 17 欄／Nail 20／Baby SKU 20·商品表 22），故產出只寫契約範圍。
 PRODUCT_HEADERS = ["商品編號", "分類", "子分類", "品名", "成本", "台幣成本", "蝦皮售價",
                    "蝦皮毛利率", "綜合毛利率", "特殊訂貨%", "廠商", "代表網址", "狀態",
                    "績效標記", "標籤", "備註", "款式關鍵字", "目標ROAS", "安全ROAS",
                    "變動毛利率", "廣告狀態"]
+# ⚠️ 只到 P（16 欄）＝三家共通的契約範圍。**Q 之後三家完全不同、一律不寫**：
+#    Lady Q=單件重量(g)｜Nail Q~T=0824到貨前庫存/AI建議訂購/AI建議安全存量/銷速來源
+#    ｜Baby Q~T=AI建議安全存量/差額/建議訂量/銷速來源
+#    寫死一份表頭拿去跑別家＝**貼錯欄且完全不報錯**，所以產出只寫 A~P。
 SKU_HEADERS = ["品號", "品名", "分類", "標籤", "狀態", "進項成本", "幣別", "安全存量",
                "裝箱數/訂貨倍數", "選項註記", "1688網址", "1688規格一", "1688規格二",
-               "備註", "廠商", "對應檢查", "單件重量(g)"]   # Q 為 #S180 新增，勿漏
+               "備註", "廠商", "對應檢查"]
 
 # 公式欄（貼上後由正表整欄陣列公式自動長出，這裡一律留白）
 PRODUCT_FORMULA_COLS = [5, 7, 8, 17, 18, 19, 20]   # F/H/I/R/S/T/U
 SKU_FORMULA_COLS = [10, 14, 15]                     # K/O/P
 # 機器抓不到就留空、要人補的欄（黃底提示）
 PRODUCT_TODO_COLS = [4, 10]                         # E 成本 / K 廠商
-SKU_TODO_COLS = [5, 16]                             # F 進項成本 / Q 單件重量
+SKU_TODO_COLS = [5]                                 # F 進項成本（Q 重量不在契約範圍內）
 
 PREORDER_TAG = "#PO_Sale"          # 預購專屬標籤（比照三家共用的 #CL_Sale）
 PREORDER_SAFETY_STOCK = "200"      # 預購品安全存量（蝦皮端庫存也開 200）
@@ -62,6 +70,38 @@ SPECIAL_ORDER_RATIO = 1            # J 特殊訂貨%：PERCENT 格式，實值 1
 YELLOW = {"red": 1.0, "green": 0.95, "blue": 0.6}
 GREY_TEXT = {"red": 0.55, "green": 0.55, "blue": 0.55}
 BLUE_HDR = {"red": 0.85, "green": 0.9, "blue": 0.97}
+
+
+class HeaderMismatch(Exception):
+    """線上表頭與程式假設的契約欄不符——**一定要中止，不可照寫**。
+
+    貼錯欄不會有任何錯誤訊息，只會把值寫進意義完全不同的欄位（例如把重量寫進
+    Nail 的「0824到貨前庫存」）。同「不報錯的錯」那一類，寧可中止也不要寫。
+    """
+
+
+def verify_headers(sh, shop: str) -> tuple[list[str], list[str]]:
+    """讀線上實際表頭，比對契約欄（商品表 A~U／SKU表 A~P）。不符就拋 HeaderMismatch。
+
+    回傳 (商品表實際表頭, SKU表實際表頭) 供呼叫端記錄；產出一律只寫契約範圍。
+    """
+    prod_hdr = sh.worksheet("商品表").get("A1:Z1")[0]
+    sku_hdr = sh.worksheet("SKU表").get("A1:Z1")[0]
+    for actual, want, tab in ((prod_hdr, PRODUCT_HEADERS, "商品表"),
+                              (sku_hdr, SKU_HEADERS, "SKU表")):
+        n = len(want)
+        got = [c.strip() for c in actual[:n]]
+        if got != want:
+            diff = [f"第{i+1}欄({chr(65+i)}) 線上「{g}」≠ 預期「{w}」"
+                    for i, (g, w) in enumerate(zip(got, want)) if g != w]
+            if len(got) < n:
+                diff.append(f"線上只有 {len(got)} 欄、契約需要 {n} 欄")
+            raise HeaderMismatch(
+                f"[{shop}] 「{tab}」表頭與契約不符，已中止（照寫會貼錯欄且不報錯）：\n  "
+                + "\n  ".join(diff[:6]))
+    logger.info(f"[{shop}] 表頭契約驗證通過（商品表 A~U／SKU表 A~P；"
+                f"線上實際 {len(prod_hdr)}／{len(sku_hdr)} 欄，Q 之後不碰）")
+    return prod_hdr, sku_hdr
 
 
 class StagingNotEmpty(Exception):
@@ -296,6 +336,9 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
             raise StagingNotEmpty(
                 f"「{STAGING_TAB}」還留著上一批（{len(vals)} 列）。先貼走/清空，或選擇覆蓋。")
 
+    # ⚠️ 先驗表頭契約再做事——不符就中止，寧可不寫也不要貼錯欄（貼錯不會報錯）
+    verify_headers(sh, shop)
+
     ctx = load_master_context(shop, sa_json)
     products, skus = build_blocks(shop, prepared, ctx)
     n_pre = sum(1 for s in skus if s["preorder"])
@@ -328,8 +371,10 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
 
     # ── 下區塊：SKU表 ──
     rows2: list[list[str]] = []
-    rows2.append([f"■ 下區塊 → 貼到「SKU表」最下方：選 A{b2_first}:Q{b2_last} 複製貼上；"
+    rows2.append([f"■ 下區塊 → 貼到「SKU表」最下方：選 A{b2_first}:P{b2_last} 複製貼上"
+                  "（只到 P！Q 之後是各賣場自己的欄位，不要選進去）；"
                   "K/O/P 是陣列公式會自動長出，貼完看 P 對應檢查該是 ✓"])
+
     rows2.append(SKU_HEADERS + ["1688ID(勿貼)", "規格顯示(勿貼)"])
     for s in skus:
         row = [""] * len(SKU_HEADERS)
