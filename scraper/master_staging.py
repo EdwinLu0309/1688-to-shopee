@@ -117,9 +117,18 @@ def _clean_url(item_id: str) -> str:
     return f"https://detail.1688.com/offer/{item_id}.html"
 
 
-def _code_letters(product_code: str) -> tuple[str, str]:
-    """`H-c2` → ('H', 'c')；解析不出回 ('','')。"""
-    m = re.match(r"\s*([A-Za-z])\s*-\s*([A-Za-z])", product_code or "")
+def _code_letters(product_code: str, shop: str = "lady") -> tuple[str, str]:
+    """商品編號 → (大分類字母, 子分類/品牌)。**三家格式不同，不可共用一條正則。**
+
+    Lady/Baby：`H-c2` → ('H', 'c')      有連字號，子分類是單一字母
+    Nail    ：`AAS1` → ('A', 'AS')      無連字號，中段是品牌字母（AS/VD/IL…）
+    解析不出回 ('','')——回空就讓分類推導留白，不亂猜。
+    """
+    s = (product_code or "").strip()
+    if str(shop).lower() == "nail":
+        m = re.fullmatch(r"([A-Za-z])([A-Za-z]+)(\d+)", s)
+        return (m.group(1).upper(), m.group(2).upper()) if m else ("", "")
+    m = re.match(r"\s*([A-Za-z])\s*-\s*([A-Za-z])", s)
     return (m.group(1).upper(), m.group(2).lower()) if m else ("", "")
 
 
@@ -131,7 +140,9 @@ class MasterContext:
     （實測 Lady：B/H/I/O/P 各對應唯一值）。所以不必要求人再填一次。
     """
 
-    def __init__(self, product_rows: list[list[str]], sku_rows: list[list[str]]):
+    def __init__(self, product_rows: list[list[str]], sku_rows: list[list[str]],
+                 shop: str = "lady"):
+        self.shop = shop
         self.sku_rows = sku_rows
         cat_by_letter: dict[str, Counter] = defaultdict(Counter)
         sub_by_pair: dict[tuple[str, str], Counter] = defaultdict(Counter)
@@ -139,7 +150,7 @@ class MasterContext:
 
         for r in product_rows:
             code = (r[0] if r else "").strip()
-            letter, sub = _code_letters(code)
+            letter, sub = _code_letters(code, shop)
             if not letter:
                 continue
             if len(r) > 1 and r[1].strip():
@@ -150,22 +161,28 @@ class MasterContext:
         for r in sku_rows:
             if len(r) < 3 or not r[1]:
                 continue
-            letter, _ = _code_letters(r[1].split("_")[0])
+            letter, _ = _code_letters(r[1].split("_")[0], shop)
             if letter and r[2].strip():
                 sku_cat_by_letter[letter][r[2].strip()] += 1
+
+        # Nail 生碼需要品牌碼/最大商品序/既有款式，一併從同一份資料建好
+        self.nail = None
+        if str(shop).lower() == "nail":
+            from scraper.sku_code_nail import NailContext
+            self.nail = NailContext.from_sku_rows(sku_rows)
 
         self.cat_of = {k: c.most_common(1)[0][0] for k, c in cat_by_letter.items()}
         self.subcat_of = {k: c.most_common(1)[0][0] for k, c in sub_by_pair.items()}
         self.sku_cat_of = {k: c.most_common(1)[0][0] for k, c in sku_cat_by_letter.items()}
 
     def product_category(self, code: str) -> str:
-        return self.cat_of.get(_code_letters(code)[0], "")
+        return self.cat_of.get(_code_letters(code, self.shop)[0], "")
 
     def product_subcategory(self, code: str) -> str:
-        return self.subcat_of.get(_code_letters(code), "")
+        return self.subcat_of.get(_code_letters(code, self.shop), "")
 
     def sku_category(self, code: str) -> str:
-        return self.sku_cat_of.get(_code_letters(code)[0], "")
+        return self.sku_cat_of.get(_code_letters(code, self.shop)[0], "")
 
 
 def _size_original_map(product_data: dict) -> dict[str, str]:
@@ -251,14 +268,21 @@ def build_blocks(shop: str, prepared: list[dict],
                 })
 
         # ── 配 SKU 品號（append-only：既有原文沿用舊碼、新原文才發新號）──
+        # ⚠️ 三家品號體系完全不同，依賣場分派到各自的生碼器，**絕不共用一套規則**
         existing = collect_existing(ctx.sku_rows, code)
+        spec_pairs = [(x["spec1"], x["spec2"]) for x in pairs]
         try:
-            alloc = allocate(shop, code, [(x["spec1"], x["spec2"]) for x in pairs], existing)
+            if str(shop).lower() == "nail":
+                from scraper.sku_code_nail import allocate as nail_allocate
+                alloc = nail_allocate(code, spec_pairs, existing, ctx.nail,
+                                      attach_to=str(cfg.get("attach_to", "")))
+            else:
+                alloc = allocate(shop, code, spec_pairs, existing)
             codes = [a.sku_code for a in alloc.allocations]
         except UnsupportedShop as e:
             logger.warning(f"[{code}] {e} → 品號欄留空給人補")
             codes = [""] * len(pairs)
-        except Exception as e:                    # 編號格式錯之類，別讓整批掛掉
+        except Exception as e:                    # 編號格式錯／未知品牌／歸屬查無，別讓整批掛掉
             logger.warning(f"[{code}] 品號生成失敗（{e}）→ 品號欄留空給人補")
             codes = [""] * len(pairs)
 
@@ -307,7 +331,7 @@ def load_master_context(shop: str, sa_json: str | Path | None = None) -> MasterC
     product_rows = sh.worksheet("商品表").get("A2:C5000")
     sku_rows = sh.worksheet("SKU表").get("A2:M8000")
     logger.info(f"[{shop}] 讀既有 1-1：商品表 {len(product_rows)} 列 / SKU表 {len(sku_rows)} 列")
-    return MasterContext(product_rows, sku_rows)
+    return MasterContext(product_rows, sku_rows, shop)
 
 
 def write_staging(shop: str, prepared: list[dict], force: bool = False,
