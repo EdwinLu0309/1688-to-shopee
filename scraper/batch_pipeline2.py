@@ -217,7 +217,9 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady") -> dict | 
         "variants": variants,
         "config": {
             "category": str(entry.get("category", "")),
-            "selling_price": entry.get("price", 99),
+            "selling_price": entry.get("price", 99),      # 掛牌價 → 蝦皮 Excel M 欄
+            # 實際成交價（折後）→ 1-1 商品表 G；沒填就退回掛牌價並在 staging 警告
+            "final_price": entry.get("final_price") or 0,
             "stock_per_option": entry.get("stock", 10),
             "weight": entry.get("weight", 0.1),
             "code": code,

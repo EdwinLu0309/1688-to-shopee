@@ -236,7 +236,17 @@ def build_blocks(shop: str, prepared: list[dict],
                   or ctx.product_subcategory(code))
         row[3] = short_name                                  # D 品名
         row[4] = str(price_cny) if price_cny > 0 else ""     # E 成本（抓得到才填）
-        row[6] = str(cfg.get("selling_price") or "")         # G 蝦皮售價（名單）
+        # G 蝦皮售價 ＝ **實際成交價（折後）**，不是掛牌價。
+        # ⚠️ 這欄餵給 H 蝦皮毛利率 → I 綜合毛利率 → R 目標ROAS / S 安全ROAS。
+        #    填掛牌價會讓毛利率虛高（實例：掛牌690/折後345/成本120 → 65% 虛報成 83%），
+        #    安全線被算低 → 廣告會被判成「還有空間」而多花錢。
+        final = cfg.get("final_price") or 0
+        if not final:
+            final = cfg.get("selling_price") or ""
+            if final:
+                logger.warning(f"[{code}] 名單沒填「最後定價」→ 暫用掛牌價 {final} 當 G 蝦皮售價，"
+                               "毛利率會偏高，貼進 1-1 前請先補實際成交價")
+        row[6] = str(final)
         row[9] = SPECIAL_ORDER_RATIO                         # J 特殊訂貨% = 100%
         row[10] = str(pd.get("shop_name") or "")             # K 廠商（抓得到才填）
         row[11] = _clean_url(item_id)                        # L 代表網址（正規化）

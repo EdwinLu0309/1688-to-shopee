@@ -50,7 +50,7 @@ _NODEFAULT = object()
 
 
 def _prepared(code, demand="", tag="", subcat="", price=399, colors=None,
-              sizes=_NODEFAULT, cost=12.5, supplier="某某廠"):
+              sizes=_NODEFAULT, cost=12.5, supplier="某某廠", final_price=0):
     """組一筆 batch_pipeline2 的 prepared。sizes=[] 代表單軸商品（沒有第二軸）。"""
     if colors is None:
         colors = [{"color": "杏色", "src_1688": "067-杏色"}]
@@ -67,7 +67,8 @@ def _prepared(code, demand="", tag="", subcat="", price=399, colors=None,
                          "title": "原始標題"},
         "ai_content": {"product_short_name": "蝴蝶結素色三角褲"},
         "variants": variants,
-        "config": {"selling_price": price, "demand": demand, "tag": tag,
+        "config": {"selling_price": price, "final_price": final_price,
+                   "demand": demand, "tag": tag,
                    "subcategory": subcat, "code": code},
         "_meta": {"code": code, "item_id": "953732723854"},
     }
@@ -161,6 +162,19 @@ def test_product_row_machine_filled():
         eq(f"公式欄留白：{name}", r[idx], "")
 
 
+def test_selling_price_uses_final_not_list_price():
+    print("\n[4b] ⚠️ G 蝦皮售價要用「實際成交價」，不是掛牌價")
+    # 掛牌 690、折後 345、成本 120 → 用錯的話毛利率 65% 會虛報成 83%
+    products, _ = build_blocks("lady", [_prepared("H-c2", price=690, final_price=345)], CTX)
+    eq("G 用最後定價 345", products[0][6], "345")
+    check("絕不是掛牌價 690", products[0][6] != "690")
+
+    # 沒填最後定價 → 退回掛牌價（並在 log 警告），不可整列空白
+    products2, _ = build_blocks("lady", [_prepared("H-c2", price=690)], CTX)
+    eq("沒填就退回掛牌價（有警告）", products2[0][6], "690")
+    check("不可留空——空白會讓 1-1 的毛利率整欄算不出來", products2[0][6] != "")
+
+
 def test_special_order_ratio_is_one_not_hundred():
     print("\n[5] ⚠️ J 特殊訂貨% 必須是 1（PERCENT 格式），寫 100 會膨脹 100 倍")
     products, _ = build_blocks("lady", [_prepared("H-c2")], CTX)
@@ -240,7 +254,9 @@ if __name__ == "__main__":
     print("=" * 56)
     for fn in (test_is_preorder, test_headers_are_the_three_shop_contract,
                test_header_mismatch_aborts, test_category_derivation,
-               test_product_row_machine_filled, test_special_order_ratio_is_one_not_hundred,
+               test_product_row_machine_filled,
+               test_selling_price_uses_final_not_list_price,
+               test_special_order_ratio_is_one_not_hundred,
                test_subcategory_from_list_wins, test_preorder_branch, test_formal_branch,
                test_sku_row_fields, test_new_color_gets_new_code,
                test_unsupported_shop_leaves_blank_not_wrong_code,

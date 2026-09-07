@@ -53,11 +53,21 @@ _HEADER_ALIASES = {
     "tag": ["標籤", "标签"],
     # 「歸屬」：填既有商品編號 → 新品掛進那個商品序（Nail 用；空白＝開新號）
     "attach_to": ["歸屬", "归属", "歸屬商品", "掛在"],
-    "style": ["款式"],
+    # 「選項說明」＝白話寫要進哪些選項（合併原本的款式＋尺寸，2026-09-08）。
+    # 它會被當成 style_note 餵給 Claude（prompt 已有「Edwin 指定這支要哪些款式」），
+    # 所以可以寫「只要底膠和封層」「1~30色」「不要粉色系」這種人話。
+    # ⚠️ 舊名保留向後相容，Lady/Baby 的表還沒改。
+    "style": ["選項說明", "款式"],
     "sizes": ["尺寸", "尺碼", "尺码"],
     "demand": ["訂貨需求", "订货需求"],
     "supplier": ["廠商", "厂商", "廠商名稱", "厂商名称"],
+    # ⚠️ 兩個價格用途不同，不可混用（2026-09-08 Edwin 釐清）：
+    #   price      ＝蝦皮「掛牌價」→ 填進上架 Excel 的 M 價格欄
+    #   final_price＝實際成交價（折後）→ 填進 1-1 商品表 G，毛利率/安全ROAS 靠它
+    # 混用的代價：掛牌 690 折後 345、成本 120 → 毛利率會從 65% 虛報成 83%，
+    # 而 R 目標ROAS/S 安全ROAS 都由它推導 → 廣告安全線被算低、會多花錢。
     "price": ["蝦皮設定售價", "蝦皮设定售价", "售價", "售价", "蝦皮售價", "蝦皮售价"],
+    "final_price": ["最後定價", "最后定价", "實際售價", "成交價"],
 }
 
 
@@ -94,6 +104,12 @@ def _build_colmap(header: list[str]) -> dict[str, int]:
 
 def _cell(row: list[str], idx: int | None) -> str:
     return row[idx].strip() if idx is not None and idx < len(row) else ""
+
+
+def _num_cell(row: list[str], idx: int | None) -> int:
+    """取純數字欄（沒有／不是數字回 0）。"""
+    raw = _cell(row, idx).replace(",", "").replace("$", "").strip()
+    return int(float(raw)) if re.fullmatch(r"\d+(\.\d+)?", raw) else 0
 
 
 def _price_from_row(row: list[str], colmap: dict[str, int]) -> int:
@@ -141,6 +157,8 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
         iid = _item_id(url)
         code = _cell(r, colmap.get("code"))
         name = _cell(r, colmap.get("name"))
+        if code.startswith("※"):          # 第 3 列的填寫說明，不是資料
+            continue
         if not iid or not code:
             if name or url:
                 logger.warning(f"跳過「{name[:20]}」：缺 1688 網址或編號（url={url[:40]}）")
@@ -166,6 +184,7 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
             "item_id": iid,
             "code": code,
             "price": price,
+            "final_price": _num_cell(r, colmap.get("final_price")),  # → 1-1 商品表 G
             "stock": stock_default,
             "category": cat_id,
             "style_filter": style,       # 「三色長褲」等 → batch 端配合色卡挑
