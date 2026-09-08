@@ -429,15 +429,14 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
 
     # ── 上區塊：商品表 ──
     rows1: list[list[str]] = []
-    # ⚠️⚠️ **絕不可叫人整塊 A~U 貼**（2026-09-09 Edwin 差點照做）：
-    #    商品表的 F/H/I/R/S/T/U/V/W 是**錨在第 2 列的整欄陣列公式**，往下都是溢出格。
-    #    往溢出格貼任何東西（含空白）→ 整欄 #REF!，而且是一次死一整欄。
-    #    所以說明只能給「跳過公式欄」的分段範圍。
-    rows1.append([f"■ 上區塊 → 貼到「商品表」最下方（綠底欄才貼）。**不要整塊 A:U 貼**——"
-                  f"F/H/I/R~U 是整欄陣列公式，貼進去會整欄 #REF!。"
-                  f"分四次：A{b1_first}:E{b1_last} → 商品表 A欄｜"
-                  f"G{b1_first}:G{b1_last} → G欄｜J{b1_first}:J{b1_last} → J欄｜"
-                  f"L{b1_first}:L{b1_last} → L欄。（勿貼）欄不要選進去"])
+    # ⚠️⚠️ **絕不可叫人整塊 A~U 貼**（2026-09-09）：商品表 F/H/I/R~U/V/W 與
+    #    SKU表 K/O/P 是**錨在第 2 列的整欄陣列公式**，往下都是溢出格 —— 貼任何東西
+    #    （含空白）進去就整欄 #REF!。用底色表達「哪些能貼」，不列一堆範圍
+    #    （Edwin 2026-09-09：範圍太瑣碎記不住，看顏色就好）。
+    rows1.append([f"■ 上區塊 → 貼到「商品表」最下方（欄序與商品表 A~U 完全一致）。"
+                  f"**綠底欄＝直接貼；黃底欄＝不要貼**"
+                  f"（黃底不是公式就是要人補，貼進去會把整欄陣列公式打成 #REF!）。"
+                  f"資料在第 {b1_first}~{b1_last} 列"])
     rows1.append(PRODUCT_HEADERS + ["1688ID(勿貼)", "名單編號(參考,勿貼)"])
     for i, row in enumerate(products):
         meta = prepared[i].get("_meta", {})
@@ -445,12 +444,9 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
 
     # ── 下區塊：SKU表 ──
     rows2: list[list[str]] = []
-    # 同上：SKU表 K/O/P 也是錨在第 2 列的陣列公式（BYROW / ARRAYFORMULA）
-    rows2.append([f"■ 下區塊 → 貼到「SKU表」最下方（綠底欄才貼）。**不要整塊 A:P 貼**——"
-                  f"K/O/P 是整欄陣列公式，貼進去會整欄 #REF!。"
-                  f"分三次：A{b2_first}:D{b2_last} → SKU表 A欄｜"
-                  f"F{b2_first}:H{b2_last} → F欄｜L{b2_first}:M{b2_last} → L欄。"
-                  f"Q 之後是各賣場自己的欄位，不要碰。貼完看 P 對應檢查該是 ✓"])
+    rows2.append([f"■ 下區塊 → 貼到「SKU表」最下方（欄序與 SKU表 A~P 完全一致）。"
+                  f"**綠底欄＝直接貼；黃底欄＝不要貼**。"
+                  f"資料在第 {b2_first}~{b2_last} 列；貼完看 P 對應檢查該是 ✓"])
 
     rows2.append(SKU_HEADERS + ["1688ID(勿貼)", "規格顯示(勿貼)"])
     for s in skus:

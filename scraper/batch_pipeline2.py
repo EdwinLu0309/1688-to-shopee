@@ -221,6 +221,19 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
     variants = build_variants(code, short_name, color_map,
                               selected_colors, size_labels, selected_sizes)
 
+    # ⚠️⚠️ 第二軸漏掉的守門員（Edwin 2026-09-09 指出）：我們的第二軸只認商品屬性表的
+    #    「尺码」那一列。頁面若是「色票 × 功率／型號／套餐」這種第二個下拉選單，
+    #    第二軸會整個漏掉 → SKU表 M 規格二 空著 → 下單時 cart_adder 只點第一層，
+    #    **訂到錯的規格而且不報錯**（同「缺貨被誤標成規格不符」那種假訊號）。
+    #    抓取器現在會回 axis_labels，頁面明明有兩軸而我們只有一軸就大聲喊。
+    _axes = [a for a in (product_data.get("axis_labels") or []) if a]
+    if len(_axes) >= 2 and not variants.get("規格2_尺碼"):
+        logger.warning(
+            f"[{code}] ⚠️ 1688 頁面有 {len(_axes)} 軸規格（{'／'.join(_axes)}），"
+            f"但我們只抓到第一軸 → SKU表 M 規格二 會是空的。"
+            f"**下單時只會點第一層，可能訂到錯的規格且不會報錯**——"
+            f"貼進 1-1 前請自行確認 M 欄，或先別讓這支走自動訂貨")
+
     sku_count = variants.get("sku_count", 0)
     n_base = len({base_color_of(color_map, k) for k in selected_colors})
     logger.info(f"[{code}] 留 {n_base} 底色（{len(selected_colors)} 個第一軸選項含身高款）"

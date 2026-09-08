@@ -120,6 +120,40 @@ EXTRACT_JS = r"""() => {
     }
   }
 
+  // ── 賣家公司全名 → 商品表 K 廠商 ──────────────────────────────
+  // ⚠️ 這欄**沒有任何公式生得出來**（SKU表 O 廠商才是公式，它 XLOOKUP 回商品表 K），
+  //    而它是進貨金額對帳的唯一 join key（改個名整列就對不到）。
+  //    選擇器與判斷式沿用 1688-order/order/master_audit.py 的同一套（已在三賣場驗過）。
+  let shop_name = "";
+  {
+    const el = document.querySelector("[class*=company-name]");
+    if (el) shop_name = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (!shop_name) {
+      const body = document.body ? document.body.innerText : "";
+      const first = body.split("\n").map(s => s.trim()).filter(Boolean)[0] || "";
+      if (/(有限公司|经营部|商行|商贸|工厂|厂|店)$/.test(first)) shop_name = first;
+    }
+  }
+
+  // ── 規格有幾軸 → 給下游判「第二軸是不是被漏掉了」──────────────
+  // ⚠️ 我們的第二軸**只認商品屬性表裡的「尺码」那一列**。頁面若是
+  //    「色票 × 功率／型號／套餐」這種第二個下拉選單，第二軸會整個漏掉 →
+  //    SKU表 M 規格二 空著 → 下單時 cart_adder 只點第一層、**訂到錯的規格且不報錯**。
+  //    抓不到就算了，但一定要讓下游知道「這頁其實有兩軸」。
+  const axis_labels = [];
+  {
+    const sel = document.querySelector(".module-od-sku-selection") || document.body;
+    const seen = new Set();
+    sel.querySelectorAll("*").forEach(e => {
+      if (e.children.length === 0) {
+        const s = (e.textContent || "").trim();
+        if (s && s.length <= 6 &&
+            /^(颜色|颜色分类|规格|尺码|尺寸|型号|款式|类型|套餐|版本|功率|容量|口味)$/.test(s)
+            && !seen.has(s)) { seen.add(s); axis_labels.push(s); }
+      }
+    });
+  }
+
   // 賣家為國內運費填的「長/寬/高/體積/重量(g)」表 → 上架 Excel 的重量欄。
   // ⚠️ 抓不到就留空、由 Python 端大聲 warning，**不可退回寫死的 0.1kg**：
   //    假重量會讓蝦皮運費與獲利表的結構版國際運費一起算錯，而且看起來像真的。
@@ -136,10 +170,10 @@ EXTRACT_JS = r"""() => {
   }
 
   return {
-    weight_tables,
+    weight_tables, axis_labels,
     item_id:itemId,
     title:(document.title||"").replace(/ - 阿里巴巴$/,"").trim(),
-    description:"", categories:[], shop_name:"", shop_url:"", shop_location:"",
+    description:"", categories:[], shop_name, shop_url:"", shop_location:"",
     shop_ratings:{}, min_order:0, origin_price:price_cny, price_ranges:[],
     attributes, main_images:main, detail_images:uniq(detail),
     video_url:(function(){var v=document.querySelector("video");return v&&v.src?v.src:"";})(),
