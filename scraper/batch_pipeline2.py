@@ -417,6 +417,21 @@ def run_batch_two_tier(
 
     if output_path is None:
         output_path = Path(OUTPUT_DIR) / sp.excel_name   # per-shop 檔名，多賣場不互相覆蓋
+    # ⚠️ 順序：**先配號再產 Excel**。Excel 的 O 商品選項貨號要填 SKU 品號，
+    #    而品號是建檔那一步配的（讀 1-1、append-only）。舊版是 Excel 先產、建檔後跑
+    #    → O 欄只能填 `HNV7_美規`，而獲利表是拿「蝦皮選項貨號 ＝ SKU 品號」去 join
+    #    進貨成本與銷量的 → 這批商品的生意在獲利表裡會是黑的。
+    staging_plan = None
+    if make_staging:
+        from scraper.master_staging import option_sku_maps, plan_blocks
+        logger.info("先讀 1-1 配 SKU 品號（不寫入），讓 Excel 與待貼分頁用同一份號碼")
+        staging_plan = plan_blocks(shop, prepared)
+        maps = option_sku_maps(staging_plan[2])
+        for i, p_ in enumerate(prepared):
+            p_.setdefault("config", {})["option_sku_map"] = maps.get(i, {})
+        n = sum(len(v) for v in maps.values())
+        logger.info(f"配到 {n} 個 SKU 品號")
+
     generate_batch_two_tier_excel(prepared, Path(output_path), tpl)
 
     staging_result = None

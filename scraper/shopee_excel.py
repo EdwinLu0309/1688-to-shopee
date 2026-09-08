@@ -393,8 +393,19 @@ def build_two_tier_rows(
             #   靜默不進（故一度改留空）。此值 per-SKU 唯一且含中文，屬同一風險模式——
             #   Edwin 要求填此格式，務必先測 1~2 筆確認資料真的有進，再全批。
             size_code = s.get("size", "")
-            row[COL["option_sku"]] = (
-                f"{code}_{color_clean}_{size_code}" if size_code else f"{code}_{color_clean}")
+            # ⚠️ O 商品選項貨號 **必須是 SKU 品號**（AA0030016010000 那種）：
+            #    獲利表拿「蝦皮選項貨號 ＝ SKU 品號」join 進貨成本與銷量（model_sku_map），
+            #    填 `HNV7_美規` 這種的話，這批商品的生意在獲利表裡會是黑的。
+            #    品號由 master_staging.plan_blocks 配（讀 1-1、append-only），
+            #    經 config["option_sku_map"] 帶進來；沒跑建檔時退回舊格式並警告。
+            osku = (config.get("option_sku_map") or {}).get((c.get("src_1688", ""), size_code))
+            if not osku:
+                osku = f"{code}_{color_clean}_{size_code}" if size_code else f"{code}_{color_clean}"
+                if not config.get("_osku_warned"):
+                    logger.warning(f"[{code}] 沒有 SKU 品號 → O 商品選項貨號退回「{osku}」。"
+                                   "獲利表會對不到這批的成本與銷量，正式上傳前請跑建檔（--staging）")
+                    config["_osku_warned"] = True
+            row[COL["option_sku"]] = osku
 
             # ── 以下「每一行都填」（Edwin 要求：規格圖同色同一張、商品圖/物流每行都一樣，不要跳填）──
             # 規格圖片：同一顏色用同一張

@@ -265,6 +265,9 @@ def build_blocks(shop: str, prepared: list[dict],
                 for t2 in tier2:
                     orig_size = size_map.get(str(t2["size"]).upper(), t2["size"])
                     pairs.append({
+                        # key ＝ 直接取自同一份 variants 的兩個欄位 → 與 shopee_excel
+                        # 用的 (c["src_1688"], s["size"]) 逐字相同，不靠順序對應
+                        "key": (str(t1.get("src_1688", "")), str(t2.get("size", ""))),
                         "spec1": str(t1.get("src_1688", "")), "spec2": orig_size,
                         "display": f"{t1.get('color', '')}_{t2['size']}",
                         "price": _sku_price(pd, orig_size),
@@ -272,6 +275,7 @@ def build_blocks(shop: str, prepared: list[dict],
         else:
             for t1 in tier1:
                 pairs.append({
+                    "key": (str(t1.get("src_1688", "")), ""),
                     "spec1": str(t1.get("src_1688", "")), "spec2": "",
                     "display": str(t1.get("color", "")),
                     "price": str(price_cny) if price_cny > 0 else "",
@@ -284,8 +288,9 @@ def build_blocks(shop: str, prepared: list[dict],
         try:
             if str(shop).lower() == "nail":
                 from scraper.sku_code_nail import allocate as nail_allocate
-                alloc = nail_allocate(code, spec_pairs, existing, ctx.nail,
-                                      attach_to=str(cfg.get("attach_to", "")))
+                # 商品序由「商品編號存不存在」決定（新編號開新序／既有編號接款式），
+                # 不再有 attach_to——見 sku_code_nail 檔頭
+                alloc = nail_allocate(code, spec_pairs, existing, ctx.nail)
             else:
                 alloc = allocate(shop, code, spec_pairs, existing)
             codes = [a.sku_code for a in alloc.allocations]
@@ -298,7 +303,7 @@ def build_blocks(shop: str, prepared: list[dict],
 
         for k, x in enumerate(pairs):
             skus.append({
-                "owner_idx": idx, "item_id": item_id, "code": code,
+                "owner_idx": idx, "item_id": item_id, "code": code, "key": x["key"],
                 "sku_code": codes[k] if k < len(codes) else "",
                 "category": sku_cat, "tag": tag, "preorder": preorder,
                 "spec1": x["spec1"], "spec2": x["spec2"],
@@ -306,6 +311,31 @@ def build_blocks(shop: str, prepared: list[dict],
                 "name": f"{code}_{short_name}_{x['display'].replace('_', ',')}",
             })
     return products, skus
+
+
+def plan_blocks(shop: str, prepared: list[dict], sa_json: str | Path | None = None):
+    """只讀 1-1、配好品號，**不寫任何東西**。回 (ctx, products, skus)。
+
+    給兩個用途共用同一份配號結果：
+    ① 上架 Excel 的 `O 商品選項貨號` —— 必須填 SKU 品號，獲利表是拿
+       「蝦皮選項貨號 ＝ SKU 品號」去 join 進貨成本與銷量的（`model_sku_map`）。
+       填 `HNV7_美規` 那種的話，這批商品的生意在獲利表裡會是黑的。
+    ② 寫進 _待貼新品 分頁的 SKU 表 A 品號。
+    **兩邊必須是同一次配號的結果**——各配一次雖然是純函式、結果相同，但只要
+    中間有人動了 1-1，兩邊就會不一致，而且不會有任何錯誤訊息。
+    """
+    ctx = load_master_context(shop, sa_json)
+    products, skus = build_blocks(shop, prepared, ctx)
+    return ctx, products, skus
+
+
+def option_sku_maps(skus: list[dict]) -> dict[int, dict[tuple[str, str], str]]:
+    """plan_blocks 的 skus → {prepared 的 index: {(src_1688, size): 品號}}。"""
+    out: dict[int, dict[tuple[str, str], str]] = {}
+    for s in skus:
+        if s.get("sku_code"):
+            out.setdefault(s["owner_idx"], {})[s["key"]] = s["sku_code"]
+    return out
 
 
 def _open_master(shop: str, sa_json):
@@ -445,7 +475,6 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
     for j, s in enumerate(skus):
         if not str(s["price"]).strip():
             todo.append(a1(SKU_TODO_COLS[0], b2_first + j))
-        todo.append(a1(SKU_TODO_COLS[1], b2_first + j))       # Q 重量目前一律待補
     if todo:
         fmt.append((todo, {"backgroundColor": YELLOW}))
 

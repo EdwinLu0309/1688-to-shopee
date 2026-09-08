@@ -47,6 +47,12 @@ ROWS = [[c, n] + [""] * 11 for c, n in REAL]
 CTX = NailContext.from_sku_rows(ROWS)
 
 
+def fresh():
+    """每個會配號的測試都要拿乾淨的 ctx —— allocate 會把配過的號登記回 ctx
+    （批次防撞號用），共用一份的話測試之間會互相污染。"""
+    return NailContext.from_sku_rows(ROWS)
+
+
 def test_parse():
     print("\n[1] Nail 商品編號解析（無連字號，與 Lady 不同）")
     pc = parse_product_code("AAS1")
@@ -91,7 +97,7 @@ def test_unknown_brand_raises():
 
 def test_new_product_gets_max_plus_one():
     print("\n[5] 新品：商品序 = 該品牌最大 + 1（不補中間空號）")
-    res = allocate("AAS20", [("色號01", ""), ("色號02", ""), ("色號03", "")], [], CTX)
+    res = allocate("AAS20", [("色號01", ""), ("色號02", ""), ("色號03", "")], [], fresh())
     eq("商品序 = 3+1 = 4", res.item_seq, 4)
     eq("款式從 01 起", res.style_seq, 1)
     check("是新開商品序", res.new_item)
@@ -104,13 +110,13 @@ def test_new_product_gets_max_plus_one():
 
 def test_no_spec_product_gets_color_0000():
     print("\n[6] 完全沒有規格的商品 → 顏色序 0000")
-    res = allocate("AAS20", [("", "")], [], CTX)
+    res = allocate("AAS20", [("", "")], [], fresh())
     eq("顏色 0000", res.allocations[0].sku_code, "AA0060004010000")
 
 
 def test_existing_code_continues_style():
     print("\n[7] 既有編號 → 沿用它的商品序，款式接在現有最大之後")
-    res = allocate("AAS1", [("皮草封層", "")], [], CTX)
+    res = allocate("AAS1", [("皮草封層", "")], [], fresh())
     eq("商品序沿用 AAS1 的 0001", res.item_seq, 1)
     eq("款式 = 既有最大4 + 1 = 5", res.style_seq, 5)
     check("不是新開商品序", not res.new_item)
@@ -121,7 +127,7 @@ def test_existing_code_continues_style():
 
 def test_new_code_never_lands_on_existing_item():
     print("\n[8] ⚠️ 新編號一定開新商品序，不可掉進既有編號的號段")
-    res = allocate("AAS99", [("x", "")], [], CTX)
+    res = allocate("AAS99", [("x", "")], [], fresh())
     check("是新開", res.new_item)
     eq("商品序 = 最大3 + 1", res.item_seq, 4)
     eq("款式從 01 起", res.style_seq, 1)
@@ -134,7 +140,7 @@ def test_append_only_reuse():
     print("\n[9] append-only：既有規格原文沿用舊碼、新原文才發新號")
     ex = [ExistingRow("AA0060004010001", "AAS20_x_色號01", "色號01", ""),
           ExistingRow("AA0060004010002", "AAS20_x_色號02", "色號02", "")]
-    res = allocate("AAS20", [("色號01", ""), ("色號09", "")], ex, CTX)
+    res = allocate("AAS20", [("色號01", ""), ("色號09", "")], ex, fresh())
     eq("既有沿用", res.allocations[0].sku_code, "AA0060004010001")
     eq("新原文拿 0003（最大+1，不補空號）", res.allocations[1].sku_code,
        "AA0060004010003")
@@ -144,7 +150,7 @@ def test_append_only_reuse():
 def test_color_pads_to_four():
     print("\n[10] ⚠️ 顏色序一律補到 4 碼（既有 55 列 5 碼的已由 Edwin 刪除）")
     specs = [(f"色號{i:02d}", "") for i in range(1, 13)]
-    res = allocate("AAS20", specs, [], CTX)
+    res = allocate("AAS20", specs, [], fresh())
     codes = [a.sku_code for a in res.allocations]
     eq("全部 15 碼", {len(c) for c in codes}, {15})
     eq("第 10 個顏色是 0010 不是 00010", codes[9][-4:], "0010")
@@ -154,10 +160,34 @@ def test_color_pads_to_four():
 def test_spec_matched_by_original_text():
     print("\n[11] 比對鍵是 1688 原文（簡體），不是我們取的繁體名")
     ex = [ExistingRow("AA0060004010001", "AAS20_x_黑", "黑色", "")]
-    r1 = allocate("AAS20", [("黑色", "")], ex, CTX)
+    r1 = allocate("AAS20", [("黑色", "")], ex, fresh())
     eq("原文相同 → 沿用", r1.allocations[0].sku_code, "AA0060004010001")
-    r2 = allocate("AAS20", [("黑", "")], ex, CTX)
+    r2 = allocate("AAS20", [("黑", "")], ex, fresh())
     check("原文不同 → 發新號（證明比對的是原文）", r2.created == 1)
+
+
+def test_batch_does_not_collide():
+    print("\n[12] ⚠️⚠️ 同一批連配多支新編號：號碼必須各不相同（實際撞過）")
+    ctx = NailContext.from_sku_rows(ROWS)
+    got = {}
+    for code in ("AAS90", "AAS91", "AAS92", "AAS93"):
+        res = allocate(code, [("x", "")], [], ctx)
+        got[code] = (res.item_seq, res.allocations[0].sku_code)
+    eq("商品序連續遞增", [v[0] for v in got.values()], [4, 5, 6, 7])
+    codes = [v[1] for v in got.values()]
+    eq("四個品號互不相同", len(set(codes)), 4)
+    check("也不與既有品號相同", not (set(codes) & {c for c, _ in REAL}))
+    print("     ", " ".join(codes))
+
+
+def test_same_code_twice_reuses_item_seq():
+    print("\n[13] 同一批出現同一個編號兩次 → 沿用同一個商品序、款式接續")
+    ctx = NailContext.from_sku_rows(ROWS)
+    a = allocate("AAS90", [("x", "")], [], ctx)
+    b = allocate("AAS90", [("y", "")], [], ctx)
+    eq("商品序相同", (a.item_seq, b.item_seq), (4, 4))
+    eq("款式接續 01 → 02", (a.style_seq, b.style_seq), (1, 2))
+    check("品號不同", a.allocations[0].sku_code != b.allocations[0].sku_code)
 
 
 if __name__ == "__main__":
@@ -168,7 +198,8 @@ if __name__ == "__main__":
                test_unknown_brand_raises, test_new_product_gets_max_plus_one,
                test_no_spec_product_gets_color_0000, test_existing_code_continues_style,
                test_new_code_never_lands_on_existing_item, test_append_only_reuse,
-               test_color_pads_to_four, test_spec_matched_by_original_text):
+               test_color_pads_to_four, test_spec_matched_by_original_text,
+               test_batch_does_not_collide, test_same_code_twice_reuses_item_seq):
         fn()
     print("\n" + "=" * 56)
     if FAILED:

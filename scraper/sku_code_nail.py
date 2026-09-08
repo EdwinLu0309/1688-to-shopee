@@ -234,6 +234,16 @@ def allocate(product_code: str, specs: list[tuple[str, str]],
         res.allocations.append(NailAllocation(s1, s2, code, False))
         res.created += 1
 
+    # ⚠️⚠️ **配完要把結果登記回 ctx，否則同一批的下一支會拿到同一個號**
+    #    （2026-09-09 實測：一批 26 支裡 HNV7~HNV12 六支全部配到 AH0030016010001）。
+    #    ctx 是批次開頭讀一次 1-1 建的，不登記的話 max_item_seq 永遠停在原值，
+    #    每支新編號都算出同一個 max+1 —— 而撞號**不會有任何錯誤訊息**，
+    #    只會讓兩支不同商品共用一個品號，蝦皮訂單／ERP／獲利表全部串到錯的商品上。
+    ctx.item_seq_of_code.setdefault(product_code.strip(), item)
+    k = (pc.cat, bcode)
+    ctx.max_item_seq[k] = max(ctx.max_item_seq.get(k, 0), item)
+    ctx.styles_of.setdefault((pc.cat, bcode, item), set()).add(style)
+
     logger.info(f"[{product_code}] Nail 配號：品牌{bcode} 商品序{item:04d} 款式{style:02d}"
                 f"（{'新編號→新商品序' if new_item else '既有編號→接款式'}）"
                 f"｜沿用 {res.reused} / 新發 {res.created}")
