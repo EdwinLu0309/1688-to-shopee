@@ -304,6 +304,10 @@ def build_blocks(shop: str, prepared: list[dict],
         for k, x in enumerate(pairs):
             skus.append({
                 "owner_idx": idx, "item_id": item_id, "code": code, "key": x["key"],
+                # H 安全存量：正式品用名單的「安全存量」，預購品統一 200。
+                # ⚠️ 不填的話 `訂貨表 M 訂貨量試算 = H − K` 算不出缺口 →
+                #    這些新 SKU 補貨時永遠不會被抓出來，而且不會有任何提示。
+                "safety_stock": "" if preorder else str(cfg.get("stock_per_option") or ""),
                 "sku_code": codes[k] if k < len(codes) else "",
                 "category": sku_cat, "tag": tag, "preorder": preorder,
                 "spec1": x["spec1"], "spec2": x["spec2"],
@@ -425,9 +429,15 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
 
     # ── 上區塊：商品表 ──
     rows1: list[list[str]] = []
-    rows1.append([f"■ 上區塊 → 貼到「商品表」最下方（選 A{b1_first}:U{b1_last} 整塊複製貼上；"
-                  "黃底＝機器抓不到、要你補；F/H/I/R~U 是陣列公式貼上後自動長出；"
-                  "(勿貼) 欄不要選進去）"])
+    # ⚠️⚠️ **絕不可叫人整塊 A~U 貼**（2026-09-09 Edwin 差點照做）：
+    #    商品表的 F/H/I/R/S/T/U/V/W 是**錨在第 2 列的整欄陣列公式**，往下都是溢出格。
+    #    往溢出格貼任何東西（含空白）→ 整欄 #REF!，而且是一次死一整欄。
+    #    所以說明只能給「跳過公式欄」的分段範圍。
+    rows1.append([f"■ 上區塊 → 貼到「商品表」最下方（綠底欄才貼）。**不要整塊 A:U 貼**——"
+                  f"F/H/I/R~U 是整欄陣列公式，貼進去會整欄 #REF!。"
+                  f"分四次：A{b1_first}:E{b1_last} → 商品表 A欄｜"
+                  f"G{b1_first}:G{b1_last} → G欄｜J{b1_first}:J{b1_last} → J欄｜"
+                  f"L{b1_first}:L{b1_last} → L欄。（勿貼）欄不要選進去"])
     rows1.append(PRODUCT_HEADERS + ["1688ID(勿貼)", "名單編號(參考,勿貼)"])
     for i, row in enumerate(products):
         meta = prepared[i].get("_meta", {})
@@ -435,9 +445,12 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
 
     # ── 下區塊：SKU表 ──
     rows2: list[list[str]] = []
-    rows2.append([f"■ 下區塊 → 貼到「SKU表」最下方：選 A{b2_first}:P{b2_last} 複製貼上"
-                  "（只到 P！Q 之後是各賣場自己的欄位，不要選進去）；"
-                  "K/O/P 是陣列公式會自動長出，貼完看 P 對應檢查該是 ✓"])
+    # 同上：SKU表 K/O/P 也是錨在第 2 列的陣列公式（BYROW / ARRAYFORMULA）
+    rows2.append([f"■ 下區塊 → 貼到「SKU表」最下方（綠底欄才貼）。**不要整塊 A:P 貼**——"
+                  f"K/O/P 是整欄陣列公式，貼進去會整欄 #REF!。"
+                  f"分三次：A{b2_first}:D{b2_last} → SKU表 A欄｜"
+                  f"F{b2_first}:H{b2_last} → F欄｜L{b2_first}:M{b2_last} → L欄。"
+                  f"Q 之後是各賣場自己的欄位，不要碰。貼完看 P 對應檢查該是 ✓"])
 
     rows2.append(SKU_HEADERS + ["1688ID(勿貼)", "規格顯示(勿貼)"])
     for s in skus:
@@ -448,8 +461,9 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
         row[3] = s["tag"]                   # D 標籤（預購＝#PO_Sale）
         row[5] = s["price"]                 # F 進項成本（⚠️ 包裝品要換算單個）
         row[6] = "人民幣"                    # G 幣別
-        if s["preorder"]:
-            row[7] = PREORDER_SAFETY_STOCK  # H 安全存量（預購統一 200）
+        # H 安全存量：預購統一 200；正式品用名單填的（Edwin 2026-09-09 要求帶入——
+        # 他名單上已經填過一次，不該再手打第二次）
+        row[7] = PREORDER_SAFETY_STOCK if s["preorder"] else s.get("safety_stock", "")
         row[11] = s["spec1"]                # L 規格一（1688 原文逐字）
         row[12] = s["spec2"]                # M 規格二（1688 原文逐字）
         rows2.append(row + [s["item_id"], s["display"]])
