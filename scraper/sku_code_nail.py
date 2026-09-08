@@ -18,11 +18,18 @@ A   A     006     0003    01     0000
 `AAS1` ＝ 大分類 `A` ＋ 品牌 `AS` ＋ 序號 `1`（`AVD1`=VDN、`AIL1`=Infin.Lin）。
 ⚠️ 與 Lady 的 `H-c2` 不同——**沒有連字號**，所以解析式不可共用。
 
-## ⚠️「商品序」是 Edwin 的商品定義，不是 1688 連結（2026-09-07 澄清）
-同一款基礎膠（底膠／免洗封層／建構膠）有些廠商放同一個連結、有些分散在不同連結。
-Edwin 認定它們是「同一個商品」＝同一個商品序，各連結則是不同的**款式**。
-所以機器無法從 1688 推斷商品序 → 預設開新號；要掛既有系列時由 AI 名單的
-**「歸屬」欄**指定（填既有商品編號，如 `AAS1`）。
+## ⚠️ 商品序由「商品編號存不存在」決定，不需要額外欄位（2026-09-08 Edwin 釐清）
+```
+新編號（1-1 沒有）  →  開新商品序，款式從 01 起
+既有編號（1-1 有）  →  用它現有的商品序，款式接在現有最大之後
+```
+Edwin 要在既有系列加東西時，**本來就會直接填既有編號**（AS 黑瓶加皮草封層就填 `AAS1`），
+不會另給新編號。所以「新編號＋掛既有商品序」這種情況不存在 → 原本設計的「歸屬」欄
+沒有作用，已移除。
+
+**款式＝1688 頁面第一軸的每個品項**（實證 `AVD2` 一個編號一個網址底下有 16 個款式：
+防翹結合劑／健甲加固膠／自動修護封層…），**顏色＝該品項底下的第二層規格**（無則 0000）。
+⚠️ 款式與 1688 連結**不是**一對一——同一個連結常包很多品項，各佔一個款式。
 
 ## ⚠️ 發號一律取「現有最大 +1」，不補中間空號
 既有品牌碼有跳號（001、004、006…，002/003 空著）。若補空號，新品號會排在既有品號
@@ -173,33 +180,27 @@ def _norm(s: str) -> str:
 
 
 def allocate(product_code: str, specs: list[tuple[str, str]],
-             existing: list, ctx: NailContext,
-             attach_to: str = "") -> NailAllocResult:
-    """替 specs 配 Nail 品號。
+             existing: list, ctx: NailContext) -> NailAllocResult:
+    """替 specs 配 Nail 品號。**商品序由「商品編號存不存在」決定**（見檔頭）。
 
-    - `attach_to`＝AI 名單「歸屬」欄：填既有商品編號（如 `AAS1`）就掛進它的商品序、
-      款式取該商品序現有最大 +1；留空＝開新商品序、款式從 01 起。
-    - append-only：同商品編號既有的規格原文沿用舊碼，新原文才發新顏色序。
-    - existing 的元素需有 `.sku_code` / `.spec1` / `.spec2`（沿用 sku_code.ExistingRow）。
+    - 新編號 → 開新商品序（該品牌現有最大 +1）、款式從 01 起
+    - 既有編號 → 用它現有的商品序、款式接在現有最大之後
+    - append-only：同商品編號既有的規格原文沿用舊碼，新原文才發新號
+    - existing 的元素需有 `.sku_code` / `.spec1` / `.spec2`（沿用 sku_code.ExistingRow）
     """
     pc = parse_product_code(product_code)
     bcode = ctx.brand_code(pc.cat, pc.brand)
 
-    # ── 決定商品序與款式 ──
-    if attach_to.strip():
-        parent = attach_to.strip()
-        item = ctx.item_seq_of_code.get(parent)
-        if item is None:
-            raise BadNailCode(
-                f"「歸屬」填了 {parent!r}，但既有 SKU 表找不到這個商品編號的品號——"
-                "無法得知要掛到哪個商品序。請確認拼字，或留空改開新商品序。")
-        used = ctx.styles_of.get((pc.cat, bcode, item), set())
-        style = (max(used) if used else 0) + 1
-        new_item = False
-    else:
-        item = ctx.max_item_seq.get((pc.cat, bcode), 0) + 1
+    # ── 決定商品序與款式：編號存不存在說了算 ──
+    item = ctx.item_seq_of_code.get(product_code.strip())
+    if item is None:
+        item = ctx.max_item_seq.get((pc.cat, bcode), 0) + 1   # 新編號 → 新商品序
         style = 1
         new_item = True
+    else:
+        used = ctx.styles_of.get((pc.cat, bcode, item), set())  # 既有編號 → 接款式
+        style = (max(used) if used else 0) + 1
+        new_item = False
 
     # ── 既有列：同規格原文沿用舊碼（append-only）──
     code_of: dict[tuple[str, str], str] = {}
@@ -234,6 +235,6 @@ def allocate(product_code: str, specs: list[tuple[str, str]],
         res.created += 1
 
     logger.info(f"[{product_code}] Nail 配號：品牌{bcode} 商品序{item:04d} 款式{style:02d}"
-                f"（{'新開' if new_item else f'掛 {attach_to}'}）"
+                f"（{'新編號→新商品序' if new_item else '既有編號→接款式'}）"
                 f"｜沿用 {res.reused} / 新發 {res.created}")
     return res

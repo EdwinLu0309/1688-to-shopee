@@ -91,19 +91,34 @@ EXTRACT_JS = r"""() => {
   });
   const sizes=(attributes["尺码"]||attributes["尺碼"]||"").split(/[、,，]/).map(s=>s.trim()).filter(Boolean);
 
-  // 買區「尺碼 ¥價 库存N件」列 → size_stock + price_cny
+  // 買區「規格 ¥價 库存N<單位>」列 → size_stock + price_cny
+  // ⚠️ 單位不是只有「件」：實測美甲類多為「个」，另有 条/套/双/包/盒…
+  //    寫死「件」→ 一列都篩不到 → price_cny=0、size_stock={} → 下游 0 SKU、Excel 空殼，
+  //    而且完全不報錯。（同坑 1688-order/master_audit 早已修過。）
   const size_stock={}; let price_cny=0;
   [...document.querySelectorAll("*")]
-    .filter(e=>e.children.length===0 && /库存\d+件/.test(e.textContent))
+    .filter(e=>e.children.length===0 && /库存\s*\d+\s*[\u4e00-\u9fa5]{0,2}/.test(e.textContent))
     .forEach(n=>{
       let row=n;
       for(let i=0;i<5&&row.parentElement;i++){row=row.parentElement;
         if(/[¥￥]/.test(row.textContent)&&/库存/.test(row.textContent))break;}
       const txt=row.textContent.replace(/\s+/g,"");
-      const mm=txt.match(/^(.+?)[¥￥]([\d.]+)库存(\d+)件/);
+      const mm=txt.match(/^(.+?)[¥￥]([\d.]+)库存(\d+)[\u4e00-\u9fa5]{0,2}/);
       if(mm){size_stock[mm[1]]={price:parseFloat(mm[2]),stock:parseInt(mm[3],10)};
         if(!price_cny)price_cny=parseFloat(mm[2]);}
     });
+
+  // ⚠️ 沒有色票（.sku-filter-button）時，買區那幾列**就是商品唯一的那一軸**。
+  //    美甲的機器/工具類多半長這樣（規格＝美规/欧规/其他规格、容量、型號），
+  //    不像女裝有「顏色色票 × 尺碼」兩軸。不補的話第一軸是空的 →
+  //    Claude 回的 color_map 空 → 變體 0 個 → **Excel 產出沒有任何規格行的空殼**，
+  //    而整條流程一路成功、不報錯（實測 HNV7 集塵器：價格庫存都抓到了、SKU 仍是 0）。
+  if(skus.length===0){
+    for(const k of Object.keys(size_stock)){
+      skus.push({sku_id:"",attributes:{规格:k},price:size_stock[k].price||0,
+                 stock:size_stock[k].stock||0,image_url:""});
+    }
+  }
 
   return {
     item_id:itemId,

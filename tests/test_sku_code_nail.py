@@ -2,7 +2,8 @@
 
 樣本取自 2026-09-07 線上 Nail 1-1 實際資料。守住的重點：
 ①結構對（用真實品號對答案）②發號一律 max+1 不補空號 ③append-only 不重編
-④未知品牌一定拋錯不自己編 ⑤「歸屬」能掛進既有商品序。
+④未知品牌一定拋錯不自己編 ⑤**商品序由「商品編號存不存在」決定**——新編號開新序、
+既有編號接款式（2026-09-08 Edwin 釐清，原本的「歸屬」欄因此移除）。
 """
 import sys
 from pathlib import Path
@@ -107,23 +108,26 @@ def test_no_spec_product_gets_color_0000():
     eq("顏色 0000", res.allocations[0].sku_code, "AA0060004010000")
 
 
-def test_attach_to_existing_item():
-    print("\n[7] 「歸屬」＝掛進既有商品序，款式接續往下")
-    res = allocate("AAS21", [("平衡液", "")], [], CTX, attach_to="AAS1")
+def test_existing_code_continues_style():
+    print("\n[7] 既有編號 → 沿用它的商品序，款式接在現有最大之後")
+    res = allocate("AAS1", [("皮草封層", "")], [], CTX)
     eq("商品序沿用 AAS1 的 0001", res.item_seq, 1)
     eq("款式 = 既有最大4 + 1 = 5", res.style_seq, 5)
-    check("不是新開", not res.new_item)
+    check("不是新開商品序", not res.new_item)
     eq("品號", res.allocations[0].sku_code, "AA0060001050001")
+    check("不與既有品號相同",
+          res.allocations[0].sku_code not in {c for c, _ in REAL})
 
 
-def test_attach_to_unknown_raises():
-    print("\n[8] 「歸屬」填了查不到的編號 → 拋錯，不默默改開新號")
-    try:
-        allocate("AAS21", [("x", "")], [], CTX, attach_to="AAS999")
-        check("要拋錯", False, "竟然默默開了新商品序")
-    except BadNailCode as e:
-        check("要拋錯", True)
-        check("訊息要說找不到", "找不到" in str(e), str(e)[:80])
+def test_new_code_never_lands_on_existing_item():
+    print("\n[8] ⚠️ 新編號一定開新商品序，不可掉進既有編號的號段")
+    res = allocate("AAS99", [("x", "")], [], CTX)
+    check("是新開", res.new_item)
+    eq("商品序 = 最大3 + 1", res.item_seq, 4)
+    eq("款式從 01 起", res.style_seq, 1)
+    used_items = {c[5:9] for c, _ in REAL if c[2:5] == "006"}
+    check("沒有落在 AS 既有的商品序上", f"{res.item_seq:04d}" not in used_items,
+          f"{res.item_seq:04d} 撞到 {used_items}")
 
 
 def test_append_only_reuse():
@@ -162,8 +166,8 @@ if __name__ == "__main__":
     print("=" * 56)
     for fn in (test_parse, test_context_from_real_data, test_build_matches_real_codes,
                test_unknown_brand_raises, test_new_product_gets_max_plus_one,
-               test_no_spec_product_gets_color_0000, test_attach_to_existing_item,
-               test_attach_to_unknown_raises, test_append_only_reuse,
+               test_no_spec_product_gets_color_0000, test_existing_code_continues_style,
+               test_new_code_never_lands_on_existing_item, test_append_only_reuse,
                test_color_pads_to_four, test_spec_matched_by_original_text):
         fn()
     print("\n" + "=" * 56)

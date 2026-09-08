@@ -117,8 +117,13 @@
   // ── 互動買區的「尺碼 ¥價 庫存」列（目前選定色的價格/庫存）──
   const size_stock = {};
   let price_cny = 0;
+  // ⚠️ 庫存單位不是只有「件」——實測還有 个/条/套/双/包/盒/张…（美甲類最常見「个」）。
+  //    寫死「件」會讓整支商品的價格與規格一個都抓不到，而且完全不報錯：
+  //    price_cny=0、size_stock={} → 下游算出 0 SKU、Excel 產出空殼。
+  //    （同一個坑 1688-order/master_audit 已修過，此處為另一個 repo 的漏網。）
+  const STOCK_RE = /库存\s*\d+\s*[\u4e00-\u9fa5]{0,2}/;
   [...document.querySelectorAll("*")]
-    .filter((e) => e.children.length === 0 && /库存\d+件/.test(e.textContent))
+    .filter((e) => e.children.length === 0 && STOCK_RE.test(e.textContent))
     .forEach((n) => {
       let row = n;
       for (let i = 0; i < 5 && row.parentElement; i++) {
@@ -126,7 +131,7 @@
         if (/[¥￥]/.test(row.textContent) && /库存/.test(row.textContent)) break;
       }
       const txt = row.textContent.replace(/\s+/g, "");
-      const mm = txt.match(/^(.+?)[¥￥]([\d.]+)库存(\d+)件/);
+      const mm = txt.match(/^(.+?)[¥￥]([\d.]+)库存(\d+)[\u4e00-\u9fa5]{0,2}/);
       if (mm) {
         size_stock[mm[1]] = { price: parseFloat(mm[2]), stock: parseInt(mm[3], 10) };
         if (!price_cny) price_cny = parseFloat(mm[2]);
