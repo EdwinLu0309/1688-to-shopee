@@ -80,7 +80,20 @@ def weight_kg(data: dict, code: str = "") -> float | None:
                        f"上架 Excel 的重量欄留空，**請手動補**（運費會算錯）")
         return None
     kg = round(g / 1000, 3)
-    logger.info(f"[{code or data.get('item_id')}] 1688 頁面重量 {g:g}g → {kg}kg")
+    tag = code or data.get("item_id")
+    # ⚠️ 「重量(g)」自成一行＝該頁只給了一個總重，沒有 per-規格。這一頁若在名單裡被
+    #    拆成多個蝦皮商品（HNV11：吸塵器/二合一打磨機/濾網 共用 offer 760973597185，
+    #    整頁只寫 200g），三個商品會拿到同一個重量——對濾網合理，對 3,143 元的
+    #    打磨機顯然不對。照寫但要喊出來，讓人回頭挑掉離譜的那幾支。
+    single_only = any(len(ln.split("\t")) == 1
+                      for tb in (data.get("weight_tables") or [])
+                      for ln in tb.split("\n")
+                      if re.search(r"重量\s*\(?(g|克)\)?", ln))
+    if single_only:
+        logger.warning(f"[{tag}] 該 1688 頁只給「全品單一重量」{g:g}g（沒有 per-規格）→ "
+                       f"同頁的每個品項都會拿到 {kg}kg，重的那幾支請自行覆蓋")
+    else:
+        logger.info(f"[{tag}] 1688 頁面重量 {g:g}g → {kg}kg")
     return kg
 
 
@@ -127,9 +140,26 @@ def parse_dims_cm(tables: list[str] | None) -> dict[str, float]:
     return {k: Counter(v).most_common(1)[0][0] for k, v in pools.items() if v}
 
 
+# ⚠️ 有賣家把 mm 填進「长(cm)」欄：實測 HNL23 光療燈寫 281×191×125（＝一台 2.8 公尺的
+#    美甲燈，連 1688 自己算的體積都變成 6.7 立方公尺）、HNL26 寫 168×68×44。
+#    **不自作聰明除以 10** —— 沒有原始事實可查時就不要猜（同「對不齊時寧可留空給人填」）。
+#    整組丟掉並把原始數字印出來讓人補；重量不受影響（1350g 本身是對的）。
+MAX_PLAUSIBLE_CM = 150
+
+
 def dims_cm(data: dict, code: str = "") -> dict[str, float]:
     d = parse_dims_cm(data.get("weight_tables"))
-    if d:
-        logger.info(f"[{code or data.get('item_id')}] 1688 頁面尺寸 "
-                    f"{d.get('length','?')}×{d.get('width','?')}×{d.get('height','?')} cm")
+    if not d:
+        return {}
+    tag = code or data.get("item_id")
+    if any(v > MAX_PLAUSIBLE_CM for v in d.values()):
+        logger.warning(
+            f"[{tag}] 1688 頁面尺寸 {d.get('length','?')}×{d.get('width','?')}"
+            f"×{d.get('height','?')} 不合理（>{MAX_PLAUSIBLE_CM}cm）——賣家很可能把 mm "
+            f"填進 cm 欄。整組不寫、留空給人補（除以 10 大概是 "
+            f"{'×'.join(f'{v/10:g}' for v in (d.get('length',0), d.get('width',0), d.get('height',0)))} cm，"
+            f"但這是推測、不代寫）")
+        return {}
+    logger.info(f"[{tag}] 1688 頁面尺寸 "
+                f"{d.get('length','?')}×{d.get('width','?')}×{d.get('height','?')} cm")
     return d

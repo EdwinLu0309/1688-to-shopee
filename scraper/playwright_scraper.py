@@ -144,7 +144,14 @@ EXTRACT_JS = r"""() => {
     attributes, main_images:main, detail_images:uniq(detail),
     video_url:(function(){var v=document.querySelector("video");return v&&v.src?v.src:"";})(),
     sku_images, skus, sizes, size_stock, price_cny,
-    _blocked: /验证|滑动|安全验证|robot|captcha/i.test(document.body?document.body.innerText.slice(0,500):""),
+    // ⚠️ 判「被驗證碼擋」要看 **document.title**，不要掃 body 前 500 字。
+    //    商品頁本來就常出現「滑动查看更多」「实名验证」這種字 → 舊寫法會把
+    //    抓得好好的頁面標成 blocked（2026-09-08 實測誤判 2 支：資料完整、
+    //    25 張主圖、20 個 SKU，卻被判成擋）。誤判的代價是雙向的：好資料被丟掉，
+    //    而且會去重抓 → 反而真的把驗證碼招來。
+    //    真正的攔截頁 title 就是「验证码拦截」，且整頁沒有商品資料
+    //    （Python 端另有 n_main == 0 這層把關，兩層都過才算真的被擋）。
+    _blocked: /验证码|拦截|滑块验证|安全验证/i.test(document.title || ""),
   };
 }"""
 
@@ -247,6 +254,20 @@ async def scrape_many(
         logger.info(msg)
         if progress_cb:
             progress_cb(msg)
+
+    # ⚠️ 同一個 offer 只抓一次——名單常有「同編號多列共用一個 1688 網址」
+    #    （HNV11 的吸塵器/二合一/濾網是同一頁的三個品項），照原樣排會變成
+    #    「短時間連打同一頁三次」→ 直接換來 1688 的滑塊驗證碼，而且會連累
+    #    後面幾支一起被擋（2026-09-08 實測：26 支裡 4 支 blocked，其中 3 支
+    #    就是這個重複的 offer，第 4 支是它後面那一支）。
+    #    下游是照 item_id 讀 output/{item_id}.json，抓一次就夠所有列用。
+    seen: set[str] = set()
+    uniq_ids = [x for x in (str(r).strip() for r in item_ids)
+                if x and not (x in seen or seen.add(x))]
+    if len(uniq_ids) != len(item_ids):
+        emit(f"去重：{len(item_ids)} 筆 → {len(uniq_ids)} 個不重複 offer"
+             f"（同一頁只抓一次，避免觸發驗證碼）")
+    item_ids = uniq_ids
 
     results: list[dict] = []
     blocked = failed = success = 0
