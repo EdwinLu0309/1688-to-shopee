@@ -120,7 +120,23 @@ EXTRACT_JS = r"""() => {
     }
   }
 
+  // 賣家為國內運費填的「長/寬/高/體積/重量(g)」表 → 上架 Excel 的重量欄。
+  // ⚠️ 抓不到就留空、由 Python 端大聲 warning，**不可退回寫死的 0.1kg**：
+  //    假重量會讓蝦皮運費與獲利表的結構版國際運費一起算錯，而且看起來像真的。
+  //    同頁可能有多張表（多 offer 版面），全收給 Python 端挑。
+  const weight_tables=[]; const _wseen=new Set();
+  for(const el of document.querySelectorAll("td,th,div,span")){
+    const wt=(el.innerText||"").trim();
+    if(/^重量\s*\(?(g|克)\)?$/.test(wt) && wt.length<12){
+      const holder=el.closest("table")||(el.parentElement&&el.parentElement.parentElement);
+      if(!holder) continue;
+      const txt=holder.innerText||"";
+      if(txt && !_wseen.has(txt)){ _wseen.add(txt); weight_tables.push(txt.slice(0,30000)); }
+    }
+  }
+
   return {
+    weight_tables,
     item_id:itemId,
     title:(document.title||"").replace(/ - 阿里巴巴$/,"").trim(),
     description:"", categories:[], shop_name:"", shop_url:"", shop_location:"",

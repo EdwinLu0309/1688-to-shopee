@@ -215,5 +215,8 @@ def build_variants(code: str, short_name: str, color_map: dict,
     for s in selected_sizes:
         key = _clean_size_key(s)
         tier2.append({"size": key, "option_name": _label_kg(size_labels.get(s, s), key)})
+    # ⚠️ 一軸商品（機器/工具類沒有第二軸）的 tier2 是空的，直接相乘會得到 0 →
+    #    摘要行會印「HNV7: 0 SKU」，但 Excel 其實好好地產了 1 列＝假的失敗訊號。
+    #    第二軸為空時視為 1（那一軸只有「無」這個值）。
     return {"規格1_顏色": tier1, "規格2_尺碼": tier2,
-            "sku_count": len(tier1) * len(tier2)}
+            "sku_count": len(tier1) * max(1, len(tier2))}

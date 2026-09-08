@@ -11,7 +11,10 @@
 - 「訂貨需求」(預購/現貨)  → 預購標記（也決定建檔走預購或正式，見 master_staging）
 - 「子分類」(b. 內衣…)    → 1-1 商品表 C 子分類（2026-08-28 新增）
 - 「標籤」(#LM_1st…)      → 1-1 SKU表 D 標籤（2026-08-28 新增；預購品由程式蓋成 #PO_Sale）
-- 「歸屬」(AAS1，選填)    → Nail 新品掛進既有商品序（2026-09-07 新增；空白＝開新商品序）
+- 「安全存量」(2)         → 上架 Excel 的庫存欄（2026-09-08 起；以前是寫死 10）
+
+⚠️ 「歸屬」欄已於 2026-09-08 移除——商品序改由「商品編號存不存在」決定（新編號開新序、
+既有編號接款式），該欄描述的情境（新編號＋掛既有系列）在真實操作中不存在。
 
 ⚠️ 欄位用「表頭名稱」動態對應，不寫死欄號——因為 Edwin 會在表裡插欄/搬欄
 （實際踩過：插了一個「廠商」欄，害款式/尺寸/售價整排右移一格，寫死欄號全錯位）。
@@ -51,8 +54,10 @@ _HEADER_ALIASES = {
     # 2026-08-28 新增：直接餵 1-1 建檔用（商品表 C 子分類 / SKU表 D 標籤）
     "subcategory": ["子分類", "子分类", "子類別", "子类别"],
     "tag": ["標籤", "标签"],
-    # 「歸屬」：填既有商品編號 → 新品掛進那個商品序（Nail 用；空白＝開新號）
-    "attach_to": ["歸屬", "归属", "歸屬商品", "掛在"],
+    # 「安全存量」→ 上架 Excel 的庫存欄（Edwin 2026-09-08 定）。
+    # ⚠️ 這欄的原義是「補貨水位」不是「首批上架量」，但這批 26 支貨都還沒訂，
+    #    用它當上架庫存是 Edwin 的取捨：量小（1~20），真被買到就吃取消率。
+    "safety_stock": ["安全存量", "安全库存", "安全存量(件)"],
     # 「選項說明」＝白話寫要進哪些選項（合併原本的款式＋尺寸，2026-09-08）。
     # 它會被當成 style_note 餵給 Claude（prompt 已有「Edwin 指定這支要哪些款式」），
     # 所以可以寫「只要底膠和封層」「1~30色」「不要粉色系」這種人話。
@@ -185,14 +190,13 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
             "code": code,
             "price": price,
             "final_price": _num_cell(r, colmap.get("final_price")),  # → 1-1 商品表 G
-            "stock": stock_default,
+            "stock": _num_cell(r, colmap.get("safety_stock")) or stock_default,
             "category": cat_id,
             "style_filter": style,       # 「三色長褲」等 → batch 端配合色卡挑
             "sizes": "all" if ("全" in size_text or not size_text) else size_text,
             "demand": demand,
             "subcategory": _cell(r, colmap.get("subcategory")),   # → 商品表 C
             "tag": _cell(r, colmap.get("tag")),                   # → SKU表 D
-            "attach_to": _cell(r, colmap.get("attach_to")),       # 歸屬商品序（選填）
             # 預購品填較長備貨天數（AP 欄）；現貨留空
             "pre_order_days": 10 if "預購" in demand else None,
             "name": name,
@@ -202,7 +206,8 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
         })
         logger.info(f"[{code}] {name[:16]} → item_id={iid} "
                     f"分類={cat_id or '(無)'}[{cat_src or '未定'}] "
-                    f"款式={style[:10]} 尺寸={size_text} 售價={price}")
+                    f"款式={style[:10]} 尺寸={size_text} 售價={price} "
+                    f"庫存={products[-1]['stock']}")
 
     logger.info(f"AI 名單共解析 {len(products)} 筆")
     return products

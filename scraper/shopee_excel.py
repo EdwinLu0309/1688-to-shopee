@@ -101,6 +101,15 @@ LOGISTICS_COLS = list(range(31, 42))
 # 實際上蝦皮批次上架需要圖片 URL 或本地路徑（依版本而定）
 
 
+
+def _weight_cell(weight) -> str:
+    """重量 → 儲存格字串。**抓不到就留空，不可退回寫死的 0.1kg**（2026-09-08 #S226）。
+
+    假重量會讓蝦皮運費與獲利表的結構版國際運費一起算錯，而且看起來像真的數字；
+    留空的話蝦皮上傳時會擋下來要人補，是「出聲的失敗」。
+    """
+    return "" if weight in (None, "", 0) else str(weight)
+
 def generate_shopee_excel(
     product_data: dict,
     ai_content: dict,
@@ -163,7 +172,7 @@ def generate_shopee_excel(
     description = ai_content.get("description", "")
     selling_price = user_config.get("selling_price", 99)
     stock = user_config.get("stock_per_option", 10)
-    weight = user_config.get("weight", 0.1)
+    weight = user_config.get("weight")      # None＝抓不到，留空給人補
     category = user_config.get("category", "")
 
     # 取圖片：蝦皮大量上傳需要 https 網址，不能用本地路徑。
@@ -190,7 +199,7 @@ def generate_shopee_excel(
         row[COL["min_purchase"]] = 1
         row[COL["parent_sku"]] = f"1688-{item_id}"
         row[COL["dangerous"]] = "否"
-        row[COL["weight"]] = weight
+        row[COL["weight"]] = _weight_cell(weight)
 
         if i == 0:
             # 圖片只填第一行
@@ -256,6 +265,11 @@ _KEY_TO_NAME = {
     "et_title_size_chart": "size_chart_img",   # Q: 圖片尺寸表（填圖片網址）
     "ps_item_cover_image": "cover_image",
     "ps_weight": "weight",
+    # 長/寬/高（cm）：模板本來就有，之前沒對應 → 一直空著。2026-09-08 補上，
+    # 資料源＝1688 商品頁的「长/宽/高/体积/重量」表（見 scraper/weight_parse.py）
+    "ps_length": "length",
+    "ps_width": "width",
+    "ps_height": "height",
     "ps_product_pre_order_dts": "pre_order_days",
 }
 
@@ -317,7 +331,8 @@ def build_two_tier_rows(
     code = config.get("code") or product_data.get("item_id", "unknown")
     price = config.get("selling_price", 99)
     stock = config.get("stock_per_option", 10)
-    weight = config.get("weight", 0.1)
+    weight = config.get("weight")           # None＝抓不到，留空給人補
+    dims = config.get("dims_cm") or {}      # 長/寬/高(cm)，抓不到就整組不填
     category = config.get("category", "")
     size_chart_url = config.get("size_chart_url", "")  # Q 欄圖片尺寸表（圖片網址）
 
@@ -358,7 +373,10 @@ def build_two_tier_rows(
             # ⚠ 注意：填主貨號 + 型號每SKU唯一 會「型號與變體不匹配」（實測過）；
             #   但「填主貨號 + 型號留空」是合法組合（商品層用主貨號、變體靠規格選項辨識）。
             row[COL["parent_sku"]] = code
-            row[COL["weight"]] = str(weight)
+            row[COL["weight"]] = _weight_cell(weight)
+            for _k in ("length", "width", "height"):
+                if dims.get(_k) and _k in COL:   # 舊模板沒這三欄 → 跳過不炸
+                    row[COL[_k]] = str(dims[_k])
             row[COL["price"]] = str(int(round(float(price))))
             row[COL["stock"]] = str(int(round(float(stock))))
             # 規格欄位：每行都填；識別碼相同 → 歸成同一商品
@@ -760,7 +778,7 @@ def _build_product_rows(
     description = ai_content.get("description", "")
     selling_price = user_config.get("selling_price", 99)
     stock = user_config.get("stock_per_option", 10)
-    weight = user_config.get("weight", 0.1)
+    weight = user_config.get("weight")      # None＝抓不到，留空給人補
     category = user_config.get("category", "")
 
     # 蝦皮需要 https 圖片網址，優先用 1688 原圖 URL（去 webp 後綴轉 JPG）
@@ -790,7 +808,7 @@ def _build_product_rows(
         row[COL["min_purchase"]] = 1
         row[COL["parent_sku"]] = f"1688-{item_id}"
         row[COL["dangerous"]] = "否"
-        row[COL["weight"]] = weight
+        row[COL["weight"]] = _weight_cell(weight)
 
         if i == 0:
             # 圖片只填第一行

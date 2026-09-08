@@ -38,6 +38,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from scraper.weight_parse import dims_cm, weight_kg
+
 from config.settings import OUTPUT_DIR
 from scraper.color_policy import base_color, select_first_axis
 from scraper.copywriter import build_variants, generate_listing
@@ -51,6 +53,25 @@ def base_color_of(color_map: dict, key: str) -> str:
     與 select_first_axis 的分組一致；Claude 繁體渲染多變不可靠。"""
     return base_color(key) or key
 
+
+
+# 1688 原始屬性名 → 蝦皮規格名稱。一軸商品的那一軸不一定是顏色。
+_AXIS_ZH = {"颜色": "顏色", "顏色": "顏色", "规格": "規格", "規格": "規格",
+            "尺码": "尺碼", "尺碼": "尺碼", "型号": "型號", "款式": "款式", "容量": "容量"}
+
+
+def _axis1_name_for(product_data: dict, sp) -> str:
+    """第一軸的蝦皮規格名稱。取 1688 SKU 的第一個屬性名；認不得就用賣場預設。"""
+    for s in (product_data.get("skus") or []):
+        for k in (s.get("attributes") or {}):
+            name = _AXIS_ZH.get(str(k).strip())
+            if name:
+                if name != sp.axis1_name:
+                    logger.info(f"第一軸依 1688 原始屬性名定為「{name}」"
+                                f"（賣場預設是「{sp.axis1_name}」）")
+                return name
+            break
+    return sp.axis1_name
 
 def _gpt_images_for(product_data: dict, code: str, category: str,
                     item_dir: Path, product_name: str) -> list[str]:
@@ -221,7 +242,13 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady") -> dict | 
             # 實際成交價（折後）→ 1-1 商品表 G；沒填就退回掛牌價並在 staging 警告
             "final_price": entry.get("final_price") or 0,
             "stock_per_option": entry.get("stock", 10),
-            "weight": entry.get("weight", 0.1),
+            # 重量：名單填了就用名單的，否則抓 1688 頁面的重量表。
+            # ⚠️ 兩者都沒有 → None，Excel 留空並 warning，**不退回寫死的 0.1kg**
+            #    （假重量會讓蝦皮運費與獲利表的結構版國際運費一起算錯且看起來像真的）
+            "weight": entry.get("weight") or weight_kg(product_data, code),
+            # 長/寬/高（cm）：比重量可靠（HNV7 重量是哨兵值、尺寸卻是真的），
+            # 材積同樣是運費依據 → 有就填
+            "dims_cm": dims_cm(product_data, code),
             "code": code,
             "size_chart_url": entry.get("size_chart_url", ""),  # Q 欄圖片尺寸表
             "image_skip": entry.get("image_skip", []),          # 排除的主圖 index（如有簡體字）
@@ -229,11 +256,13 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady") -> dict | 
             # 1-1 建檔用（master_staging 讀）：AI 名單新增的兩欄 + 預購/現貨
             "subcategory": entry.get("subcategory", ""),          # → 商品表 C 子分類
             "tag": entry.get("tag", ""),                          # → SKU表 D 標籤
-            "attach_to": entry.get("attach_to", ""),              # Nail：掛進既有商品序
             "demand": entry.get("demand", ""),                    # 預購/現貨 → 決定標籤與建檔分支
             "image_urls": image_urls,                            # ✨ GPT 生圖圖床 URL（有=覆蓋 1688）
             # 賣場差異（shops.py）：規格軸名 + 啟用的物流頻道
-            "axis1_name": sp.axis1_name,
+            # ⚠️ 一軸商品不一定是顏色：機器/工具類的那一軸是「規格」（美规/欧规），
+            #    照 sp.axis1_name 寫死會讓前台顯示「顏色：美甲吸塵器_美規」。
+            #    依 1688 原始屬性名判斷（实测 HNV7 集塵器）。
+            "axis1_name": _axis1_name_for(product_data, sp),
             "axis2_name": sp.axis2_name,
             "enabled_channels": set(sp.enabled_channels),
         },
