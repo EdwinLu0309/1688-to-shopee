@@ -72,8 +72,13 @@ def parse_weight_g(tables: list[str] | None) -> float | None:
     return None
 
 
-def weight_kg(data: dict, code: str = "") -> float | None:
-    """抓取結果 dict → 重量(kg，四捨五入 3 位)；取不到回 None 並 warning。"""
+def weight_kg(data: dict, code: str = "", shared_offer: bool = False) -> float | None:
+    """抓取結果 dict → 重量(kg，四捨五入 3 位)；取不到回 None 並 warning。
+
+    shared_offer＝這個 1688 網址在名單裡被多列共用（會被拆成多個蝦皮商品）。
+    只有這種情況下「全品單一重量」才是問題，單獨一列用的話總重本來就對——
+    無條件喊會讓 11 次裡有 8 次是雜訊，燈就沒人看了。
+    """
     g = parse_weight_g(data.get("weight_tables"))
     if g is None:
         logger.warning(f"[{code or data.get('item_id')}] 1688 頁面沒有重量表 → "
@@ -89,9 +94,10 @@ def weight_kg(data: dict, code: str = "") -> float | None:
                       for tb in (data.get("weight_tables") or [])
                       for ln in tb.split("\n")
                       if re.search(r"重量\s*\(?(g|克)\)?", ln))
-    if single_only:
-        logger.warning(f"[{tag}] 該 1688 頁只給「全品單一重量」{g:g}g（沒有 per-規格）→ "
-                       f"同頁的每個品項都會拿到 {kg}kg，重的那幾支請自行覆蓋")
+    if single_only and shared_offer:
+        logger.warning(f"[{tag}] ⚠️ 這個 1688 網址被名單多列共用，而該頁只給「全品單一重量」"
+                       f"{g:g}g（沒有 per-規格）→ 拆出來的每個蝦皮商品都會拿到 {kg}kg。"
+                       f"價差大的那幾支請自行覆蓋（實例：HNV11 的濾網與 3,143 元的打磨機同重）")
     else:
         logger.info(f"[{tag}] 1688 頁面重量 {g:g}g → {kg}kg")
     return kg

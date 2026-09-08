@@ -36,6 +36,8 @@ import asyncio
 import json
 from pathlib import Path
 
+from collections import Counter
+
 from loguru import logger
 
 from scraper.weight_parse import dims_cm, weight_kg
@@ -131,7 +133,8 @@ def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], 
     return selected, color_map
 
 
-def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady") -> dict | None:
+def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
+                     shared_offer: bool = False) -> dict | None:
     """把一個 manifest 商品項處理成 generate_batch_two_tier_excel 需要的 dict。"""
     from scraper.shops import get_shop
 
@@ -245,7 +248,7 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady") -> dict | 
             # 重量：名單填了就用名單的，否則抓 1688 頁面的重量表。
             # ⚠️ 兩者都沒有 → None，Excel 留空並 warning，**不退回寫死的 0.1kg**
             #    （假重量會讓蝦皮運費與獲利表的結構版國際運費一起算錯且看起來像真的）
-            "weight": entry.get("weight") or weight_kg(product_data, code),
+            "weight": entry.get("weight") or weight_kg(product_data, code, shared_offer),
             # 長/寬/高（cm）：比重量可靠（HNV7 重量是哨兵值、尺寸卻是真的），
             # 材積同樣是運費依據 → 有就填
             "dims_cm": dims_cm(product_data, code),
@@ -385,12 +388,16 @@ def run_batch_two_tier(
         return {"total": 0, "success": 0, "failed": 0, "excel_path": None, "failures": []}
     logger.info(f"賣場：{shop}（模板 {tpl.name}）")
 
+    # 同一個 1688 網址被名單多列共用（會被拆成多個蝦皮商品）→ 影響重量的可信度
+    _offer_uses = Counter(str(e.get("item_id")) for e in entries)
+
     prepared, failures = [], []
     for entry in entries:
         code = entry.get("code", entry.get("item_id"))
         logger.info(f"{'='*50}\n處理 {code} (item_id: {entry.get('item_id')})")
         try:
-            p = _prepare_product(entry, json_dir, shop=shop)
+            p = _prepare_product(entry, json_dir, shop=shop,
+                                 shared_offer=_offer_uses[str(entry.get("item_id"))] > 1)
             if p is None:
                 failures.append({"code": code, "error": "缺 JSON 或文案失敗"})
             else:
