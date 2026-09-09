@@ -1,7 +1,7 @@
 # TODO
 
 ## 高優先
-- [ ] **三家 1-1 Apps Script 加了「⑥ 寫入 _在途」（2026-09-10 #S233），要 Edwin 貼回雲端**：`config/apps_script/{lady,nail,baby}_master_Code.gs` → 各表 擴充功能 → Apps Script → 全選貼上取代 → 儲存。🚀 全執行變 ①②③④⑥；設計與消帳規則見 1688-order `CLAUDE.md` ⑥-B
+- [ ] **三家 1-1 Apps Script 加了「⑥ 寫入 _在途」（2026-09-10 #S234），要 Edwin 貼回雲端**：`config/apps_script/{lady,nail,baby}_master_Code.gs` → 各表 擴充功能 → Apps Script → 全選貼上取代 → 儲存。🚀 全執行變 ①②③④⑥；設計與消帳規則見 1688-order `CLAUDE.md` ⑥-B
 - [ ] **⭐ Lady 端到端實測（2026-08-28 #S194 六件事已完成，等你跑）**：AI 名單填 1 支預購品
       （記得補 `子分類`／`標籤` 兩欄、訂貨需求填「預購」）→ GUI 勾「🆕 建檔」跑 → 檢查
       1-1「_待貼新品」上下兩區塊（品號是否正確生成、黃底是否只落在成本/廠商/重量）→ 貼進
