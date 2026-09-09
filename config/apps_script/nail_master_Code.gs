@@ -416,7 +416,7 @@ function syncStatusTab(silent) {
 //   · 下單日寫真 Date（不可寫 "0910"，會變數字 910）
 var TRANSIT_TAB = "_在途";
 var TRANSIT_SAME_ROUND_DAYS = 3;
-var TRANSIT_SKIP_STATUS = ["🚫", "❌"];      // S 欄開頭
+var TRANSIT_SKIP_STATUS = ["🚫", "❌"];      // S 加購狀態／T 核對狀態 開頭（沒進購物車＝沒訂）
 var TRANSIT_SKIP_TAG = "#PO_Sale";
 
 function writeTransit(silent) {
@@ -430,7 +430,7 @@ function writeTransit(silent) {
   var ov = od.getDataRange().getValues(), oh = ov[0];
   var iO = oh.indexOf("正式訂貨數"); if (iO < 0) iO = 14;
   var iTag = oh.indexOf("標籤"); if (iTag < 0) iTag = 3;
-  var iS = 18;
+  var iS = 18, iT = 19;                              // S 加購狀態／T 核對狀態（標題是空的，固定欄）
   // SKU表：A品號 → G幣別
   var sv = sk.getDataRange().getValues(), shd = sv[0];
   var iCur = shd.indexOf("幣別"); if (iCur < 0) iCur = 6;
@@ -440,40 +440,46 @@ function writeTransit(silent) {
   var today = new Date(); today = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   var cand = [], skipped = { tw: 0, po: 0, st: 0 };
   for (var r = 1; r < ov.length; r++) {
-    var code = String(ov[r][0]).trim(); if (!code) continue;
+    var raw = ov[r][0], code = String(raw).trim(); if (!code) continue;   // raw：Baby 品號是數字，寫原值才對得上 SUMIF
     var qty = Number(ov[r][iO]); if (!(qty > 0)) continue;
     if (cur[code] === "台幣") { skipped.tw++; continue; }
     if (String(ov[r][iTag] || "").indexOf(TRANSIT_SKIP_TAG) >= 0) { skipped.po++; continue; }
-    var st = String(ov[r][iS] || "").trim();
-    if (TRANSIT_SKIP_STATUS.some(function (p) { return st.indexOf(p) === 0; })) { skipped.st++; continue; }
-    cand.push([code, qty]);
+    var st = String(ov[r][iS] || "").trim(), tt = String(ov[r][iT] || "").trim();
+    if (TRANSIT_SKIP_STATUS.some(function (p) { return st.indexOf(p) === 0 || tt.indexOf(p) === 0; })) { skipped.st++; continue; }
+    cand.push([raw, qty, code]);
   }
   if (!cand.length) return fail("訂貨表沒有 O>0 的列（先填正式訂貨數）");
 
   // 既有 _在途：找「同品號、未到量>0、下單日 ±3 天」的列 → 覆蓋
   var tl = lastDataRow_(tw, 1);
   var tv = tl >= 2 ? tw.getRange(2, 1, tl - 1, 6).getValues() : [];   // A~F
-  var open = {};
+  var open = {}, older = {};                                    // open＝±3 天同輪；older＝>3 天還在途（真再訂？還是上輪 O 沒清？）
   for (var t = 0; t < tv.length; t++) {
     var tc = String(tv[t][0]).trim(); if (!tc) continue;
     var d = tv[t][2]; var f = Number(tv[t][5]) || 0;
     if (!(d instanceof Date) || !(f > 0)) continue;
     var dd = Math.abs((today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
     if (dd <= TRANSIT_SAME_ROUND_DAYS) open[tc] = t + 2;    // sheet row
+    else older[tc] = Math.round(dd);
   }
-  var updates = [], appends = [];
+  var updates = [], appends = [], suspect = [];
   cand.forEach(function (c) {
-    if (open[c[0]]) updates.push({ row: open[c[0]], qty: c[1] });
-    else appends.push([c[0], c[1], today, 0, "", "", "", ""]);   // A~H；F/G 是 ARRAYFORMULA，寫空字串不擋溢出
+    if (open[c[2]]) updates.push({ row: open[c[2]], qty: c[1] });
+    else {
+      appends.push([c[0], c[1], today, 0]);                  // A~D；E 空、F/G 是 ARRAYFORMULA 自動長
+      if (older[c[2]] !== undefined) suspect.push(c[2] + "（" + older[c[2]] + " 天前那批還在途）");
+    }
   });
   updates.forEach(function (u) { tw.getRange(u.row, 2).setValue(u.qty); });
   if (appends.length) {
     var start = lastDataRow_(tw, 1) + 1;
-    tw.getRange(start, 1, appends.length, 4).setValues(appends.map(function (a) { return a.slice(0, 4); }));
+    tw.getRange(start, 1, appends.length, 4).setValues(appends);
     tw.getRange(start, 3, appends.length, 1).setNumberFormat("yyyy-mm-dd");
   }
   var msg = "✅ _在途：新增 " + appends.length + " 列、覆蓋 " + updates.length + " 列（同輪重按）" +
-            "｜跳過 台幣 " + skipped.tw + "／預購 " + skipped.po + "／售完或規格不符 " + skipped.st;
+            "｜跳過 台幣 " + skipped.tw + "／預購 " + skipped.po + "／售完、規格不符、未找到 " + skipped.st;
+  if (suspect.length) msg += "\n\n⚠️ 這 " + suspect.length + " 個品號在 _在途 已有 >3 天的在途列——是真的再訂一批，還是上輪的 O 沒清？\n　" +
+                             suspect.slice(0, 15).join("\n　") + (suspect.length > 15 ? "\n　…還有 " + (suspect.length - 15) + " 個" : "");
   if (!silent) ui.alert("⑥ 寫入 _在途", msg, ui.ButtonSet.OK);
   return msg;
 }
