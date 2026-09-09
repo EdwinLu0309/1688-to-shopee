@@ -26,26 +26,28 @@ var KEY_HEADER = { "商品表": "商品編號", "SKU表": "品號" };
 // ───────── 選單 ─────────
 function onOpen() {
   SpreadsheetApp.getUi().createMenu("🚀 主檔動作")
-    .addItem("🚀 全執行（①②③④）", "runAllActions")
+    .addItem("🚀 全執行（①②③④⑥）", "runAllActions")
     .addSeparator()
     .addItem("① 畫紅線分區（目前分頁）", "applyRedBordersByNamePrefix")
     .addItem("② 訂單完成備份 → 共用硬碟", "backupOrderSheet")
     .addItem("③ 備份 Order_List → 共用硬碟", "exportOrderList")
     .addItem("④ 廠商訂單 → 進貨金額記錄", "snapshotToAmountRecord")
     .addItem("⑤ 同步蝦皮處理狀態", "syncStatusTab")
+    .addItem("⑥ 寫入 _在途（J 在途自動）", "writeTransit")
     .addToUi();
 }
 
 // ───────── 🚀 全執行：依序跑 ①②③④，最後一次總結 ─────────
 function runAllActions() {
   var ui = SpreadsheetApp.getUi();
-  if (ui.alert("全執行", "將依序執行 ①畫紅線 ②訂單完成備份 ③商品訂貨備份 ④金額記錄，確定？",
+  if (ui.alert("全執行", "將依序執行 ①畫紅線 ②訂單完成備份 ③商品訂貨備份 ④金額記錄 ⑥寫入_在途，確定？",
                ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
   var res = [];
   var steps = [["① 畫紅線", applyRedBordersByNamePrefix],
                ["② 訂單完成備份", backupOrderSheet],
                ["③ 商品訂貨備份", exportOrderList],
-               ["④ 金額記錄", snapshotToAmountRecord]];
+               ["④ 金額記錄", snapshotToAmountRecord],
+               ["⑥ 寫入 _在途", writeTransit]];
   steps.forEach(function (s) {
     try { s[1](true); res.push("✅ " + s[0]); }
     catch (e) { res.push("❌ " + s[0] + "：" + e.message); }
@@ -390,6 +392,89 @@ function syncStatusTab(silent) {
 
 
 // ───────── onEdit：變更Log + 價格Log（自動）─────────
+
+// ───────── ⑥ 寫入 _在途（2026-09-10 #S233）─────────
+// 「🚀 全執行」按下時，把訂貨表 O>0 的列（＝這一輪要訂的）寫進機器分頁「_在途」，
+// 訂貨表 J 訂購未到貨 是 SUMIF('_在途'!F 未到量) 的公式 → 從此 J 自己會對，不用人填。
+// 之後每天由 1688-order 的 order.transit 用 ERP 庫存跳升自動消帳（已進量／最近進ERP日）。
+// 規則：
+//   · 跳過 台幣品（SKU表 G=台幣：台灣廠 2 天到貨、刻意不記在途）
+//   · 跳過 #PO_Sale 預購品（不進 ERP，永遠不會跳升，記了會永遠掛在卡住清單）
+//   · 跳過 S 加購狀態 為 🚫 售完／❌ 規格不符／❌ 的列（根本沒進購物車，沒訂）
+//   · 同品號、未到量>0、下單日在 ±3 天內 → 視為同一輪重按，覆蓋預定量不重複加列
+//   · 下單日寫真 Date（不可寫 "0910"，會變數字 910）
+var TRANSIT_TAB = "_在途";
+var TRANSIT_SAME_ROUND_DAYS = 3;
+var TRANSIT_SKIP_STATUS = ["🚫", "❌"];      // S 欄開頭
+var TRANSIT_SKIP_TAG = "#PO_Sale";
+
+function writeTransit(silent) {
+  var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActiveSpreadsheet();
+  var od = ss.getSheetByName("訂貨表"), sk = ss.getSheetByName("SKU表"), tw = ss.getSheetByName(TRANSIT_TAB);
+  var fail = function (m) { if (silent) throw new Error(m); ui.alert("⑥ 寫入 _在途", m, ui.ButtonSet.OK); };
+  if (!od || !sk) return fail("找不到 訂貨表／SKU表");
+  if (!tw) return fail("找不到「" + TRANSIT_TAB + "」分頁（要先由 1688-order 建好，含 F/G 公式）");
+
+  // 訂貨表：A品號 D標籤 O正式訂貨數（按標題找，找不到退回第 15 欄）S加購狀態（第 19 欄，標題是空的）
+  var ov = od.getDataRange().getValues(), oh = ov[0];
+  var iO = oh.indexOf("正式訂貨數"); if (iO < 0) iO = 14;
+  var iTag = oh.indexOf("標籤"); if (iTag < 0) iTag = 3;
+  var iS = 18;
+  // SKU表：A品號 → G幣別
+  var sv = sk.getDataRange().getValues(), shd = sv[0];
+  var iCur = shd.indexOf("幣別"); if (iCur < 0) iCur = 6;
+  var cur = {};
+  for (var s = 1; s < sv.length; s++) { var c0 = String(sv[s][0]).trim(); if (c0) cur[c0] = String(sv[s][iCur] || "").trim(); }
+
+  var today = new Date(); today = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  var cand = [], skipped = { tw: 0, po: 0, st: 0 };
+  for (var r = 1; r < ov.length; r++) {
+    var code = String(ov[r][0]).trim(); if (!code) continue;
+    var qty = Number(ov[r][iO]); if (!(qty > 0)) continue;
+    if (cur[code] === "台幣") { skipped.tw++; continue; }
+    if (String(ov[r][iTag] || "").indexOf(TRANSIT_SKIP_TAG) >= 0) { skipped.po++; continue; }
+    var st = String(ov[r][iS] || "").trim();
+    if (TRANSIT_SKIP_STATUS.some(function (p) { return st.indexOf(p) === 0; })) { skipped.st++; continue; }
+    cand.push([code, qty]);
+  }
+  if (!cand.length) return fail("訂貨表沒有 O>0 的列（先填正式訂貨數）");
+
+  // 既有 _在途：找「同品號、未到量>0、下單日 ±3 天」的列 → 覆蓋
+  var tl = lastDataRow_(tw, 1);
+  var tv = tl >= 2 ? tw.getRange(2, 1, tl - 1, 6).getValues() : [];   // A~F
+  var open = {};
+  for (var t = 0; t < tv.length; t++) {
+    var tc = String(tv[t][0]).trim(); if (!tc) continue;
+    var d = tv[t][2]; var f = Number(tv[t][5]) || 0;
+    if (!(d instanceof Date) || !(f > 0)) continue;
+    var dd = Math.abs((today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+    if (dd <= TRANSIT_SAME_ROUND_DAYS) open[tc] = t + 2;    // sheet row
+  }
+  var updates = [], appends = [];
+  cand.forEach(function (c) {
+    if (open[c[0]]) updates.push({ row: open[c[0]], qty: c[1] });
+    else appends.push([c[0], c[1], today, 0, "", "", "", ""]);   // A~H；F/G 是 ARRAYFORMULA，寫空字串不擋溢出
+  });
+  updates.forEach(function (u) { tw.getRange(u.row, 2).setValue(u.qty); });
+  if (appends.length) {
+    var start = lastDataRow_(tw, 1) + 1;
+    tw.getRange(start, 1, appends.length, 4).setValues(appends.map(function (a) { return a.slice(0, 4); }));
+    tw.getRange(start, 3, appends.length, 1).setNumberFormat("yyyy-mm-dd");
+  }
+  var msg = "✅ _在途：新增 " + appends.length + " 列、覆蓋 " + updates.length + " 列（同輪重按）" +
+            "｜跳過 台幣 " + skipped.tw + "／預購 " + skipped.po + "／售完或規格不符 " + skipped.st;
+  if (!silent) ui.alert("⑥ 寫入 _在途", msg, ui.ButtonSet.OK);
+  return msg;
+}
+
+// 以某一欄「最後一個有值的列」當資料尾（不用 getLastRow：F/G 的 ARRAYFORMULA 會把整欄撐到底）
+function lastDataRow_(sh, col) {
+  var v = sh.getRange(1, col, sh.getMaxRows(), 1).getValues();
+  for (var i = v.length - 1; i >= 0; i--) if (String(v[i][0]).trim() !== "") return i + 1;
+  return 1;
+}
+
+
 function onEdit(e) {
   try {
     if (!e || !e.range) return;
