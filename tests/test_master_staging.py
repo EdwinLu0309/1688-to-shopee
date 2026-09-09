@@ -62,8 +62,16 @@ def _prepared(code, demand="", tag="", subcat="", price=399, colors=None,
     return {
         # sizes 的原文要與既有 SKU表 M 欄一致（線上 H-c2 的 M 就是純 "XL"），
         # 否則比對不到會發新號——這正是「比對鍵必須是原文」的實際後果。
+        # ⚠️ size_stock 是成本的正本——`_sku_price` 只查它、不再退回 price_cny
+        #    （2026-09-09：退回 price_cny＝用「頁面第一個價」當所有規格的成本，
+        #     實測 27 列裡 13 列因此錯，HNV11 濾網毛利率變 −790%）。
+        #    第二軸存在時 key 是尺碼原文，單軸時 key 是第一軸的值。
         "product_data": {"item_id": "953732723854", "price_cny": cost,
                          "shop_name": supplier, "sizes": ["XL"],
+                         "size_stock": {**{s["size"]: {"price": cost, "stock": 9}
+                                           for s in (sizes or [])},
+                                        **{c["src_1688"]: {"price": cost, "stock": 9}
+                                           for c in colors}},
                          "title": "原始標題"},
         "ai_content": {"product_short_name": "蝴蝶結素色三角褲"},
         "variants": variants,
@@ -248,6 +256,22 @@ def test_single_axis_product():
     eq("品名不帶逗號規格", skus[0]["name"], "H-c2_蝴蝶結素色三角褲_杏色")
 
 
+def test_sku_cost_unit_scale():
+    """⚠️⚠️ SKU表 F 進項成本＝RMB×100，商品表 E＝RMB 原值（2026-09-09 全表驗證）。
+
+    寫錯的話訂貨表 U 金額TW（= O × F/100 × 匯率）會差 100 倍，而**金額只是變小、
+    不會報錯**。實測 1-1 有 1,563/1,971 列比值正好 100.0。
+    """
+    print("\n[9] ⚠️ SKU表 F 進項成本必須 ×100（商品表 E 不用）")
+    from scraper.master_staging import _sku_cost_cell, SKU_COST_SCALE
+    eq("倍率是 100", SKU_COST_SCALE, 100)
+    eq("9.88 RMB → 988", _sku_cost_cell("9.88"), "988")
+    eq("5 RMB → 500（比照兔子膠實際值）", _sku_cost_cell("5"), "500")
+    eq("小數不進位成 0", _sku_cost_cell("0.145"), "14.5")
+    eq("空值照樣空、不可變 0", _sku_cost_cell(""), "")
+    eq("非數字原樣保留（台幣品的 -）", _sku_cost_cell("-"), "-")
+
+
 if __name__ == "__main__":
     print("=" * 56)
     print("_待貼新品 產生器回歸測試")
@@ -260,7 +284,7 @@ if __name__ == "__main__":
                test_subcategory_from_list_wins, test_preorder_branch, test_formal_branch,
                test_sku_row_fields, test_new_color_gets_new_code,
                test_unsupported_shop_leaves_blank_not_wrong_code,
-               test_bad_code_does_not_kill_batch, test_single_axis_product):
+               test_bad_code_does_not_kill_batch, test_single_axis_product, test_sku_cost_unit_scale):
         fn()
     print("\n" + "=" * 56)
     if FAILED:

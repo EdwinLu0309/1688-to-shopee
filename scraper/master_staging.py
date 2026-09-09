@@ -66,6 +66,14 @@ PRODUCT_TODO_COLS = [4, 10]                         # E 成本 / K 廠商
 SKU_TODO_COLS = [5]                                 # F 進項成本（Q 重量不在契約範圍內）
 
 PREORDER_TAG = "#PO_Sale"          # 預購專屬標籤（比照三家共用的 #CL_Sale）
+# ⚠️⚠️ **同一張 1-1 裡成本有兩套單位，寫錯就是 100 倍的錯**（2026-09-09 全表驗證）：
+#   · 商品表 E 成本      ＝ RMB **原值**（商品表 F 台幣成本 = E × 匯率）
+#   · SKU表 F 進項成本   ＝ RMB **×100**（訂貨表 U 金額TW = O × F/**100** × 匯率）
+#   實測 1,971 列可比對中 1,563 列比值正好 100.0（中位數 100.0）；
+#   例：兔子膠 SKU表 F=500 ＝ 5.00 RMB。
+#   寫成原值的話訂貨金額會少 100 倍——而金額只是變小、不會報錯。
+SKU_COST_SCALE = 100
+
 PREORDER_SAFETY_STOCK = "200"      # 預購品安全存量（蝦皮端庫存也開 200）
 SPECIAL_ORDER_RATIO = 1            # J 特殊訂貨%：PERCENT 格式，實值 1 ＝ 顯示 100%
 
@@ -339,6 +347,19 @@ def build_blocks(shop: str, prepared: list[dict],
         else:
             logger.warning(f"[{code}] 抓不到選到規格的成本 → 商品表 E 留空（會顯示「成本未填」），請手補")
 
+        # ── 包裝品提醒：成本一律記「單個」，不是整包價 ──────────────
+        # 規則正本在 1688-order/CLAUDE.md：訂貨表 U 金額TW 與商品表 H 毛利率
+        # 都以「個」為單位（同 ERP 可售／安全存量），成本填包價 → 金額膨脹 N 倍、
+        # 毛利率變負。每包入數 per-SKU 不同（實測 J-b9 小中 20 入／大 15／特大 10），
+        # 機器猜不出來 → 只提醒，並要人在 SKU表 N 備註寫「單位：N入」。
+        _PACK_HINT = re.compile(r"\d+\s*(包|片|pcs|PCS|支|入|組|组|套|對|对|双|雙)|\*\s*\d+")
+        for x in pairs:
+            if x["price"] and _PACK_HINT.search(x["spec1"] + x["spec2"] + x["display"]):
+                logger.warning(f"[{code}] 「{x['display'][:24]}」看起來是包裝品，"
+                               f"而成本填的是 {x['price']} RMB —— **成本要記單個（包價÷每包入數）**，"
+                               f"並在 SKU表 N 備註寫「單位：N入」，否則訂貨金額與毛利率會差 N 倍")
+                break
+
         # ── 配 SKU 品號（append-only：既有原文沿用舊碼、新原文才發新號）──
         # ⚠️ 三家品號體系完全不同，依賣場分派到各自的生碼器，**絕不共用一套規則**
         existing = collect_existing(ctx.sku_rows, code)
@@ -434,6 +455,18 @@ def load_master_context(shop: str, sa_json: str | Path | None = None) -> MasterC
     sku_rows = sh.worksheet(SKU_WS).get("A2:M8000")
     logger.info(f"[{shop}] 讀既有 1-1：商品表 {len(product_rows)} 列 / SKU表 {len(sku_rows)} 列")
     return MasterContext(product_rows, sku_rows, shop)
+
+
+def _sku_cost_cell(rmb: str) -> str:
+    """RMB 原值 → SKU表 F 進項成本的儲存格值（×100）。空值照樣空，不要變成 0。"""
+    s = str(rmb or "").strip()
+    if not s:
+        return ""
+    try:
+        v = float(s) * SKU_COST_SCALE
+    except ValueError:
+        return s                       # 不是數字（例如台幣品填的 "-"）原樣保留
+    return str(int(v)) if abs(v - round(v)) < 1e-9 else str(round(v, 4))
 
 
 def leftover_codes(stage_ws, sh) -> dict:
@@ -540,7 +573,7 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
         row[1] = s["name"]                  # B 品名（編號_品名_規格，直接寫值）
         row[2] = s["category"]              # C 分類
         row[3] = s["tag"]                   # D 標籤（預購＝#PO_Sale）
-        row[5] = s["price"]                 # F 進項成本（⚠️ 包裝品要換算單個）
+        row[5] = _sku_cost_cell(s["price"])  # F 進項成本（RMB×100；⚠️ 包裝品要換算單個）
         row[6] = "人民幣"                    # G 幣別
         # H 安全存量：預購統一 200；正式品用名單填的（Edwin 2026-09-09 要求帶入——
         # 他名單上已經填過一次，不該再手打第二次）
