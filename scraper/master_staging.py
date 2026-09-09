@@ -41,6 +41,8 @@ from loguru import logger
 from scraper.sku_code import UnsupportedShop, allocate, collect_existing
 
 STAGING_TAB = "_待貼新品"
+PRODUCT_WS = "商品表"
+SKU_WS = "SKU表"
 
 # 契約表頭：商品表 A~U（21 欄）、SKU表 A~P（16 欄）——2026-09-07 三家逐欄比對確認一致。
 # 三家 Q 之後各不相同（Lady 17 欄／Nail 20／Baby SKU 20·商品表 22），故產出只寫契約範圍。
@@ -67,7 +69,19 @@ PREORDER_TAG = "#PO_Sale"          # 預購專屬標籤（比照三家共用的 
 PREORDER_SAFETY_STOCK = "200"      # 預購品安全存量（蝦皮端庫存也開 200）
 SPECIAL_ORDER_RATIO = 1            # J 特殊訂貨%：PERCENT 格式，實值 1 ＝ 顯示 100%
 
-YELLOW = {"red": 1.0, "green": 0.95, "blue": 0.6}
+# ── 表頭底色＝貼上指南（Edwin 2026-09-09 定，取代一堆文字範圍）──────────
+#    綠＝程式會填、可以直接貼；黃＝不要貼（不是整欄陣列公式就是要人自己補）。
+#    ⚠️ 黃底欄若被貼進正表，會把錨在第 2 列的整欄陣列公式打成 #REF!。
+GREEN = {"red": 0.84, "green": 0.93, "blue": 0.83}
+YELLOW = {"red": 1.0, "green": 0.95, "blue": 0.8}
+# 資料格「機器沒抓到、要你補」用橘色 —— 刻意與表頭的黃分開，
+# 兩種黃會讓人分不清「這欄別貼」和「這格要補」。
+ORANGE = {"red": 1.0, "green": 0.85, "blue": 0.6}
+FONT_SIZE = 14                      # Edwin 要求
+
+# 程式會填值的欄（0-based）＝表頭標綠的那些；其餘一律標黃。
+PRODUCT_FILL_COLS = [0, 1, 2, 3, 4, 6, 9, 10, 11]   # A編號 B分類 C子分類 D品名 E成本 G售價 J特殊% K廠商 L網址
+SKU_FILL_COLS = [0, 1, 2, 3, 5, 6, 7, 11, 12]       # A品號 B品名 C分類 D標籤 F成本 G幣別 H安全存量 L規格一 M規格二
 GREY_TEXT = {"red": 0.55, "green": 0.55, "blue": 0.55}
 BLUE_HDR = {"red": 0.85, "green": 0.9, "blue": 0.97}
 
@@ -86,9 +100,9 @@ def verify_headers(sh, shop: str) -> tuple[list[str], list[str]]:
     回傳 (商品表實際表頭, SKU表實際表頭) 供呼叫端記錄；產出一律只寫契約範圍。
     """
     prod_hdr = sh.worksheet("商品表").get("A1:Z1")[0]
-    sku_hdr = sh.worksheet("SKU表").get("A1:Z1")[0]
+    sku_hdr = sh.worksheet(SKU_WS).get("A1:Z1")[0]
     for actual, want, tab in ((prod_hdr, PRODUCT_HEADERS, "商品表"),
-                              (sku_hdr, SKU_HEADERS, "SKU表")):
+                              (sku_hdr, SKU_HEADERS, SKU_WS)):
         n = len(want)
         got = [c.strip() for c in actual[:n]]
         if got != want:
@@ -373,9 +387,31 @@ def load_master_context(shop: str, sa_json: str | Path | None = None) -> MasterC
     """讀 1-1 正表（商品表 A:C、SKU表 A:M）建對照＋既有 SKU 列。"""
     sh, _ = _open_master(shop, sa_json)
     product_rows = sh.worksheet("商品表").get("A2:C5000")
-    sku_rows = sh.worksheet("SKU表").get("A2:M8000")
+    sku_rows = sh.worksheet(SKU_WS).get("A2:M8000")
     logger.info(f"[{shop}] 讀既有 1-1：商品表 {len(product_rows)} 列 / SKU表 {len(sku_rows)} 列")
     return MasterContext(product_rows, sku_rows, shop)
+
+
+def leftover_codes(stage_ws, sh) -> dict:
+    """待貼分頁殘留的 SKU 品號，分成「已貼進 1-1」與「還沒貼」。
+
+    ⚠️ 為什麼用「查正表有沒有這些品號」而不是「分頁有沒有資料」（Edwin 2026-09-09 問
+    「貼完要不要自己刪」）：要人記得清空，就一定有忘記的一天，而忘記的代價是
+    **下次跑被擋住、或更糟：以為擋住是誤報而直接 --force，把還沒貼的那批洗掉**。
+    改成查事實——品號在 SKU 表找得到＝已經貼走了，可以安心覆蓋；找不到＝真的還沒貼，
+    這時才擋。**所以貼完什麼都不用做，下次直接跑。**
+    """
+    vals = stage_ws.get_all_values()
+    marks = [i for i, r in enumerate(vals) if str(r[0] if r else "").startswith("■")]
+    if len(marks) < 2:
+        return {"pasted": [], "pending": []}
+    codes = [str(r[0]).strip() for r in vals[marks[1] + 2:] if r and str(r[0]).strip()]
+    if not codes:
+        return {"pasted": [], "pending": []}
+    live = {c.strip() for c in sh.worksheet(SKU_WS).col_values(1) if c.strip()}
+    pasted = [c for c in codes if c in live]
+    pending = [c for c in codes if c not in live]
+    return {"pasted": pasted, "pending": pending}
 
 
 def write_staging(shop: str, prepared: list[dict], force: bool = False,
@@ -397,12 +433,17 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
         old = sh.worksheet(STAGING_TAB)
     except gspread.WorksheetNotFound:
         pass
-    if old is not None:
-        vals = old.get_all_values()
-        has_data = any(cell.strip() for r in vals[2:] for cell in r)  # 前兩列是說明/表頭
-        if has_data and not force:
+    if old is not None and not force:
+        left = leftover_codes(old, sh)
+        if left["pending"]:
             raise StagingNotEmpty(
-                f"「{STAGING_TAB}」還留著上一批（{len(vals)} 列）。先貼走/清空，或選擇覆蓋。")
+                f"「{STAGING_TAB}」還留著上一批**沒貼進 1-1** 的資料："
+                f"{len(left['pending'])} 個品號（{'、'.join(left['pending'][:6])}"
+                f"{' …' if len(left['pending']) > 6 else ''}）。"
+                f"先貼走，或選擇覆蓋。")
+        if left["pasted"]:
+            logger.info(f"上一批 {len(left['pasted'])} 個品號都已在 1-1 找到 → 視為已貼走，直接覆蓋"
+                        f"（不用先手動清空）")
 
     # ⚠️ 先驗表頭契約再做事——不符就中止，寧可不寫也不要貼錯欄（貼錯不會報錯）
     verify_headers(sh, shop)
@@ -472,11 +513,30 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
         return f"{a1(col0, first)}:{a1(col0, last)}"
 
     fmt: list[tuple[list[str], dict]] = []
-    fmt.append(([f"A{b1_hdr}:{a1(len(PRODUCT_HEADERS) + 1, b1_hdr)}",
-                 f"A{b2_hdr}:{a1(len(SKU_HEADERS) + 1, b2_hdr)}"],
-                {"backgroundColor": BLUE_HDR, "textFormat": {"bold": True}}))
 
-    # 黃底只標「機器沒填到」的格子，填到的不要打擾
+    # 全分頁 14 級字（Edwin 要求）
+    fmt.append(([f"A{b1_note}:{a1(len(PRODUCT_HEADERS) + 1, b2_last)}"],
+                {"textFormat": {"fontSize": FONT_SIZE}}))
+
+    # 說明列：粗體、不換行擠版
+    fmt.append(([f"A{b1_note}", f"A{b2_note}"],
+                {"textFormat": {"bold": True, "fontSize": FONT_SIZE}}))
+
+    # ── 表頭底色＝貼上指南：綠＝可以貼／黃＝不要貼 ──
+    for hdr_row, headers, fill_cols in ((b1_hdr, PRODUCT_HEADERS, PRODUCT_FILL_COLS),
+                                        (b2_hdr, SKU_HEADERS, SKU_FILL_COLS)):
+        green = [a1(c, hdr_row) for c in range(len(headers)) if c in fill_cols]
+        yellow = [a1(c, hdr_row) for c in range(len(headers)) if c not in fill_cols]
+        fmt.append((green, {"backgroundColor": GREEN,
+                            "textFormat": {"bold": True, "fontSize": FONT_SIZE}}))
+        fmt.append((yellow, {"backgroundColor": YELLOW,
+                             "textFormat": {"bold": True, "fontSize": FONT_SIZE}}))
+        # 「(勿貼)」那兩欄用灰字，跟資料欄區隔
+        fmt.append(([f"{a1(len(headers), hdr_row)}:{a1(len(headers) + 1, hdr_row)}"],
+                    {"textFormat": {"foregroundColor": GREY_TEXT, "bold": True,
+                                    "fontSize": FONT_SIZE}}))
+
+    # ── 資料格「機器沒抓到、要你補」→ 橘底（與表頭的黃刻意分開）──
     todo: list[str] = []
     for i, row in enumerate(products):
         for c in PRODUCT_TODO_COLS:
@@ -486,7 +546,7 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
         if not str(s["price"]).strip():
             todo.append(a1(SKU_TODO_COLS[0], b2_first + j))
     if todo:
-        fmt.append((todo, {"backgroundColor": YELLOW}))
+        fmt.append((todo, {"backgroundColor": ORANGE}))
 
     # J 特殊訂貨% 設成百分比，兩種貼法都不會跑掉（正表是 PERCENT 格式）
     if products:
@@ -501,6 +561,24 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
                     {"textFormat": {"foregroundColor": GREY_TEXT}}))
     for ranges, style in fmt:
         ws.format(ranges, style)
+
+    # ── 格線（Edwin 要求）：gspread 的 format() 不支援框線，要走 updateBorders ──
+    #    兩個區塊各畫一次（表頭列 + 資料列，含「(勿貼)」那兩欄），細灰線。
+    line = {"style": "SOLID", "width": 1,
+            "color": {"red": 0.6, "green": 0.6, "blue": 0.6}}
+    border_reqs = []
+    for hdr_row, last_row, n_cols in ((b1_hdr, b1_last, len(PRODUCT_HEADERS) + 2),
+                                      (b2_hdr, b2_last, len(SKU_HEADERS) + 2)):
+        if last_row < hdr_row:
+            continue
+        border_reqs.append({"updateBorders": {
+            "range": {"sheetId": ws.id,
+                      "startRowIndex": hdr_row - 1, "endRowIndex": last_row,
+                      "startColumnIndex": 0, "endColumnIndex": n_cols},
+            "top": line, "bottom": line, "left": line, "right": line,
+            "innerHorizontal": line, "innerVertical": line}})
+    if border_reqs:
+        sh.batch_update({"requests": border_reqs})
 
     kind = f"（預購 {n_pre} / 正式 {len(skus) - n_pre} SKU 列）"
     logger.info(f"[{shop}] {STAGING_TAB} 已寫入：{len(products)} 商品 / {len(skus)} SKU 列 {kind}")
