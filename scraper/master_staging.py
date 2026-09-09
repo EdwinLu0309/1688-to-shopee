@@ -216,13 +216,21 @@ def _size_original_map(product_data: dict) -> dict[str, str]:
     return out
 
 
-def _sku_price(product_data: dict, size_orig: str) -> str:
-    """該規格的 1688 價：size_stock 有就用，退 price_cny，再沒有留空（人補）。"""
-    info = (product_data.get("size_stock") or {}).get(size_orig)
+def _sku_price(product_data: dict, spec_key: str) -> str:
+    """該規格自己的 1688 價（查 size_stock）；查不到就**留空給人補**。
+
+    ⚠️⚠️ **絕不可退回 `price_cny`**（2026-09-09 Edwin 抓到）：那是頁面上抓到的
+    **第一個**價格，不是這個規格的價格。同一頁的各規格常常差很多倍——
+    實測 HNV11 那頁 ¥198（打磨機）／¥158（吸塵器）／**¥10（濾網）**，
+    而三列全被寫成 198 → 濾網售價 110、成本 978 台幣 → **毛利率 −790%**；
+    HNL27 選的夾子款是 ¥12 卻被寫成 ¥29.5（第一個規格的價）。
+    成本錯 → 毛利率錯 → 目標ROAS／安全ROAS 錯，而且**看起來像真的數字**。
+    留空的話商品表會顯示「成本未填」＝出聲的失敗，人補得掉。
+    """
+    info = (product_data.get("size_stock") or {}).get(spec_key)
     if isinstance(info, dict) and (info.get("price") or 0) > 0:
         return str(info["price"])
-    p = product_data.get("price_cny") or 0
-    return str(p) if p > 0 else ""
+    return ""
 
 
 def build_blocks(shop: str, prepared: list[dict],
@@ -249,7 +257,7 @@ def build_blocks(shop: str, prepared: list[dict],
         row[2] = (str(cfg.get("subcategory", "")).strip()    # C 子分類（名單優先）
                   or ctx.product_subcategory(code))
         row[3] = short_name                                  # D 品名
-        row[4] = str(price_cny) if price_cny > 0 else ""     # E 成本（抓得到才填）
+        row[4] = ""            # E 成本：等 pairs 算完再填（見下方「依實際選到的規格定成本」）
         # G 蝦皮售價 ＝ **實際成交價（折後）**，不是掛牌價。
         # ⚠️ 這欄餵給 H 蝦皮毛利率 → I 綜合毛利率 → R 目標ROAS / S 安全ROAS。
         #    填掛牌價會讓毛利率虛高（實例：掛牌690/折後345/成本120 → 65% 虛報成 83%），
@@ -288,12 +296,48 @@ def build_blocks(shop: str, prepared: list[dict],
                     })
         else:
             for t1 in tier1:
+                spec1 = str(t1.get("src_1688", ""))
                 pairs.append({
-                    "key": (str(t1.get("src_1688", "")), ""),
-                    "spec1": str(t1.get("src_1688", "")), "spec2": "",
+                    "key": (spec1, ""),
+                    "spec1": spec1, "spec2": "",
                     "display": str(t1.get("color", "")),
-                    "price": str(price_cny) if price_cny > 0 else "",
+                    # 單軸：買區列的 key 就是第一軸的值 → 直接查它自己的價
+                    "price": _sku_price(pd, spec1),
                 })
+
+        # ── 成本的來源優先序：名單填的 ＞ 抓取的 per-規格價 ──────────────
+        # ⚠️ **名單優先**（2026-09-09 Edwin 指出）：1688 會依數量階梯／會員身分顯示不同價，
+        #    抓到的是「當下這個登入態看到的價」（實測 HNV7 名單 139、抓到 125.1＝9 折），
+        #    而名單那個是他下單時真正付的。成本錯 → 毛利率 → R/S ROAS 全錯且看起來像真的。
+        # 例外：**同一個名單列選到多個規格、而它們的抓取價彼此不同**時，
+        #    名單那一個數字表達不了 → 這時才逐列用抓取價，並喊出來。
+        _listed = str(cfg.get("cost_cny", "")).strip()
+        _scraped = [x["price"] for x in pairs if str(x["price"]).strip()]
+        _mixed = len(set(_scraped)) > 1
+        if _listed and not _mixed:
+            for x in pairs:
+                x["price"] = _listed
+            if _scraped and abs(float(_scraped[0]) - float(_listed)) > float(_listed) * 0.1:
+                logger.warning(f"[{code}] 名單成本 {_listed} 與 1688 現價 {_scraped[0]} 差超過 10%"
+                               f"（階梯價/會員價，或真的漲跌了）→ 採用名單的，請留意")
+        elif _mixed:
+            logger.warning(f"[{code}] 這一列選到多個規格、成本各不同"
+                           f"（{'／'.join(sorted(set(_scraped)))} RMB）→ 逐列用 1688 抓到的價，"
+                           f"名單的 {_listed or '(空)'} 不套用")
+
+        # ── 商品表 E 成本＝**實際選到的那些規格**的成本，不是頁面第一個價 ──
+        #    （2026-09-09 Edwin 抓到：HNV11 三列共用 ¥198，但濾網其實是 ¥10）
+        #    選到多個規格而價格不同時取眾數並 warning——商品表一列只有一個成本欄，
+        #    而它餵給 H 毛利率 → R/S ROAS，猜錯的代價是廣告門檻整支錯。
+        _prices = [x["price"] for x in pairs if str(x["price"]).strip()]
+        if _prices:
+            _uniq = sorted(set(_prices), key=lambda v: float(v))
+            row[4] = Counter(_prices).most_common(1)[0][0]
+            if len(_uniq) > 1:
+                logger.warning(f"[{code}] 選到的規格成本不一致（{'／'.join(_uniq)} RMB）→ "
+                               f"商品表 E 取眾數 {row[4]}，貼進 1-1 前請確認")
+        else:
+            logger.warning(f"[{code}] 抓不到選到規格的成本 → 商品表 E 留空（會顯示「成本未填」），請手補")
 
         # ── 配 SKU 品號（append-only：既有原文沿用舊碼、新原文才發新號）──
         # ⚠️ 三家品號體系完全不同，依賣場分派到各自的生碼器，**絕不共用一套規則**

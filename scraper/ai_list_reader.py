@@ -58,6 +58,10 @@ _HEADER_ALIASES = {
     # ⚠️ 這欄的原義是「補貨水位」不是「首批上架量」，但這批 26 支貨都還沒訂，
     #    用它當上架庫存是 Edwin 的取捨：量小（1~20），真被買到就吃取消率。
     "safety_stock": ["安全存量", "安全库存", "安全存量(件)"],
+    # 「商品成本」＝ Edwin 自己確認過的 1688 進價（RMB）。**優先於抓取價**：
+    # 1688 會依數量階梯/會員身分顯示不同價（實測 HNV7 名單 139、抓到 125.1＝9 折），
+    # 抓到的是「當下這個登入態看到的價」，名單那個是他下單時真正付的。
+    "cost": ["商品成本", "商品成本(RMB)", "成本", "进货成本", "進貨成本"],
     # 「選項說明」＝白話寫要進哪些選項（合併原本的款式＋尺寸，2026-09-08）。
     # 它會被當成 style_note 餵給 Claude（prompt 已有「Edwin 指定這支要哪些款式」），
     # 所以可以寫「只要底膠和封層」「1~30色」「不要粉色系」這種人話。
@@ -190,6 +194,7 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
             "code": code,
             "price": price,
             "final_price": _num_cell(r, colmap.get("final_price")),  # → 1-1 商品表 G
+            "cost_cny": _cell(r, colmap.get("cost")),   # → 商品表 E / SKU表 F（優先於抓取價）
             "stock": _num_cell(r, colmap.get("safety_stock")) or stock_default,
             "category": cat_id,
             "style_filter": style,       # 「三色長褲」等 → batch 端配合色卡挑

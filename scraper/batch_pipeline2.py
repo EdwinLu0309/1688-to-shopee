@@ -257,6 +257,7 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
             "selling_price": entry.get("price", 99),      # 掛牌價 → 蝦皮 Excel M 欄
             # 實際成交價（折後）→ 1-1 商品表 G；沒填就退回掛牌價並在 staging 警告
             "final_price": entry.get("final_price") or 0,
+            "cost_cny": entry.get("cost_cny", ""),      # 名單填的 1688 進價（優先於抓取價）
             "stock_per_option": entry.get("stock", 10),
             # 重量：名單填了就用名單的，否則抓 1688 頁面的重量表。
             # ⚠️ 兩者都沒有 → None，Excel 留空並 warning，**不退回寫死的 0.1kg**
