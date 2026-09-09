@@ -475,6 +475,10 @@ function writeTransit(silent) {
     var start = lastDataRow_(tw, 1) + 1;
     tw.getRange(start, 1, appends.length, 4).setValues(appends);
     tw.getRange(start, 3, appends.length, 1).setNumberFormat("yyyy-mm-dd");
+    // ⚠️ D 已進量是「件數」不是日期：整欄曾被設成 DATE 格式，10 件顯示成 1900-01-09、
+    //    77 件顯示成 1900-03-17（值是對的、F 未到量也算得出來，但那一欄人完全看不懂）。
+    //    2026-09-10 已把整欄改回數字；這裡每次 append 再壓一次，避免又被日期格式傳染。
+    tw.getRange(start, 4, appends.length, 1).setNumberFormat("#,##0");
   }
   var msg = "✅ _在途：新增 " + appends.length + " 列、覆蓋 " + updates.length + " 列（同輪重按）" +
             "｜跳過 台幣 " + skipped.tw + "／預購 " + skipped.po + "／售完、規格不符、未找到 " + skipped.st;
@@ -547,10 +551,10 @@ var NP_PRODUCT = "商品表";
 var NP_SKU     = "SKU表";
 var NP_ORDER   = "訂貨表";
 
-// 待貼分頁「程式會填、要貼過去」的欄（0-based，對應表頭綠底那些）
-var NP_PROD_FILL = [0, 1, 2, 3, 4, 6, 9, 10, 11];   // A編號 B分類 C子分類 D品名 E成本 G售價 J特殊% K廠商 L網址
-var NP_SKU_FILL  = [0, 1, 2, 3, 5, 6, 7, 11, 12];   // A品號 B品名 C分類 D標籤 F成本 G幣別 H安全存量 L規格一 M規格二
-// 連續欄合併成 range 一次寫（跳過中間的公式欄）
+// 「程式會填、要貼過去」的欄＝待貼分頁表頭**綠底**那些；中間的公式欄整個跳過。
+//   商品表：A編號 B分類 C子分類 D品名 E成本 ┊ G售價 ┊ J特殊% K廠商 L網址
+//   SKU表 ：A品號 B品名 C分類 D標籤 ┊ F成本 G幣別 H安全存量 ┊ L規格一 M規格二
+// 連續的合併成一個 range 一次寫（少幾次 API，也不會誤觸公式欄）
 var NP_PROD_RANGES = [[1, 5], [7, 1], [10, 3]];     // [起始欄, 欄數]：A~E / G / J~L
 var NP_SKU_RANGES  = [[1, 4], [6, 3], [12, 2]];     // A~D / F~H / L~M
 
