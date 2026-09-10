@@ -36,6 +36,8 @@ function onOpen() {
     .addItem("④ 廠商訂單 → 進貨金額記錄", "snapshotToAmountRecord")
     .addItem("⑤ 同步蝦皮處理狀態", "syncStatusTab")
     .addItem("⑥ 寫入 _在途（J 在途自動）", "writeTransit")
+    .addSeparator()
+    .addItem("⑦ 水位診斷 手填安全存量 → 寫回 SKU表", "applyHandSafety")
     .addToUi();
 
   // 📦 新品：獨立選單，與「🚀 主檔動作」分開（Edwin 2026-09-10 要求兩個功能分開）
@@ -493,6 +495,75 @@ function writeTransit(silent) {
   if (suspect.length) msg += "\n\n⚠️ 這 " + suspect.length + " 個品號在 _在途 已有 >3 天的在途列——是真的再訂一批，還是上輪的 O 沒清？\n　" +
                              suspect.slice(0, 15).join("\n　") + (suspect.length > 15 ? "\n　…還有 " + (suspect.length - 15) + " 個" : "");
   if (!silent) ui.alert("⑥ 寫入 _在途", msg, ui.ButtonSet.OK);
+  return msg;
+}
+
+
+// ───────── ⑦ 水位診斷「手填安全存量」→ 一鍵寫回 SKU表 ─────────
+// Edwin 2026-09-10：「我要一個手填欄，填完按一個鍵就照品號寫進 SKU表，不然我要一直複製編號很久。」
+// ⚠️ 這個動作**刻意不放進 🚀 全執行**：改水位是決策，不能被順手跑掉。
+// ⚠️⚠️ 程式寫入**不會觸發 onEdit**，所以 `變更Log` 要自己補一列——否則 `_水位診斷` 下輪
+//      會把這支當成「沒調過」，而「已調待驗證」那條擋重複加碼的規則就是靠它。
+var DIAG_TAB = "_水位診斷";
+
+function applyHandSafety(silent) {
+  var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActiveSpreadsheet();
+  var fail = function (m) { if (silent) throw new Error(m); ui.alert("⑦ 寫回安全存量", m, ui.ButtonSet.OK); };
+  var dg = ss.getSheetByName(DIAG_TAB), sk = ss.getSheetByName("SKU表");
+  if (!dg) return fail("找不到「" + DIAG_TAB + "」分頁（1688-order 每天 11:50 產生）");
+  if (!sk) return fail("找不到 SKU表");
+
+  var dv = dg.getDataRange().getValues(), dh = dv[0];
+  var iCode = dh.indexOf("品號"), iHand = dh.indexOf("手填安全存量");
+  if (iCode < 0 || iHand < 0) return fail("「" + DIAG_TAB + "」找不到「品號」或「手填安全存量」欄");
+
+  var want = {}, nIn = 0;
+  for (var r = 1; r < dv.length; r++) {
+    var c = String(dv[r][iCode]).trim(); if (!c) continue;
+    var q = dv[r][iHand];
+    if (q === "" || q === null || q === undefined || isNaN(Number(q))) continue;
+    want[c] = Number(q); nIn++;
+  }
+  if (!nIn) return fail("「手填安全存量」整欄是空的。\n\n先把「建議安全存量」複製過去（可以再自己改），再按這個。");
+
+  var sv = sk.getDataRange().getValues(), shd = sv[0];
+  var jCode = shd.indexOf("品號"), jSafe = shd.indexOf("安全存量");
+  if (jCode < 0 || jSafe < 0) return fail("SKU表 找不到「品號」或「安全存量」欄");
+
+  var col = sk.getRange(2, jSafe + 1, sv.length - 1, 1).getValues();
+  var ts = Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd HH:mm:ss");
+  var log = [], hit = {}, changed = 0, same = 0;
+  for (var i = 1; i < sv.length; i++) {
+    var c2 = String(sv[i][jCode]).trim(); if (!c2 || !(c2 in want)) continue;
+    hit[c2] = 1;
+    var oldV = sv[i][jSafe], newV = want[c2];
+    if (Number(oldV) === newV) { same++; continue; }
+    col[i - 1][0] = newV; changed++;
+    log.push([ts, "SKU表", c2, "安全存量", oldV, newV]);
+  }
+  var missing = [];
+  for (var k in want) if (!hit[k]) missing.push(k);
+
+  var lg = ss.getSheetByName("變更Log");
+  if (changed) {
+    sk.getRange(2, jSafe + 1, col.length, 1).setValues(col);
+    if (lg) lg.getRange(lg.getLastRow() + 1, 1, log.length, 6).setValues(log);
+  }
+  // 只清「真的寫進去了」的那幾格；對不到品號的留著讓人看見
+  if (changed || same) {
+    var hv = dg.getRange(2, iHand + 1, dv.length - 1, 1).getValues();
+    for (var r2 = 1; r2 < dv.length; r2++) {
+      if (hit[String(dv[r2][iCode]).trim()]) hv[r2 - 1][0] = "";
+    }
+    dg.getRange(2, iHand + 1, hv.length, 1).setValues(hv);
+  }
+
+  var msg = "✅ 寫回 SKU表 安全存量 " + changed + " 支｜值沒變略過 " + same + " 支";
+  if (changed && !lg) msg += "\n\n⚠️ 找不到「變更Log」，這次沒留紀錄 → 下輪水位診斷會把這些當成「沒調過」。";
+  if (missing.length) msg += "\n\n⚠️ 這 " + missing.length + " 個品號在 SKU表 找不到、沒有寫入（手填的值留著）：\n　"
+                             + missing.slice(0, 15).join("、") + (missing.length > 15 ? "\n　…還有 " + (missing.length - 15) + " 個" : "");
+  if (changed) msg += "\n\n訂貨表的「訂貨量試算」會立刻跟著變；已寫入的手填格已清空（紀錄在 變更Log）。";
+  if (!silent) ui.alert("⑦ 寫回安全存量", msg, ui.ButtonSet.OK);
   return msg;
 }
 
