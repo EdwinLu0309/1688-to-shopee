@@ -424,7 +424,7 @@ function writeTransit(silent) {
   var od = ss.getSheetByName("訂貨表"), sk = ss.getSheetByName("SKU表"), tw = ss.getSheetByName(TRANSIT_TAB);
   var fail = function (m) { if (silent) throw new Error(m); ui.alert("⑥ 寫入 _在途", m, ui.ButtonSet.OK); };
   if (!od || !sk) return fail("找不到 訂貨表／SKU表");
-  if (!tw) return fail("找不到「" + TRANSIT_TAB + "」分頁（要先由 1688-order 建好，含 F/G 公式）");
+  if (!tw) return fail("找不到「" + TRANSIT_TAB + "」分頁（要先由 1688-order 建好，含 B 品名／G/H 公式）");
 
   // 訂貨表：A品號 D標籤 O正式訂貨數（按標題找，找不到退回第 15 欄）S加購狀態（第 19 欄，標題是空的）
   var ov = od.getDataRange().getValues(), oh = ov[0];
@@ -452,11 +452,11 @@ function writeTransit(silent) {
 
   // 既有 _在途：找「同品號、未到量>0、下單日 ±3 天」的列 → 覆蓋
   var tl = lastDataRow_(tw, 1);
-  var tv = tl >= 2 ? tw.getRange(2, 1, tl - 1, 6).getValues() : [];   // A~F
+  var tv = tl >= 2 ? tw.getRange(2, 1, tl - 1, 7).getValues() : [];   // A~G（B 品名是公式；C 預定量／D 下單日／G 未到量）
   var open = {}, older = {};                                    // open＝±3 天同輪；older＝>3 天還在途（真再訂？還是上輪 O 沒清？）
   for (var t = 0; t < tv.length; t++) {
     var tc = String(tv[t][0]).trim(); if (!tc) continue;
-    var d = tv[t][2]; var f = Number(tv[t][5]) || 0;
+    var d = tv[t][3]; var f = Number(tv[t][6]) || 0;
     if (!(d instanceof Date) || !(f > 0)) continue;
     var dd = Math.abs((today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
     if (dd <= TRANSIT_SAME_ROUND_DAYS) open[tc] = t + 2;    // sheet row
@@ -466,15 +466,16 @@ function writeTransit(silent) {
   cand.forEach(function (c) {
     if (open[c[2]]) updates.push({ row: open[c[2]], qty: c[1] });
     else {
-      appends.push([c[0], c[1], today, 0]);                  // A~D；E 空、F/G 是 ARRAYFORMULA 自動長
+      appends.push([c[0], c[1], today, 0]);                  // A 品號＋C~E（預定量/下單日/已進量 0）；B 品名、G/H 是 ARRAYFORMULA 自動長
       if (older[c[2]] !== undefined) suspect.push(c[2] + "（" + older[c[2]] + " 天前那批還在途）");
     }
   });
-  updates.forEach(function (u) { tw.getRange(u.row, 2).setValue(u.qty); });
+  updates.forEach(function (u) { tw.getRange(u.row, 3).setValue(u.qty); });   // C 預定量
   if (appends.length) {
     var start = lastDataRow_(tw, 1) + 1;
-    tw.getRange(start, 1, appends.length, 4).setValues(appends);
-    tw.getRange(start, 3, appends.length, 1).setNumberFormat("yyyy-mm-dd");
+    tw.getRange(start, 1, appends.length, 1).setValues(appends.map(function (a) { return [a[0]]; }));        // A 品號（跳過 B 品名公式）
+    tw.getRange(start, 3, appends.length, 3).setValues(appends.map(function (a) { return a.slice(1); }));   // C~E
+    tw.getRange(start, 4, appends.length, 1).setNumberFormat("yyyy-mm-dd");
     // ⚠️ D 已進量是「件數」不是日期：整欄曾被設成 DATE 格式，10 件顯示成 1900-01-09、
     //    77 件顯示成 1900-03-17（值是對的、F 未到量也算得出來，但那一欄人完全看不懂）。
     //    2026-09-10 已把整欄改回數字；這裡每次 append 再壓一次，避免又被日期格式傳染。
