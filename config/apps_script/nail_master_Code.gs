@@ -450,13 +450,16 @@ function writeTransit(silent) {
   }
   if (!cand.length) return fail("訂貨表沒有 O>0 的列（先填正式訂貨數）");
 
+  // ⚠️ 欄位配置（2026-09-10 加了 B 品名之後整排右移一格，動欄位一定要回頭改這裡）：
+  //    A品號 │ B品名(公式) │ C預定量 │ D下單日 │ E已進量 │ F最近進ERP日 │ G未到量(公式) │ H狀態(公式) │ I取消(下拉)
+  var C_CODE = 1, C_QTY = 3, C_DATE = 4, C_GOT = 5, C_LEFT = 7;   // 1-based
   // 既有 _在途：找「同品號、未到量>0、下單日 ±3 天」的列 → 覆蓋
-  var tl = lastDataRow_(tw, 1);
-  var tv = tl >= 2 ? tw.getRange(2, 1, tl - 1, 7).getValues() : [];   // A~G（B 品名是公式；C 預定量／D 下單日／G 未到量）
+  var tl = lastDataRow_(tw, C_CODE);
+  var tv = tl >= 2 ? tw.getRange(2, 1, tl - 1, C_LEFT).getValues() : [];   // A~G
   var open = {}, older = {};                                    // open＝±3 天同輪；older＝>3 天還在途（真再訂？還是上輪 O 沒清？）
   for (var t = 0; t < tv.length; t++) {
     var tc = String(tv[t][0]).trim(); if (!tc) continue;
-    var d = tv[t][3]; var f = Number(tv[t][6]) || 0;
+    var d = tv[t][C_DATE - 1]; var f = Number(tv[t][C_LEFT - 1]) || 0;
     if (!(d instanceof Date) || !(f > 0)) continue;
     var dd = Math.abs((today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
     if (dd <= TRANSIT_SAME_ROUND_DAYS) open[tc] = t + 2;    // sheet row
@@ -466,20 +469,22 @@ function writeTransit(silent) {
   cand.forEach(function (c) {
     if (open[c[2]]) updates.push({ row: open[c[2]], qty: c[1] });
     else {
-      appends.push([c[0], c[1], today, 0]);                  // A 品號＋C~E（預定量/下單日/已進量 0）；B 品名、G/H 是 ARRAYFORMULA 自動長
+      appends.push([c[0], c[1], today, 0]);                  // 品號＋預定量/下單日/已進量0；B 品名、G/H 是 ARRAYFORMULA 自動長
       if (older[c[2]] !== undefined) suspect.push(c[2] + "（" + older[c[2]] + " 天前那批還在途）");
     }
   });
-  updates.forEach(function (u) { tw.getRange(u.row, 3).setValue(u.qty); });   // C 預定量
+  updates.forEach(function (u) { tw.getRange(u.row, C_QTY).setValue(u.qty); });
   if (appends.length) {
-    var start = lastDataRow_(tw, 1) + 1;
-    tw.getRange(start, 1, appends.length, 1).setValues(appends.map(function (a) { return [a[0]]; }));        // A 品號（跳過 B 品名公式）
-    tw.getRange(start, 3, appends.length, 3).setValues(appends.map(function (a) { return a.slice(1); }));   // C~E
-    tw.getRange(start, 4, appends.length, 1).setNumberFormat("yyyy-mm-dd");
-    // ⚠️ D 已進量是「件數」不是日期：整欄曾被設成 DATE 格式，10 件顯示成 1900-01-09、
-    //    77 件顯示成 1900-03-17（值是對的、F 未到量也算得出來，但那一欄人完全看不懂）。
-    //    2026-09-10 已把整欄改回數字；這裡每次 append 再壓一次，避免又被日期格式傳染。
-    tw.getRange(start, 4, appends.length, 1).setNumberFormat("#,##0");
+    var start = lastDataRow_(tw, C_CODE) + 1;
+    tw.getRange(start, C_CODE, appends.length, 1).setValues(appends.map(function (a) { return [a[0]]; }));   // A 品號（跳過 B 品名公式）
+    tw.getRange(start, C_QTY, appends.length, 3).setValues(appends.map(function (a) { return a.slice(1); })); // C~E
+    tw.getRange(start, C_DATE, appends.length, 1).setNumberFormat("yyyy-mm-dd");                             // D 下單日
+    // ⚠️ 已進量是「件數」不是日期：它整欄曾被設成 DATE 格式，10 件顯示成 1900-01-09、
+    //    77 件顯示成 1900-03-17（值是對的、未到量也算得出來，但那一欄人完全看不懂）。
+    //    它就在下單日隔壁，格式很容易被整片套過去 → 每次 append 壓一次數字格式。
+    //    ⚠️ 這一行必須指 E 欄（C_GOT）不是 D —— 指到 D 會把上一行的日期格式蓋掉，
+    //       下單日就變成 46275 這種序號（2026-09-10 加 B 品名右移後真的踩過）。
+    tw.getRange(start, C_GOT, appends.length, 1).setNumberFormat("#,##0");
   }
   var msg = "✅ _在途：新增 " + appends.length + " 列、覆蓋 " + updates.length + " 列（同輪重按）" +
             "｜跳過 台幣 " + skipped.tw + "／預購 " + skipped.po + "／售完、規格不符、未找到 " + skipped.st;
@@ -489,7 +494,7 @@ function writeTransit(silent) {
   return msg;
 }
 
-// 以某一欄「最後一個有值的列」當資料尾（不用 getLastRow：F/G 的 ARRAYFORMULA 會把整欄撐到底）
+// 以某一欄「最後一個有值的列」當資料尾（不用 getLastRow：B/G/H 的 ARRAYFORMULA 會把整欄撐到底）
 function lastDataRow_(sh, col) {
   var v = sh.getRange(1, col, sh.getMaxRows(), 1).getValues();
   for (var i = v.length - 1; i >= 0; i--) if (String(v[i][0]).trim() !== "") return i + 1;
