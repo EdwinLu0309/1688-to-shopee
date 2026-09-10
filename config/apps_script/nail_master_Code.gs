@@ -27,17 +27,19 @@ var KEY_HEADER = { "商品表": "商品編號", "SKU表": "品號" };
 
 // ───────── 選單 ─────────
 function onOpen() {
+  // 上半 ①~⑤＝訂貨那一輪的流程（🚀 全執行就是這五步）；下半 Ⓐ/Ⓑ＝跟訂貨無關、要用才單獨點。
+  // ⑤ 原本是「同步蝦皮處理狀態」（重建上架用的資產包清單），與訂貨無關 → 2026-09-11 移到 Ⓐ。
   SpreadsheetApp.getUi().createMenu("🚀 主檔動作")
-    .addItem("🚀 全執行（①②③④⑥）", "runAllActions")
+    .addItem("🚀 全執行（①②③④⑤）", "runAllActions")
     .addSeparator()
     .addItem("① 畫紅線分區（目前分頁）", "applyRedBordersByNamePrefix")
     .addItem("② 訂單完成備份 → 共用硬碟", "backupOrderSheet")
     .addItem("③ 備份 Order_List → 共用硬碟", "exportOrderList")
     .addItem("④ 廠商訂單 → 進貨金額記錄", "snapshotToAmountRecord")
-    .addItem("⑤ 同步蝦皮處理狀態", "syncStatusTab")
-    .addItem("⑥ 寫入 _在途（J 在途自動）", "writeTransit")
+    .addItem("⑤ 寫入 _在途（J 在途自動）", "writeTransit")
     .addSeparator()
-    .addItem("⑦ 水位診斷 手填安全存量 → 寫回 SKU表", "applyHandSafety")
+    .addItem("Ⓐ 同步蝦皮處理狀態（上架用，與訂貨無關）", "syncStatusTab")
+    .addItem("Ⓑ 水位診斷 手填安全存量 → 寫回 SKU表", "applyHandSafety")
     .addToUi();
 
   // 📦 新品：獨立選單，與「🚀 主檔動作」分開（Edwin 2026-09-10 要求兩個功能分開）
@@ -50,17 +52,17 @@ function onOpen() {
     .addToUi();
 }
 
-// ───────── 🚀 全執行：依序跑 ①②③④，最後一次總結 ─────────
+// ───────── 🚀 全執行：依序跑 ①②③④⑤，最後一次總結 ─────────
 function runAllActions() {
   var ui = SpreadsheetApp.getUi();
-  if (ui.alert("全執行", "將依序執行 ①畫紅線 ②訂單完成備份 ③商品訂貨備份 ④金額記錄 ⑥寫入_在途，確定？",
+  if (ui.alert("全執行", "將依序執行 ①畫紅線 ②訂單完成備份 ③商品訂貨備份 ④金額記錄 ⑤寫入_在途，確定？",
                ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
   var res = [];
   var steps = [["① 畫紅線", applyRedBordersByNamePrefix],
                ["② 訂單完成備份", backupOrderSheet],
                ["③ 商品訂貨備份", exportOrderList],
                ["④ 金額記錄", snapshotToAmountRecord],
-               ["⑥ 寫入 _在途", writeTransit]];
+               ["⑤ 寫入 _在途", writeTransit]];
   steps.forEach(function (s) {
     try { s[1](true); res.push("✅ " + s[0]); }
     catch (e) { res.push("❌ " + s[0] + "：" + e.message); }
@@ -421,10 +423,10 @@ var TRANSIT_SAME_ROUND_DAYS = 3;
 var TRANSIT_SKIP_STATUS = ["🚫", "❌"];      // S 加購狀態／T 核對狀態 開頭（沒進購物車＝沒訂）
 var TRANSIT_SKIP_TAG = "#PO_Sale";
 
-function writeTransit(silent) {
+function writeTransit(silent) {   // 選單 ⑤（2026-09-11 前叫 ⑥）
   var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActiveSpreadsheet();
   var od = ss.getSheetByName("訂貨表"), sk = ss.getSheetByName("SKU表"), tw = ss.getSheetByName(TRANSIT_TAB);
-  var fail = function (m) { if (silent) throw new Error(m); ui.alert("⑥ 寫入 _在途", m, ui.ButtonSet.OK); };
+  var fail = function (m) { if (silent) throw new Error(m); ui.alert("⑤ 寫入 _在途", m, ui.ButtonSet.OK); };
   if (!od || !sk) return fail("找不到 訂貨表／SKU表");
   if (!tw) return fail("找不到「" + TRANSIT_TAB + "」分頁（要先由 1688-order 建好，含 B 品名／G/H 公式）");
 
@@ -494,7 +496,7 @@ function writeTransit(silent) {
             "｜跳過 台幣 " + skipped.tw + "／預購 " + skipped.po + "／售完、規格不符、未找到 " + skipped.st;
   if (suspect.length) msg += "\n\n⚠️ 這 " + suspect.length + " 個品號在 _在途 已有 >3 天的在途列——是真的再訂一批，還是上輪的 O 沒清？\n　" +
                              suspect.slice(0, 15).join("\n　") + (suspect.length > 15 ? "\n　…還有 " + (suspect.length - 15) + " 個" : "");
-  if (!silent) ui.alert("⑥ 寫入 _在途", msg, ui.ButtonSet.OK);
+  if (!silent) ui.alert("⑤ 寫入 _在途", msg, ui.ButtonSet.OK);
   return msg;
 }
 
@@ -508,7 +510,7 @@ var DIAG_TAB = "_水位診斷";
 
 function applyHandSafety(silent) {
   var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActiveSpreadsheet();
-  var fail = function (m) { if (silent) throw new Error(m); ui.alert("⑦ 寫回安全存量", m, ui.ButtonSet.OK); };
+  var fail = function (m) { if (silent) throw new Error(m); ui.alert("Ⓑ 寫回安全存量", m, ui.ButtonSet.OK); };
   var dg = ss.getSheetByName(DIAG_TAB), sk = ss.getSheetByName("SKU表");
   if (!dg) return fail("找不到「" + DIAG_TAB + "」分頁（1688-order 每天 11:50 產生）");
   if (!sk) return fail("找不到 SKU表");
@@ -563,7 +565,7 @@ function applyHandSafety(silent) {
   if (missing.length) msg += "\n\n⚠️ 這 " + missing.length + " 個品號在 SKU表 找不到、沒有寫入（手填的值留著）：\n　"
                              + missing.slice(0, 15).join("、") + (missing.length > 15 ? "\n　…還有 " + (missing.length - 15) + " 個" : "");
   if (changed) msg += "\n\n訂貨表的「訂貨量試算」會立刻跟著變；已寫入的手填格已清空（紀錄在 變更Log）。";
-  if (!silent) ui.alert("⑦ 寫回安全存量", msg, ui.ButtonSet.OK);
+  if (!silent) ui.alert("Ⓑ 寫回安全存量", msg, ui.ButtonSet.OK);
   return msg;
 }
 
