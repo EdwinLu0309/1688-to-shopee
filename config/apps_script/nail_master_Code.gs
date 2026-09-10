@@ -430,7 +430,9 @@ function writeTransit(silent) {
   var ov = od.getDataRange().getValues(), oh = ov[0];
   var iO = oh.indexOf("正式訂貨數"); if (iO < 0) iO = 14;
   var iTag = oh.indexOf("標籤"); if (iTag < 0) iTag = 3;
-  var iS = 18, iT = 19;                              // S 加購狀態／T 核對狀態（標題是空的，固定欄）
+  // ⚠️ 欄號會漂：Edwin 搬過欄位兩次（2026-09-10），照標題找；S1/T1 的標題已補上，找不到才退回固定欄
+  var iS = oh.indexOf("加購狀態"); if (iS < 0) iS = 18;
+  var iT = oh.indexOf("核對狀態"); if (iT < 0) iT = 19;
   // SKU表：A品號 → G幣別
   var sv = sk.getDataRange().getValues(), shd = sv[0];
   var iCur = shd.indexOf("幣別"); if (iCur < 0) iCur = 6;
