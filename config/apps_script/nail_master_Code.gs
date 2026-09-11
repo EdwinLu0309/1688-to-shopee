@@ -720,13 +720,28 @@ function npRun_(doWrite) {
     var sd = sSh.getRange(2, 1, sSh.getLastRow() - 1, 1).getValues();
     for (var j = 0; j < sd.length; j++) { var q = String(sd[j][0]).trim(); if (q) sExist[q] = true; }
 
+    // ⚠️⚠️ 商品表可能早就手動貼過了（2026-09-12 真的發生：26 列上一輪已貼、只剩 SKU表沒貼）。
+    //    **商品編號本來就會重複**（同一個編號多款式，Nail 有 29 個編號佔 183 列），所以不能一律當成錯；
+    //    判準是「整批都在」還是「只有一部分在」：
+    //      · 整批都在 → 上次貼過了，這次只插 SKU表（商品表跳過，否則會插出一模一樣的第二批）
+    //      · 只有一部分 → 狀態不乾淨（貼到一半？），停下來讓人看，不要猜
+    var pDone = 0;
+    stage.prod.forEach(function (r) { if (pExist[String(r[0]).trim()]) pDone++; });
+    var skipProduct = false, note = [];
+    if (stage.prod.length && pDone === stage.prod.length) {
+      skipProduct = true;
+      note.push("ℹ️ 商品表：" + stage.prod.length + " 個編號都已經在表上了（上次貼過）→ 這次只插 SKU表");
+    } else if (pDone) {
+      warn.push("❌ 商品表已經有其中 " + pDone + " / " + stage.prod.length + " 列的商品編號 —— 是不是上次貼到一半？先確認再跑");
+    }
+
     stage.sku.forEach(function (r) {
       var code = String(r[0]).trim();
       if (sExist[code]) warn.push("❌ 品號已存在於 SKU表：" + code);
       if (code.length !== 15) warn.push("❌ 品號不是 15 碼：" + code);
       if (!String(r[5]).trim()) warn.push("⚠️ 進項成本空白：" + code);
     });
-    stage.prod.forEach(function (r) {
+    if (!skipProduct) stage.prod.forEach(function (r) {   // 商品表跳過時不必再挑它的毛病，那批早就貼進去了
       var code = String(r[0]).trim();
       if (!String(r[1]).trim()) warn.push("⚠️ 分類推導不出來：" + code);
       if (!String(r[6]).trim()) warn.push("⚠️ 蝦皮售價空白：" + code);
@@ -742,13 +757,14 @@ function npRun_(doWrite) {
 
     // ── 插入計畫 ──
     var plan = [];
-    for (var cat in pGroups) plan.push({ what: "商品表", key: cat, n: pGroups[cat].length, at: npProductTarget_(pSh, cat) });
+    if (!skipProduct) for (var cat in pGroups) plan.push({ what: "商品表", key: cat, n: pGroups[cat].length, at: npProductTarget_(pSh, cat) });
     for (var pre in sGroups) plan.push({ what: "SKU表", key: pre, n: sGroups[pre].length, at: npSkuTarget_(sSh, pre) });
 
     msg.push("【插入計畫】");
     plan.forEach(function (p) { msg.push("　" + p.what + "：" + p.key + "　" + p.n + " 列 → 插在第 " + p.at + " 列之後"); });
     msg.push("");
-    msg.push("商品 " + stage.prod.length + " 列｜SKU " + stage.sku.length + " 列");
+    msg.push("商品 " + (skipProduct ? "0（跳過，已存在）" : stage.prod.length + " 列") + "｜SKU " + stage.sku.length + " 列");
+    if (note.length) { msg.push(""); note.forEach(function (n) { msg.push(n); }); }
     msg.push("");
     if (warn.length) { msg.push("【要注意】"); warn.slice(0, 20).forEach(function (w) { msg.push("　" + w); });
       if (warn.length > 20) msg.push("　…還有 " + (warn.length - 20) + " 項"); }
@@ -819,7 +835,7 @@ function npRun_(doWrite) {
 
     // ── ④ 驗證 ──
     var res = [];
-    res.push("✅ 已插入：商品表 " + stage.prod.length + " 列、SKU表 " + stage.sku.length + " 列");
+    res.push("✅ 已插入：商品表 " + (skipProduct ? "0 列（已存在，跳過）" : stage.prod.length + " 列") + "、SKU表 " + stage.sku.length + " 列");
     res.push("訂貨表：" + (oLast - 1) + " → " + (nLast - 1) + " 列");
     res.push("死值(O/S/T)有值格數：" + beforeFilled + " → " + afterFilled +
              (beforeFilled === afterFilled ? "　✅ 一致" : "　⚠️ 不一致，請檢查！"));
