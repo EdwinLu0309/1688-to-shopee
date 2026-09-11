@@ -106,7 +106,7 @@ function backupOrderSheet(silent) {
       if (!src) return;
       var tmp = src.copyTo(ss);
       var rng = tmp.getDataRange(); rng.copyTo(rng, { contentsOnly: true });
-      tmp.copyTo(newSs).setName(name);
+      tmp.copyTo(newSs).setName(name).showSheet();   // 來源分頁被隱藏時，複本也是隱藏的 → 不先顯示，下面刪預設分頁會報「不得將工作表全部移除」
       ss.deleteSheet(tmp);
     });
     var def = newSs.getSheetByName("工作表1") || newSs.getSheetByName("Sheet1");
@@ -128,7 +128,7 @@ function exportOrderList(silent) {
     DriveApp.getFileById(newSs.getId()).moveTo(DriveApp.getFolderById(ORDERLIST_FOLDER_ID));
     var tmp = src.copyTo(ss);
     var rng = tmp.getDataRange(); rng.setValues(rng.getValues());
-    tmp.copyTo(newSs).setName("到貨核對");
+    tmp.copyTo(newSs).setName("到貨核對").showSheet();   // Order_List 常被隱藏（Edwin 會藏不常用分頁）；複本要顯示出來，否則刪預設分頁時整份沒有可見分頁而報錯（2026-09-11 Lady 踩到）
     ss.deleteSheet(tmp);
     var def = newSs.getSheetByName("工作表1") || newSs.getSheetByName("Sheet1");
     if (def && newSs.getSheets().length > 1) newSs.deleteSheet(def);
