@@ -715,8 +715,14 @@ function npRun_(doWrite) {
     // ── 檢查 ──
     var warn = [];
     var pExist = {}, sExist = {};
-    var pd = pSh.getRange(2, 1, pSh.getLastRow() - 1, 1).getValues();
-    for (var i = 0; i < pd.length; i++) { var c = String(pd[i][0]).trim(); if (c) pExist[c] = (pExist[c] || 0) + 1; }
+    // ⚠️ 判「這列貼過沒」的 key 必須是「商品編號＋品名」，**不能只看編號**（2026-09-12 實測）：
+    //    Nail 同一個編號本來就會掛多個款式（HNV1 機身「迷你版集塵器」與配件「美甲集塵器濾紙」同編號），
+    //    只比編號會把「配件是新品、機身早就在」誤判成已貼過。
+    var pd = pSh.getRange(2, 1, pSh.getLastRow() - 1, 4).getValues();   // A~D
+    for (var i = 0; i < pd.length; i++) {
+      var c = String(pd[i][0]).trim(); if (!c) continue;
+      pExist[c + "｜" + String(pd[i][3]).trim()] = true;
+    }
     var sd = sSh.getRange(2, 1, sSh.getLastRow() - 1, 1).getValues();
     for (var j = 0; j < sd.length; j++) { var q = String(sd[j][0]).trim(); if (q) sExist[q] = true; }
 
@@ -726,13 +732,13 @@ function npRun_(doWrite) {
     //      · 整批都在 → 上次貼過了，這次只插 SKU表（商品表跳過，否則會插出一模一樣的第二批）
     //      · 只有一部分 → 狀態不乾淨（貼到一半？），停下來讓人看，不要猜
     var pDone = 0;
-    stage.prod.forEach(function (r) { if (pExist[String(r[0]).trim()]) pDone++; });
+    stage.prod.forEach(function (r) { if (pExist[String(r[0]).trim() + "｜" + String(r[3]).trim()]) pDone++; });
     var skipProduct = false, note = [];
     if (stage.prod.length && pDone === stage.prod.length) {
       skipProduct = true;
       note.push("ℹ️ 商品表：" + stage.prod.length + " 個編號都已經在表上了（上次貼過）→ 這次只插 SKU表");
     } else if (pDone) {
-      warn.push("❌ 商品表已經有其中 " + pDone + " / " + stage.prod.length + " 列的商品編號 —— 是不是上次貼到一半？先確認再跑");
+      warn.push("❌ 商品表已經有其中 " + pDone + " / " + stage.prod.length + " 列（編號＋品名都一樣）—— 是不是上次貼到一半？先確認再跑");
     }
 
     stage.sku.forEach(function (r) {
