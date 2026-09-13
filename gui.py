@@ -95,6 +95,11 @@ class App:
         self.make_video = tk.BooleanVar(value=True)
         self.make_staging = tk.BooleanVar(value=False)  # 正式新品：產 1-1「_待貼新品」分頁
         self.status_var = tk.StringVar(value="就緒")
+        # ⚠️ 「這次開工有沒有按過『⬇️ 更新名單』」——沒按過就不讓按 🚀 一鍵完成（Edwin 2026-09-14 要求）。
+        #    本機 CSV 只是線上名單的抄本，不更新就是拿舊抄本去跑，而**線上新增的商品根本不在清單裡**
+        #    （踩過：本機停在 2 支、線上其實 48 支）。改時間判斷（超過 N 小時才提醒）會留下
+        #    「剛好沒過期但線上剛改過」的縫，所以做成硬性擋住，不做時間判斷。
+        self.list_fresh = False
 
         self.products: list[dict] = []
         self.check_vars: list[tk.BooleanVar] = []
@@ -102,6 +107,7 @@ class App:
         self.action_buttons: list[tk.Button] = []
 
         self._build_ui()
+        self._refresh_hero()          # 開檔當下就是「沒更新名單」＝灰色鎖住
         self.root.minsize(760, 860)
         self._refresh_cookie_status()
         self._refresh_products()
@@ -148,6 +154,8 @@ class App:
         self.csv_path.set(str(DEFAULT_CSV if (sp.key == "lady" and DEFAULT_CSV.exists())
                               else sp.csv_path))
         self._save_state()
+        self.list_fresh = False          # 換賣場＝換一份名單，要重抓
+        self._refresh_hero()
         self._refresh_cookie_status()
         self._refresh_products()
 
@@ -381,14 +389,25 @@ class App:
                 text=f"❌ {_SHOP_LABELS[self.shop_var.get()]} 未登入（先按「🔑 登入 1688」）",
                 fg="#cf222e")
 
+    def _mark_list_fresh(self) -> None:
+        self.list_fresh = True
+        self._refresh_hero()
+
+    def _refresh_hero(self) -> None:
+        """一鍵按鈕的外觀：忙碌 or 名單沒更新 → 灰色＋說明文字。"""
+        blocked = self.running or not self.list_fresh
+        color = "#9aa0a6" if blocked else "#1a7f37"
+        self.hero_bg.config(bg=color)
+        self.run_all_lbl.config(
+            bg=color,
+            text=("🚀 一鍵完成（抓取 → 產出上架檔）" if self.list_fresh
+                  else "🔒 請先按「⬇️ 更新名單」"))
+
     def _busy(self, on: bool, cancellable: bool = False) -> None:
         self.running = on
         self._set_buttons("disabled" if on else "normal")
         self.stop_btn.config(state="normal" if (on and cancellable) else "disabled")
-        # 一鍵按鈕（Frame+Label 自製）：忙碌時轉灰，閒置時綠色
-        color = "#9aa0a6" if on else "#1a7f37"
-        self.hero_bg.config(bg=color)
-        self.run_all_lbl.config(bg=color)
+        self._refresh_hero()
 
     def _guard(self) -> bool:
         if self.running:
@@ -462,6 +481,7 @@ class App:
             res = fetch_ai_list(out_path=out, shop=self.shop_var.get())
             if res.get("ok"):
                 self._thread_log(f"✅ 名單已更新（來源 {res['profile']}，{res['bytes']} bytes）")
+                self.root.after(0, self._mark_list_fresh)
                 self.root.after(0, self._refresh_products)
             else:
                 self._thread_log(f"❌ 抓取失敗：{res.get('error')}")
@@ -475,6 +495,14 @@ class App:
 
     # ── 🚀 一鍵完成 ──────────────────────────────
     def _on_run_all(self) -> None:
+        if not self.list_fresh:
+            messagebox.showwarning(
+                "請先更新名單",
+                "還沒按「⬇️ 更新名單」。\n\n"
+                "程式跑的是本機那份 CSV 抄本，不更新的話，你在線上名單新增的商品\n"
+                "不會出現在下面的勾選清單裡（看起來一切正常，但那幾支不會被做）。\n\n"
+                "先按「⬇️ 更新名單」，這顆才會變綠色。")
+            return
         if not self._guard():
             return
         if not self._shop().cookie_path.exists():
@@ -678,12 +706,15 @@ class App:
 
     # ── 其他 ──────────────────────────────
     def _on_pick_csv(self) -> None:
+        """手動指定本機 CSV：也算「沒更新」——那份可能是很舊的抄本。"""
         path = filedialog.askopenfilename(
             title="選 AI 上架名單 CSV",
             initialdir=str((BASE_DIR / "input") if (BASE_DIR / "input").exists() else BASE_DIR),
             filetypes=[("CSV", "*.csv"), ("所有檔案", "*.*")])
         if path:
             self.csv_path.set(path)
+            self.list_fresh = False
+            self._refresh_hero()
             self._save_state()
             self._refresh_products()
 

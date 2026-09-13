@@ -39,6 +39,15 @@ function onOpen() {
     .addItem("Ⓐ 同步蝦皮處理狀態（上架用，與訂貨無關）", "syncStatusTab")
     .addItem("Ⓑ 水位診斷 手填安全存量 → 寫回 SKU表", "applyHandSafety")
     .addToUi();
+
+  // 📦 新品：獨立選單，與「🚀 主檔動作」分開（Edwin 2026-09-10 要求兩個功能分開）
+  // ⚠️ 一個試算表只能有一個 onOpen —— 兩個選單都要寫在這裡面，
+  //    另外開一支 onOpen 會蓋掉上面那個，五個主檔動作會整組消失。
+  SpreadsheetApp.getUi().createMenu("📦 新品")
+    .addItem("🔍 檢查（只看不寫）", "npCheck")
+    .addSeparator()
+    .addItem("✅ 貼進 1-1", "npPaste")
+    .addToUi();
 }
 
 // ───────── 🚀 全執行：依序跑 ①②③④⑤，最後一次總結 ─────────
@@ -585,4 +594,255 @@ function onEdit(e) {
 function appendRow_(tab, values) {
   var ws = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(tab);
   if (ws) ws.appendRow(values);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// 📦 新品：_待貼新品 → 商品表 / SKU表（2026-09-10 建）
+//
+// 取代「人工複製貼上」。手貼有兩個風險，這支一次拿掉：
+//   ① 貼到黃底欄會把錨在第 2 列的整欄陣列公式打成 #REF!
+//      （商品表 F/H/I/R~U/V/W、SKU表 K/O/P）
+//   ② 要自己找分類位置，不然新品全掉在表尾（＝停售區後面）
+//
+// ⚠️⚠️ 為什麼用「插入列」不用「排序」（2026-09-09 開測試分頁實測）：
+//   · 排序整塊（含公式溢出欄）→ 陣列公式直接死掉、末列 #REF!
+//   · 只排部分欄 → 沒選到的死值欄原地不動，資料靜默錯位、畫面完全正常
+//   · 插入列 → 公式完好並跟著重算、死值跟著走、連靜態格式都跟著搬
+//
+// ⚠️⚠️ 插進 SKU 表中間會讓訂貨表的死值欄錯位（#S217 那個災難）：
+//   訂貨表 A2 是 QUERY 溢出，SKU 表一多列，A~G 整片下移而 O/S/T 原地不動
+//   → 插入點以下全部對錯品號，**表面完全看不出來**。
+//   所以「貼進 1-1」是一組不可分割的動作：先記下品號→O/S/T，插完再照品號寫回。
+//   （J 訂購未到貨 2026-09-09 起已改成公式接 _在途，不再是死值、不用管。）
+// ═══════════════════════════════════════════════════════════════════
+
+var NP_STAGING = "_待貼新品";
+var NP_PRODUCT = "商品表";
+var NP_SKU     = "SKU表";
+var NP_ORDER   = "訂貨表";
+
+// 「程式會填、要貼過去」的欄＝待貼分頁表頭**綠底**那些；中間的公式欄整個跳過。
+//   商品表：A編號 B分類 C子分類 D品名 E成本 ┊ G售價 ┊ J特殊% K廠商 L網址
+//   SKU表 ：A品號 B品名 C分類 D標籤 ┊ F成本 G幣別 H安全存量 ┊ L規格一 M規格二
+// 連續的合併成一個 range 一次寫（少幾次 API，也不會誤觸公式欄）
+var NP_PROD_RANGES = [[1, 5], [7, 1], [10, 3]];     // [起始欄, 欄數]：A~E / G / J~L
+var NP_SKU_RANGES  = [[1, 4], [6, 3], [12, 2]];     // A~D / F~H / L~M
+
+var NP_ORDER_DEAD = [15, 19, 20];                   // 訂貨表死值欄：O 正式訂貨數 / S 加購狀態 / T 核對狀態
+var NP_DEAD_STATUS = ["停售", "出清"];              // 商品表 M 狀態：這些算「非活躍」，新品不插到它們後面
+// ⚠️ 品號長度各家不同（2026-09-14 移植 Lady/Baby 時發現）：Nail/Lady 是 15 碼英數、
+//    **Baby 是 14 碼純數字**。照抄 15 會把 Baby 整批標成「品號不是 15 碼」而擋掉。
+var NP_CODE_LEN = 15;
+
+
+// ───────── 選單入口 ─────────
+function npCheck()  { npRun_(false); }
+function npPaste()  { npRun_(true); }
+
+
+// ───────── 讀待貼分頁 → 兩個區塊 ─────────
+function npReadStaging_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var st = ss.getSheetByName(NP_STAGING);
+  if (!st) throw new Error("找不到「" + NP_STAGING + "」分頁");
+  var v = st.getDataRange().getValues();
+  var marks = [];
+  for (var i = 0; i < v.length; i++) {
+    if (String(v[i][0] || "").indexOf("■") === 0) marks.push(i);
+  }
+  if (marks.length < 2) throw new Error("「" + NP_STAGING + "」看不到兩個「■」區塊標記，格式不對");
+  var prod = [], sku = [];
+  for (var a = marks[0] + 2; a < marks[1]; a++) if (String(v[a][0] || "").trim()) prod.push(v[a]);
+  for (var b = marks[1] + 2; b < v.length; b++) if (String(v[b][0] || "").trim()) sku.push(v[b]);
+  return { prod: prod, sku: sku };
+}
+
+
+// ───────── 找插入位置 ─────────
+// 商品表：同「分類(B)」的最後一列活躍商品之後。找不到就放在活躍區最末（停售區之前）。
+function npProductTarget_(sh, cat) {
+  var last = sh.getLastRow();
+  var d = sh.getRange(2, 1, last - 1, 13).getValues();   // A~M
+  var hit = 0, lastActive = 0;
+  for (var i = 0; i < d.length; i++) {
+    if (!String(d[i][0]).trim()) continue;
+    var dead = NP_DEAD_STATUS.indexOf(String(d[i][12]).trim()) >= 0;
+    if (dead) continue;
+    lastActive = i + 2;
+    if (String(d[i][1]).trim() === cat) hit = i + 2;
+  }
+  return hit || lastActive;
+}
+
+// SKU表：同「品號前 5 碼」（賣場+分類+品牌）的最後一列之後。找不到就放最末。
+function npSkuTarget_(sh, prefix) {
+  var last = sh.getLastRow();
+  var d = sh.getRange(2, 1, last - 1, 1).getValues();
+  var hit = 0;
+  for (var i = 0; i < d.length; i++) {
+    var c = String(d[i][0]).trim();
+    if (c && c.substring(0, 5) === prefix) hit = i + 2;
+  }
+  return hit || last;
+}
+
+
+// ───────── 主流程（check=只看不寫 / paste=真的插入）─────────
+function npRun_(doWrite) {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var msg = [];
+  try {
+    var stage = npReadStaging_();
+    if (!stage.prod.length && !stage.sku.length) { ui.alert("📦 新品", "「" + NP_STAGING + "」沒有資料。", ui.ButtonSet.OK); return; }
+
+    var pSh = ss.getSheetByName(NP_PRODUCT), sSh = ss.getSheetByName(NP_SKU), oSh = ss.getSheetByName(NP_ORDER);
+    if (!pSh || !sSh || !oSh) throw new Error("找不到 商品表／SKU表／訂貨表");
+
+    // ── 分組（商品表照分類、SKU 表照品號前 5 碼）──
+    var pGroups = {}, sGroups = {};
+    stage.prod.forEach(function (r) { var k = String(r[1]).trim() || "(無分類)"; (pGroups[k] = pGroups[k] || []).push(r); });
+    stage.sku.forEach(function (r) { var k = String(r[0]).trim().substring(0, 5); (sGroups[k] = sGroups[k] || []).push(r); });
+
+    // ── 檢查 ──
+    var warn = [];
+    var pExist = {}, sExist = {};
+    // ⚠️ 判「這列貼過沒」的 key 必須是「商品編號＋品名」，**不能只看編號**（2026-09-12 實測）：
+    //    Nail 同一個編號本來就會掛多個款式（HNV1 機身「迷你版集塵器」與配件「美甲集塵器濾紙」同編號），
+    //    只比編號會把「配件是新品、機身早就在」誤判成已貼過。
+    var pd = pSh.getRange(2, 1, pSh.getLastRow() - 1, 4).getValues();   // A~D
+    for (var i = 0; i < pd.length; i++) {
+      var c = String(pd[i][0]).trim(); if (!c) continue;
+      pExist[c + "｜" + String(pd[i][3]).trim()] = true;
+    }
+    var sd = sSh.getRange(2, 1, sSh.getLastRow() - 1, 1).getValues();
+    for (var j = 0; j < sd.length; j++) { var q = String(sd[j][0]).trim(); if (q) sExist[q] = true; }
+
+    // ⚠️⚠️ 商品表可能早就手動貼過了（2026-09-12 真的發生：26 列上一輪已貼、只剩 SKU表沒貼）。
+    //    **商品編號本來就會重複**（同一個編號多款式，Nail 有 29 個編號佔 183 列），所以不能一律當成錯；
+    //    判準是「整批都在」還是「只有一部分在」：
+    //      · 整批都在 → 上次貼過了，這次只插 SKU表（商品表跳過，否則會插出一模一樣的第二批）
+    //      · 只有一部分 → 狀態不乾淨（貼到一半？），停下來讓人看，不要猜
+    var pDone = 0;
+    stage.prod.forEach(function (r) { if (pExist[String(r[0]).trim() + "｜" + String(r[3]).trim()]) pDone++; });
+    var skipProduct = false, note = [];
+    if (stage.prod.length && pDone === stage.prod.length) {
+      skipProduct = true;
+      note.push("ℹ️ 商品表：" + stage.prod.length + " 個編號都已經在表上了（上次貼過）→ 這次只插 SKU表");
+    } else if (pDone) {
+      warn.push("❌ 商品表已經有其中 " + pDone + " / " + stage.prod.length + " 列（編號＋品名都一樣）—— 是不是上次貼到一半？先確認再跑");
+    }
+
+    stage.sku.forEach(function (r) {
+      var code = String(r[0]).trim();
+      if (sExist[code]) warn.push("❌ 品號已存在於 SKU表：" + code);
+      if (code.length !== NP_CODE_LEN) warn.push("❌ 品號不是 " + NP_CODE_LEN + " 碼：" + code);
+      if (!String(r[5]).trim()) warn.push("⚠️ 進項成本空白：" + code);
+    });
+    if (!skipProduct) stage.prod.forEach(function (r) {   // 商品表跳過時不必再挑它的毛病，那批早就貼進去了
+      var code = String(r[0]).trim();
+      if (!String(r[1]).trim()) warn.push("⚠️ 分類推導不出來：" + code);
+      if (!String(r[6]).trim()) warn.push("⚠️ 蝦皮售價空白：" + code);
+      if (!String(r[4]).trim()) warn.push("⚠️ 成本空白：" + code);
+    });
+    // 品號重複（待貼分頁自己內部）
+    var seen = {};
+    stage.sku.forEach(function (r) {
+      var c = String(r[0]).trim();
+      if (seen[c]) warn.push("❌ 待貼分頁裡品號重複：" + c);
+      seen[c] = true;
+    });
+
+    // ── 插入計畫 ──
+    var plan = [];
+    if (!skipProduct) for (var cat in pGroups) plan.push({ what: "商品表", key: cat, n: pGroups[cat].length, at: npProductTarget_(pSh, cat) });
+    for (var pre in sGroups) plan.push({ what: "SKU表", key: pre, n: sGroups[pre].length, at: npSkuTarget_(sSh, pre) });
+
+    msg.push("【插入計畫】");
+    plan.forEach(function (p) { msg.push("　" + p.what + "：" + p.key + "　" + p.n + " 列 → 插在第 " + p.at + " 列之後"); });
+    msg.push("");
+    msg.push("商品 " + (skipProduct ? "0（跳過，已存在）" : stage.prod.length + " 列") + "｜SKU " + stage.sku.length + " 列");
+    if (note.length) { msg.push(""); note.forEach(function (n) { msg.push(n); }); }
+    msg.push("");
+    if (warn.length) { msg.push("【要注意】"); warn.slice(0, 20).forEach(function (w) { msg.push("　" + w); });
+      if (warn.length > 20) msg.push("　…還有 " + (warn.length - 20) + " 項"); }
+    else msg.push("【檢查】沒有問題 ✅");
+
+    var blocking = warn.filter(function (w) { return w.indexOf("❌") === 0; });
+
+    if (!doWrite) {
+      ui.alert("🔍 新品檢查", msg.join("\n"), ui.ButtonSet.OK);
+      return;
+    }
+    if (blocking.length) {
+      ui.alert("❌ 不能貼", "有 " + blocking.length + " 項阻擋問題，先處理：\n\n" + blocking.slice(0, 10).join("\n"), ui.ButtonSet.OK);
+      return;
+    }
+    if (ui.alert("✅ 貼進 1-1", msg.join("\n") + "\n\n確定要插入嗎？", ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+
+    // ── ① 先記下訂貨表死值（品號 → O/S/T）──
+    var oLast = oSh.getLastRow();
+    var oCodes = oSh.getRange(2, 1, oLast - 1, 1).getValues();
+    var oDead = {};
+    NP_ORDER_DEAD.forEach(function (col) {
+      var vals = oSh.getRange(2, col, oLast - 1, 1).getValues();
+      for (var k = 0; k < oCodes.length; k++) {
+        var c = String(oCodes[k][0]).trim();
+        if (!c) continue;
+        (oDead[c] = oDead[c] || {})[col] = vals[k][0];
+      }
+    });
+    var beforeFilled = 0;
+    for (var cc in oDead) NP_ORDER_DEAD.forEach(function (col) { if (String(oDead[cc][col] || "").trim() !== "") beforeFilled++; });
+
+    // ── ② 插入（由下往上，避免行號位移）──
+    plan.sort(function (a, b) { return b.at - a.at; });
+    plan.forEach(function (p) {
+      var sh = (p.what === "商品表") ? pSh : sSh;
+      var rows = (p.what === "商品表") ? pGroups[p.key] : sGroups[p.key];
+      var ranges = (p.what === "商品表") ? NP_PROD_RANGES : NP_SKU_RANGES;
+      sh.insertRowsAfter(p.at, p.n);
+      var start = p.at + 1;
+      ranges.forEach(function (rg) {
+        var c0 = rg[0], w = rg[1];
+        var block = rows.map(function (r) {
+          var out = [];
+          for (var x = 0; x < w; x++) out.push(r[c0 - 1 + x]);
+          return out;
+        });
+        sh.getRange(start, c0, rows.length, w).setValues(block);
+      });
+    });
+    SpreadsheetApp.flush();
+
+    // ── ③ 訂貨表死值照品號重新對齊 ──
+    var nLast = oSh.getLastRow();
+    var nCodes = oSh.getRange(2, 1, nLast - 1, 1).getValues();
+    var afterFilled = 0;
+    NP_ORDER_DEAD.forEach(function (col) {
+      var out = [];
+      for (var k = 0; k < nCodes.length; k++) {
+        var c = String(nCodes[k][0]).trim();
+        var v = (c && oDead[c] && oDead[c][col] !== undefined) ? oDead[c][col] : "";
+        if (String(v || "").trim() !== "") afterFilled++;
+        out.push([v]);
+      }
+      oSh.getRange(2, col, out.length, 1).setValues(out);
+    });
+    SpreadsheetApp.flush();
+
+    // ── ④ 驗證 ──
+    var res = [];
+    res.push("✅ 已插入：商品表 " + (skipProduct ? "0 列（已存在，跳過）" : stage.prod.length + " 列") + "、SKU表 " + stage.sku.length + " 列");
+    res.push("訂貨表：" + (oLast - 1) + " → " + (nLast - 1) + " 列");
+    res.push("死值(O/S/T)有值格數：" + beforeFilled + " → " + afterFilled +
+             (beforeFilled === afterFilled ? "　✅ 一致" : "　⚠️ 不一致，請檢查！"));
+    res.push("");
+    res.push("接下來：SKU表 P 對應檢查應該全是 ✓。");
+    ui.alert("📦 新品完成", res.join("\n"), ui.ButtonSet.OK);
+
+  } catch (e) {
+    ui.alert("❌ 失敗", e.message + "\n\n（沒有寫入任何東西，或已中途停止——請檢查後重跑）", ui.ButtonSet.OK);
+  }
 }

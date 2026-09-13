@@ -641,6 +641,9 @@ var NP_SKU_RANGES  = [[1, 4], [6, 3], [12, 2]];     // A~D / F~H / L~M
 
 var NP_ORDER_DEAD = [15, 19, 20];                   // 訂貨表死值欄：O 正式訂貨數 / S 加購狀態 / T 核對狀態
 var NP_DEAD_STATUS = ["停售", "出清"];              // 商品表 M 狀態：這些算「非活躍」，新品不插到它們後面
+// ⚠️ 品號長度各家不同（2026-09-14 移植 Lady/Baby 時發現）：Nail/Lady 是 15 碼英數、
+//    **Baby 是 14 碼純數字**。照抄 15 會把 Baby 整批標成「品號不是 15 碼」而擋掉。
+var NP_CODE_LEN = 15;
 
 
 // ───────── 選單入口 ─────────
@@ -744,7 +747,7 @@ function npRun_(doWrite) {
     stage.sku.forEach(function (r) {
       var code = String(r[0]).trim();
       if (sExist[code]) warn.push("❌ 品號已存在於 SKU表：" + code);
-      if (code.length !== 15) warn.push("❌ 品號不是 15 碼：" + code);
+      if (code.length !== NP_CODE_LEN) warn.push("❌ 品號不是 " + NP_CODE_LEN + " 碼：" + code);
       if (!String(r[5]).trim()) warn.push("⚠️ 進項成本空白：" + code);
     });
     if (!skipProduct) stage.prod.forEach(function (r) {   // 商品表跳過時不必再挑它的毛病，那批早就貼進去了
