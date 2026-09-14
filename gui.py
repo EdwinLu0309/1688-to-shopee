@@ -102,6 +102,9 @@ class App:
 
         # 文案模板：掃 config/sop/{shop}/*.md，加一份 md 就多一個選項（Edwin 2026-09-14）
         self.sop_var = tk.StringVar(value="（該賣場預設）")
+        # 圖片模板：config/design_engine/{shop}/*.md。⚠️ 上游 load_design_spec() 會把資料夾裡
+        # 所有 md 串起來當規範 → 不分賣場的話，Nail 勾 GPT 會拿到女裝的「人物比例／模特兒位置」。
+        self.img_var = tk.StringVar(value="（尚未建立）")
         self.status_var = tk.StringVar(value="就緒")
         # ⚠️ 「這次開工有沒有按過『⬇️ 更新名單』」——沒按過就不讓按 🚀 一鍵完成（Edwin 2026-09-14 要求）。
         #    本機 CSV 只是線上名單的抄本，不更新就是拿舊抄本去跑，而**線上新增的商品根本不在清單裡**
@@ -123,6 +126,7 @@ class App:
         self._refresh_hero()          # 開檔當下就是「沒更新名單」＝灰色鎖住
         self._refresh_csv_state()
         self._refresh_sop_menu()
+        self._refresh_img_menu()
         self.root.minsize(760, 860)
         self._refresh_cookie_status()
         self._refresh_products()
@@ -172,6 +176,7 @@ class App:
         self.list_fresh = False          # 換賣場＝換一份名單，要重抓
         self._refresh_csv_state()
         self._refresh_sop_menu()
+        self._refresh_img_menu()
         self._refresh_hero()
         self._refresh_cookie_status()
         self._refresh_products()
@@ -263,7 +268,13 @@ class App:
         self.sop_menu.config(font=F_BTN_SM)
         self.sop_menu.pack(side="left")
         tk.Label(sop_frame, text="（決定標題與詳情怎麼寫）",
-                 font=F_HINT, fg="#888", bg=BG).pack(side="left", padx=6)
+                 font=F_HINT, fg="#888", bg=BG).pack(side="left", padx=(4, 18))
+        tk.Label(sop_frame, text="圖片模板：", font=F_LBL_B, bg=BG, fg=FG).pack(side="left")
+        self.img_menu = tk.OptionMenu(sop_frame, self.img_var, "（尚未建立）")
+        self.img_menu.config(font=F_BTN_SM)
+        self.img_menu.pack(side="left")
+        tk.Label(sop_frame, text="（只在勾 ✨GPT 的商品生效）",
+                 font=F_HINT, fg="#888", bg=BG).pack(side="left", padx=4)
 
         tk.Checkbutton(self.root, text="🎬 合成短影片（選配：不勾就不做，也不算「缺」；蝦皮 Excel 沒有影片欄，要在後台手動補）",
                        variable=self.make_video,
@@ -567,6 +578,21 @@ class App:
         if self.sop_var.get() not in names:
             self.sop_var.set(names[0])
 
+    def _refresh_img_menu(self) -> None:
+        """依賣場重建圖片模板下拉（掃 config/design_engine/{shop}/*.md）。"""
+        from scraper.gpt_image_generator import design_templates
+        names = [p.stem for p in design_templates(self.shop_var.get())]
+        menu = self.img_menu["menu"]
+        menu.delete(0, "end")
+        for n in (names or ["（尚未建立）"]):
+            menu.add_command(label=n, command=lambda v=n: self.img_var.set(v))
+        if self.img_var.get() not in (names or ["（尚未建立）"]):
+            self.img_var.set((names or ["（尚未建立）"])[0])
+
+    def _img_template(self) -> str | None:
+        v = self.img_var.get()
+        return None if v.startswith("（") else v
+
     def _sop_override(self) -> list[str] | None:
         """下拉選的模板 → sop_texts 用的相對路徑；選預設回 None。"""
         v = self.sop_var.get()
@@ -639,12 +665,27 @@ class App:
 
     def _warn_gpt(self, sel: list[dict]) -> bool:
         gpt = [p["code"] for p in sel if p.get("route") == "gpt"]
-        if gpt:
-            return messagebox.askyesno(
-                "✨ GPT 生圖確認",
-                f"這 {len(gpt)} 支走 GPT 生圖（每支 5 張、要花錢 + 較慢，會上傳圖床）：\n"
-                f"{', '.join(gpt)}\n\n要繼續嗎？")
-        return True
+        if not gpt:
+            return True
+        # ⚠️ 沒有該賣場的圖片規範就**擋下來**，不要拿別家的規範生圖：
+        #    上游 load_design_spec() 是把資料夾裡所有 md 串起來，Nail 套到女裝規範
+        #    會得到「人物比例／模特兒位置／穿搭情境」那套，生出來的集塵器會很怪。
+        if not self._img_template():
+            messagebox.showerror(
+                "還沒有圖片規範",
+                f"{_SHOP_LABELS[self.shop_var.get()]} 還沒有圖片設計規範，"
+                f"這 {len(gpt)} 支不能走 GPT 生圖。\n\n"
+                f"規範要放在 config/design_engine/{self.shop_var.get()}/ 底下（.md）。\n"
+                "沒有規範就沒有風格依據——拿別家的規範生圖會歪掉，所以直接擋下。\n\n"
+                "先取消那幾支的 ✨GPT，或請 Claude 起草一份規範。")
+            return False
+        cost = len(gpt) * 0.17
+        return messagebox.askyesno(
+            "✨ GPT 生圖確認",
+            f"這 {len(gpt)} 支走 GPT 生圖：{', '.join(gpt)}\n\n"
+            f"模板：{self.img_var.get()}\n"
+            f"費用：約 US${cost:.2f}（台幣 {cost * 32:.0f} 元）＋比較慢，圖會上傳圖床\n\n"
+            "要繼續嗎？")
 
     def _staging_precheck(self) -> tuple[bool, bool] | None:
         """回 (make_staging, staging_force)；None＝使用者取消執行。
@@ -738,6 +779,12 @@ class App:
                      + (f"（其餘 {sel - n('品號')} 支 1-1 已經有了，沿用）" if n('品號') < sel else "")
                      + "，並寫進 1-1「_待貼新品」")
         lines.append(f"　上架檔　　{sel} 支 → 新的一版（舊版保留）")
+        gpt = [p for p in plan["全部"] if p.get("route") == "gpt"]
+        if gpt:
+            tpl = self.img_var.get()
+            cost = len(gpt) * 0.17            # gpt-image-1 1024x1024 high ≈ US$0.17/張
+            lines.append(f"　✨GPT 生圖　{len(gpt)} 支　模板：{tpl}"
+                         f"　約 US${cost:.2f}（台幣 {cost * 32:.0f} 元）")
         if self.make_video.get():
             lines.append(f"　影片　　　{n('影片')} 支要合成" + (f"（其餘 {sel - n('影片')} 支已有）" if n('影片') < sel else ""))
         else:
@@ -820,6 +867,7 @@ class App:
             # ② 產出（run_batch_two_tier 內部自帶 asyncio.run，須無 running loop）
             self._thread_log(f"② 產出 {len(products)} 商品（文案+挑色+影片+Excel）…")
             res2 = run_batch_two_tier(json_dir=Path(RAW_DIR), sop_override=self._sop_override(),
+                                      img_template=self._img_template(),
                                       make_video=self.make_video.get(), products=products,
                                       shop=shop, make_staging=make_staging,
                                       staging_force=staging_force)
@@ -968,6 +1016,7 @@ class App:
         from scraper.batch_pipeline2 import run_batch_two_tier
         try:
             res = run_batch_two_tier(json_dir=Path(RAW_DIR), sop_override=self._sop_override(),
+                                     img_template=self._img_template(),
                                      make_video=self.make_video.get(), products=products,
                                      shop=self.shop_var.get(), make_staging=make_staging,
                                      staging_force=staging_force)

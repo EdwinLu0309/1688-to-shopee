@@ -77,7 +77,8 @@ def _axis1_name_for(product_data: dict, sp) -> str:
     return sp.axis1_name
 
 def _gpt_images_for(product_data: dict, code: str, category: str,
-                    item_dir: Path, product_name: str) -> list[str]:
+                    item_dir: Path, product_name: str,
+                    shop: str = "lady", img_template: str | None = None) -> list[str]:
     """✨ GPT 路線：下載 1688 圖當參考 → 生品牌電商圖 → 上傳圖床 → 回公開 URL 清單。
 
     圖床未設定 / 無參考圖 / 生圖失敗 → 回 []（呼叫端會退回 1688 原圖）。
@@ -99,9 +100,17 @@ def _gpt_images_for(product_data: dict, code: str, category: str,
     if not (main_imgs or detail_imgs):
         logger.warning(f"[{code}] 無圖可當參考，GPT 路線退回 1688 圖")
         return []
-    logger.info(f"[{code}] ✨ GPT 生封面（依 design_engine 規範）…")
-    cover = generate_cover(main_imgs, detail_imgs,
-                           item_dir / "images" / "generated" / "cover.png")
+    from scraper.gpt_image_generator import use_template
+    logger.info(f"[{code}] ✨ GPT 生封面（規範：{shop}/{img_template or '全部'}）…")
+    try:
+        with use_template(shop, img_template):
+            cover = generate_cover(main_imgs, detail_imgs,
+                                   item_dir / "images" / "generated" / "cover.png")
+    except FileNotFoundError as e:
+        # 該賣場沒有圖片規範 → 退回 1688 原圖。**不要拿別家的規範硬生**（那會生出風格完全
+        # 不對的圖，而且看起來像「功能有在跑」，比直接不生更難發現。）
+        logger.warning(f"[{code}] {e} → 退回 1688 原圖")
+        return []
     gen = [cover] if cover else []
     if not gen:
         logger.warning(f"[{code}] GPT 沒生出圖，退回 1688 圖")
@@ -135,7 +144,8 @@ def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], 
 
 
 def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
-                     shared_offer: bool = False, sop_override: list[str] | None = None) -> dict | None:
+                     shared_offer: bool = False, sop_override: list[str] | None = None,
+                     img_template: str | None = None) -> dict | None:
     """把一個 manifest 商品項處理成 generate_batch_two_tier_excel 需要的 dict。"""
     from scraper.shops import get_shop
 
@@ -249,7 +259,8 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
     if str(entry.get("route", "1688")).lower() == "gpt":
         image_urls = _gpt_images_for(
             product_data, code, str(entry.get("category", "")), item_dir,
-            ai_content.get("product_short_name") or product_data.get("title", ""))
+            ai_content.get("product_short_name") or product_data.get("title", ""),
+            shop=shop, img_template=img_template)
 
     return {
         "product_data": product_data,
@@ -470,6 +481,7 @@ def run_batch_two_tier(
     make_staging: bool = False,
     staging_force: bool = False,
     sop_override: list[str] | None = None,
+    img_template: str | None = None,
 ) -> dict:
     """逐商品處理（文案+變體，選配影片）→ 合併蝦皮二階 Excel。
 
@@ -516,7 +528,7 @@ def run_batch_two_tier(
         try:
             p = _prepare_product(entry, json_dir, shop=shop,
                                  shared_offer=_offer_uses[str(entry.get("item_id"))] > 1,
-                                 sop_override=sop_override)
+                                 sop_override=sop_override, img_template=img_template)
             if p is None:
                 failures.append({"code": code, "error": "缺 JSON 或文案失敗"})
             else:
