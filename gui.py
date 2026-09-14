@@ -22,8 +22,9 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 
 from dotenv import load_dotenv
 
@@ -117,6 +118,7 @@ class App:
 
         self._build_ui()
         self._refresh_hero()          # 開檔當下就是「沒更新名單」＝灰色鎖住
+        self._refresh_csv_state()
         self._refresh_sop_menu()
         self.root.minsize(760, 860)
         self._refresh_cookie_status()
@@ -165,6 +167,7 @@ class App:
                               else sp.csv_path))
         self._save_state()
         self.list_fresh = False          # 換賣場＝換一份名單，要重抓
+        self._refresh_csv_state()
         self._refresh_sop_menu()
         self._refresh_hero()
         self._refresh_cookie_status()
@@ -186,28 +189,27 @@ class App:
                                   command=self._on_shop_pick)
         shop_menu.config(font=F_BTN_SM)
         shop_menu.pack(side="left", padx=4)
-        tk.Label(shop_frame, text="（換賣場會切換名單/登入帳號/模板/文案規範）",
-                 font=F_HINT, fg="#888", bg=BG).pack(side="left", padx=6)
 
         # ── 名單 + 更新 ──
         csv_frame = tk.Frame(self.root, padx=24, pady=4, bg=BG)
         csv_frame.pack(fill="x")
         tk.Label(csv_frame, text="① 名單：", font=F_LBL_B, bg=BG, fg=FG).pack(side="left")
-        tk.Entry(csv_frame, textvariable=self.csv_path, font=("Arial", 12), width=24,
-                 bg="#ffffff", fg="#111111").pack(side="left", fill="x", expand=True, padx=4)
-        tk.Button(csv_frame, text="選檔…", font=F_BTN_SM,
-                  command=self._on_pick_csv).pack(side="left", padx=(0, 6))
+        # 名單由賣場決定（input/{shop}_ai_list.csv），沒有讓人挑檔的必要 → 只顯示狀態。
+        # 要加新賣場是改 code 的事（.env 設名單 ID ＋ shops.py 的 profile），不是在這裡選檔。
+        self.csv_state = tk.StringVar(value="")
+        tk.Label(csv_frame, textvariable=self.csv_state, font=F_LBL,
+                 bg=BG, fg="#1a7f37").pack(side="left", padx=6)
         self.fetch_btn = tk.Button(csv_frame, text="⬇️ 更新名單", font=F_BTN,
                                    command=self._on_fetch_list)
         self.fetch_btn.pack(side="left")
         self.action_buttons.append(self.fetch_btn)
-        tk.Label(self.root, text="（⬇️ 更新名單＝抓最新線上表；Windows 首次請先按下方「🔑 Google 登入」）",
+        tk.Label(self.root, text="（每次開工先按這顆：程式跑的是本機抄本，不更新就看不到你線上新增的商品）",
                  font=F_HINT, fg="#888", bg=BG).pack(anchor="w", padx=24)
 
         # ── 商品勾選清單 ──
         list_lbl = tk.Frame(self.root, padx=24, pady=6, bg=BG)
         list_lbl.pack(fill="x")
-        tk.Label(list_lbl, text="② 勾選商品（右側 ✨GPT＝改用 GPT 生圖，不勾＝1688 直用）：",
+        tk.Label(list_lbl, text="② 勾要做的商品（右側 ✨GPT＝這支自己生圖，不勾＝直接用 1688 的圖）：",
                  font=F_LBL_B, bg=BG, fg=FG).pack(side="left")
         self.count_var = tk.StringVar(value="尚未載入名單")
         tk.Label(list_lbl, textvariable=self.count_var, font=F_LBL, bg=BG, fg="#1a7f37").pack(side="left", padx=8)
@@ -241,19 +243,20 @@ class App:
         self.sop_menu = tk.OptionMenu(sop_frame, self.sop_var, "（該賣場預設）")
         self.sop_menu.config(font=F_BTN_SM)
         self.sop_menu.pack(side="left")
-        tk.Label(sop_frame, text="（換一份規範就是另一版文案；產出會標版本，舊版不會被蓋掉）",
+        tk.Label(sop_frame, text="（決定標題與詳情怎麼寫）",
                  font=F_HINT, fg="#888", bg=BG).pack(side="left", padx=6)
 
-        tk.Checkbutton(self.root, text="產出時順便合成短影片（缺圖自動下載）", variable=self.make_video,
+        tk.Checkbutton(self.root, text="🎬 合成短影片：挑 9 張圖做一支商品影片（蝦皮 Excel 沒有影片欄，要在後台手動補）",
+                       variable=self.make_video,
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
                        activebackground=BG).pack(anchor="w", padx=24, pady=(2, 0))
         tk.Checkbutton(self.root,
-                       text="🆕 建檔：產 1-1「_待貼新品」＋配 SKU 品號（正式/預購都要；取消＝只試跑，產出的檔不可上架）",
+                       text="🏷 配 SKU 品號＋寫 1-1「_待貼新品」（正式與預購都要；取消＝試跑，檔名會標「試跑」不可上傳）",
                        variable=self.make_staging,
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
                        activebackground=BG).pack(anchor="w", padx=24, pady=(0, 0))
         tk.Checkbutton(self.root,
-                       text="已抓過的就不重抓 1688（只重生文案／Excel；1688 那邊真的改了才取消勾選）",
+                       text="⏭ 抓過的就不再抓 1688（只重跑文案與 Excel；1688 頁面真的改了才取消勾選）",
                        variable=self.skip_scraped,
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
                        activebackground=BG).pack(anchor="w", padx=24, pady=(0, 4))
@@ -268,7 +271,8 @@ class App:
         self.run_all_lbl.place(relx=0.5, rely=0.5, anchor="center")
         for w in (self.hero_bg, self.run_all_lbl):
             w.bind("<Button-1>", lambda e: (None if self.running else self._on_run_all()))
-        tk.Label(self.root, text="③ 勾好商品按這顆：自動去 1688 抓資料，再做文案+挑色+影片+蝦皮 Excel，一次到底",
+        tk.Label(self.root,
+                 text="③ 產出會存成 batch/{賣場}/{日期}/文案_v1、v2…　舊版一律保留，不滿意就重跑一版再挑",
                  font=F_HINT, fg="#888", bg=BG).pack(anchor="w", padx=24)
 
         # ── 分步 / 其他 ──
@@ -306,9 +310,11 @@ class App:
         # 底部
         bottom = tk.Frame(self.root, padx=24, pady=8, bg=BG)
         bottom.pack(fill="x")
+        # ⏹ 停止：只在跑的時候才出現（閒著時是一顆永遠灰的按鈕＝純噪音）。
+        # 功能本身要留——一輪 26 支要跑很久，中途發現勾錯了得停得下來。
         self.stop_btn = tk.Button(bottom, text="⏹ 停止", font=F_BTN_SM, width=8,
-                                  state="disabled", command=self._on_stop)
-        self.stop_btn.pack(side="right")
+                                  command=self._on_stop)
+        self._stop_parent = bottom
         tk.Label(bottom, textvariable=self.status_var, font=F_STATUS, fg="#555", bg=BG,
                  wraplength=560, justify="left", anchor="w").pack(side="left", fill="x", expand=True)
         tk.Frame(self.root, height=8, bg=BG).pack()
@@ -466,7 +472,17 @@ class App:
 
     def _mark_list_fresh(self) -> None:
         self.list_fresh = True
+        self._refresh_csv_state()
         self._refresh_hero()
+
+    def _refresh_csv_state(self) -> None:
+        """名單那行顯示什麼：檔名＋抓取時間，沒更新就講「請先按更新名單」。"""
+        f = Path(self.csv_path.get())
+        if not self.list_fresh:
+            self.csv_state.set(f"{f.name}　← 還沒更新，請先按右邊那顆")
+        else:
+            ts = datetime.fromtimestamp(f.stat().st_mtime).strftime("%m/%d %H:%M") if f.exists() else "?"
+            self.csv_state.set(f"{f.name}　{ts} 更新")
 
     def _refresh_hero(self) -> None:
         """一鍵按鈕的外觀：忙碌 or 名單沒更新 → 灰色＋說明文字。"""
@@ -481,7 +497,10 @@ class App:
     def _busy(self, on: bool, cancellable: bool = False) -> None:
         self.running = on
         self._set_buttons("disabled" if on else "normal")
-        self.stop_btn.config(state="normal" if (on and cancellable) else "disabled")
+        if on and cancellable:
+            self.stop_btn.pack(side="right")
+        else:
+            self.stop_btn.pack_forget()
         self._refresh_hero()
 
     def _guard(self) -> bool:
@@ -815,19 +834,6 @@ class App:
         _open_path(target)
 
     # ── 其他 ──────────────────────────────
-    def _on_pick_csv(self) -> None:
-        """手動指定本機 CSV：也算「沒更新」——那份可能是很舊的抄本。"""
-        path = filedialog.askopenfilename(
-            title="選 AI 上架名單 CSV",
-            initialdir=str((BASE_DIR / "input") if (BASE_DIR / "input").exists() else BASE_DIR),
-            filetypes=[("CSV", "*.csv"), ("所有檔案", "*.*")])
-        if path:
-            self.csv_path.set(path)
-            self.list_fresh = False
-            self._refresh_hero()
-            self._save_state()
-            self._refresh_products()
-
     def _on_stop(self) -> None:
         self.cancel_event.set()
         self.stop_btn.config(state="disabled")
