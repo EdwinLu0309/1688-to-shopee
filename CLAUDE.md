@@ -210,7 +210,7 @@ python main.py images --ingest-downloads
 
 ## 產出目錄（2026-09-14 定版）
 ```
-input/{shop}_ai_list.csv          名單抄本（自動產生，手改會被蓋掉）
+input/{shop}_ai_list.csv          名單抄本（自動產生，手改會被蓋掉）— **一賣場一個檔，就這三個**
 output/
   raw/{item_id}.json              1688 原料，**刻意扁平不分賣場批次**
   raw/{item_id}/ai_content.json   文案快取
@@ -229,6 +229,11 @@ output/
 - **文案模板＝一份 SOP md**：`config/sop/{shop}/*.md` 每多一份就多一個下拉選項，不用改程式；
   換模板會分開存文案快取（`ai_content_{模板}.json`），不會讀到舊模板的快取。
   ⚠️ Lady 的 SOP 在 `config/sop/` 根目錄（沒有 lady/ 子夾），`copy_templates()` 兩邊都掃。
+- **四個資料夾各有身分，別混**（2026-09-14 定）：`input/` 只放三家的名單抄本｜
+  `output/` 只放 `raw/`＋`batch/`｜`tests/` 是**回歸測試程式**不是測試資料｜
+  其他臨時產物一律 `scratch/`（gitignore，隨時可整個刪）。
+  這條是清理 3.5G→433M 之後定的：當時 `input/` 躺著 7 月的舊名單副本、根目錄十幾個
+  `scratchpad_*.log`、`output/` 混著測試 xlsx——每個當下都想「先放這等下整理」。
 - **已上架之後才要改文案不走這條**（那是蝦皮後台／直接找 Claude 改）；這裡處理的是
   「待上架區看了不滿意」那一段。
 - **raw 為什麼扁平**：key 是 1688 的 `item_id`（全站唯一），同一個連結會被不同批、不同賣場

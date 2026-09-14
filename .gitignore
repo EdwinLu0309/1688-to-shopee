@@ -34,3 +34,6 @@ config/cookies_kkren.json
 
 # Claude Code 本機權限設定（機器本機、勿提交）
 .claude/settings.local.json
+
+# 丟過即忘的暫存（見 scratch/README.md）
+scratch/
