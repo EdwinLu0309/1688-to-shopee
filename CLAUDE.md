@@ -138,7 +138,6 @@ A   A     006     0003    01     0000
 │   ├── copywriter.py          # ★文案引擎：Claude + SOP 生標題/詳情/簡稱/變體命名（build_variants）
 │   ├── video_maker.py         # 蝦皮短影片合成（本機圖→1:1 mp4，ffmpeg）
 │   ├── pipeline.py            # 單商品全流程串接
-│   ├── batch_pipeline.py      # 批次處理（採購表→逐一處理→合併 Excel）
 │   ├── product_card.py        # 商品資產包（廠商固定事實商品卡 + 圖/影片/raw）
 │   └── master_staging.py      # ★正式新品 → 1-1「_待貼新品」暫存分頁（接訂貨流程，2026-08-20）
 │   # （★②③ 訂貨/對帳套件 scraper/ordering/ 已於 #S134 整包遷至 1688-order repo）
