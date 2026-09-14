@@ -99,9 +99,7 @@ class App:
         #    只能退回「HNV7_美規」這種字串，而獲利表是拿「蝦皮選項貨號＝SKU 品號」去 join
         #    成本與銷量的 → 這批商品的生意在獲利表裡會整片是黑的。
         self.make_staging = tk.BooleanVar(value=True)
-        # 已抓過就不重抓（Edwin 2026-09-14）：改標題/詳情規範後重生文案是常態，
-        # 那時 1688 的規格圖片都沒變，重抓只是白打 1688 一次（有風控成本，實測連開十幾次會吃滑塊）。
-        self.skip_scraped = tk.BooleanVar(value=True)
+
         # 文案模板：掃 config/sop/{shop}/*.md，加一份 md 就多一個選項（Edwin 2026-09-14）
         self.sop_var = tk.StringVar(value="（該賣場預設）")
         self.status_var = tk.StringVar(value="就緒")
@@ -112,6 +110,7 @@ class App:
         self.list_fresh = False
 
         self.products: list[dict] = []
+        self.status: dict[str, dict] = {}
         self.check_vars: list[tk.BooleanVar] = []
         self.route_vars: list[tk.BooleanVar] = []   # True = ✨GPT 生圖；False = 🖼 1688 直用
         self.action_buttons: list[tk.Button] = []
@@ -250,16 +249,6 @@ class App:
                        variable=self.make_video,
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
                        activebackground=BG).pack(anchor="w", padx=24, pady=(2, 0))
-        tk.Checkbutton(self.root,
-                       text="🏷 配 SKU 品號＋寫 1-1「_待貼新品」（正式與預購都要；取消＝試跑，檔名會標「試跑」不可上傳）",
-                       variable=self.make_staging,
-                       font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
-                       activebackground=BG).pack(anchor="w", padx=24, pady=(0, 0))
-        tk.Checkbutton(self.root,
-                       text="⏭ 抓過的就不再抓 1688（只重跑文案與 Excel；1688 頁面真的改了才取消勾選）",
-                       variable=self.skip_scraped,
-                       font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
-                       activebackground=BG).pack(anchor="w", padx=24, pady=(0, 4))
 
         hero = tk.Frame(self.root, padx=24, pady=8, bg=BG)
         hero.pack(fill="x")
@@ -287,10 +276,13 @@ class App:
             self.action_buttons.append(b)
             return b
 
+        # 下半段＝**只重做某一項**。上半段已經「缺什麼補什麼」，所以這裡每顆都是覆寫性的例外動作，
+        # 點了才會發生（Edwin 2026-09-15：兩段分開，第一段湊齊、第二段挑不滿意的重做）。
         step_btn("🔑 登入 1688", self._on_login)
-        step_btn("🔍 只抓取", self._on_scrape)
-        step_btn("📦 只產出", self._on_run)
-        step_btn("📁 素材夾", self._on_open_assets)
+        step_btn("🔄 重抓 1688", self._on_scrape)
+        step_btn("✏️ 重生文案（產新版）", self._on_run)
+        step_btn("🧪 試跑（不寫 1-1）", self._on_dry_run)
+        step_btn("📁 這批的資料夾", self._on_open_assets)
 
         # cookie 狀態
         cf = tk.Frame(self.root, padx=24, pady=4, bg=BG)
@@ -350,7 +342,6 @@ class App:
             return
 
         cat_names = _cat_names(self.shop_var.get())
-        done = self._done_map()
         for p in self.products:
             sel_var = tk.BooleanVar(value=False)
             gpt_var = tk.BooleanVar(value=False)
@@ -360,9 +351,7 @@ class App:
             row.pack(fill="x", anchor="w")
             cat = cat_names.get(p.get("category", ""), p.get("category", ""))
             warn = "" if p.get("category") else " ⚠️"
-            d = done.get(str(p.get("item_id")))
-            tag = f"　✅ 已產出 {d[4:6]}/{d[6:8]}" if d and len(d) == 8 else ""
-            label = f"{p['code']}　[{cat}{warn}]　{p.get('name','')[:18]}{tag}"
+            label = f"{p['code']}　[{cat}{warn}]　{p.get('name','')[:16]}　{self._badges(p['code'])}"
             tk.Checkbutton(row, text="✨GPT", variable=gpt_var, font=("Arial", 12),
                            bg="#ffffff", fg="#7a3ea8", selectcolor="#ffffff",
                            activebackground="#f0f0f0", command=self._update_count).pack(side="right", padx=6)
@@ -371,6 +360,65 @@ class App:
                            activebackground="#f0f0f0", command=self._update_count,
                            padx=4, pady=2).pack(side="left", fill="x", expand=True)
         self._update_count()
+
+    # ── 每支商品「做到哪了」──────────────────────────────
+    #
+    # ⚠️ **刻意不另存一份狀態檔**（Edwin 2026-09-15 問「是不是該有內部表格記誰做過」）：
+    #    狀態檔會跟現實脫節——檔案被刪了它還說做過，或反過來，而那種 bug 最難查。
+    #    每一步的「做過沒」都從**真實產物**讀：raw json／文案快取／1-1 SKU表／批次夾／影片檔。
+    #    manifest.json 只記歷史（哪天哪一版用什麼模板），不負責判斷狀態——兩者分開才不會互相汙染。
+    def _scan_status(self) -> None:
+        """掃一次：每支商品的 抓取／文案／品號／上架檔／影片 各自做了沒。
+
+        1-1 要打 API，所以只在「更新名單」與切賣場時掃，不是每次重畫都掃。
+        """
+        self.status: dict[str, dict] = {}
+        tpl_tag = ""
+        try:
+            from scraper.batch_pipeline2 import _template_tag
+            tpl_tag = _template_tag(self._sop_override())
+        except Exception:  # noqa: BLE001
+            pass
+        # 1-1：哪些商品編號已經有 SKU 品號（唯一正本）
+        coded: set[str] = set()
+        try:
+            from scraper.master_staging import load_master_context
+            ctx = load_master_context(self.shop_var.get())
+            for r in ctx.sku_rows:
+                if len(r) >= 2 and r[0].strip() and r[1].strip():
+                    coded.add(r[1].split("_")[0].strip())
+        except Exception as e:  # noqa: BLE001
+            self._log(f"⚠️ 讀 1-1 失敗，品號狀態這欄先留空：{e}")
+            coded = None
+        done = self._done_map()
+        for p in self.products:
+            item, code = str(p.get("item_id")), p.get("code", "")
+            rd = Path(RAW_DIR) / item
+            cache = rd / (f"ai_content_{tpl_tag}.json" if tpl_tag else "ai_content.json")
+            self.status[code] = {
+                "抓取": (Path(RAW_DIR) / f"{item}.json").exists(),
+                "文案": cache.exists(),
+                "品號": (code in coded) if coded is not None else None,
+                "上架檔": done.get(item),          # 有值＝哪天產過
+                "影片": (rd / "video" / f"{code}.mp4").exists(),
+            }
+
+    def _rescan_and_redraw(self) -> None:
+        self._status("掃描每支商品做到哪了…")
+        self._scan_status()
+        self._refresh_products()
+        self._status("就緒")
+
+    def _badges(self, code: str) -> str:
+        """一行狀態徽章，缺什麼一眼看得出來。"""
+        st = self.status.get(code)
+        if not st:
+            return ""
+        def m(ok):
+            return "✓" if ok else ("—" if ok is False else "?")
+        d = st["上架檔"]
+        excel = f"上架檔 {d[4:6]}/{d[6:8]}" if d and len(d) == 8 else "上架檔 —"
+        return f"抓{m(st['抓取'])} 文案{m(st['文案'])} 品號{m(st['品號'])} {excel} 影片{m(st['影片'])}"
 
     def _done_map(self) -> dict[str, str]:
         """item_id → 最近一次產出的日期（掃 batch/{shop}/*/manifest.json）。
@@ -383,8 +431,9 @@ class App:
         base = Path(BATCH_DIR) / self.shop_var.get()
         if not base.exists():
             return out
-        for mf in sorted(base.glob("*/manifest.json")):
-            day = mf.parent.name
+        # manifest 在 batch/{shop}/{日期}/文案_vN/manifest.json；舊批次（版本化之前）在日期夾底下
+        for mf in sorted(list(base.glob("*/*/manifest.json")) + list(base.glob("*/manifest.json"))):
+            day = mf.parent.name if mf.parent.name.isdigit() else mf.parent.parent.name
             try:
                 doc = json.loads(mf.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001
@@ -491,7 +540,7 @@ class App:
         self.hero_bg.config(bg=color)
         self.run_all_lbl.config(
             bg=color,
-            text=("🚀 一鍵完成（抓取 → 產出上架檔）" if self.list_fresh
+            text=("🚀 開始（缺什麼補什麼）" if self.list_fresh
                   else "🔒 請先按「⬇️ 更新名單」"))
 
     def _busy(self, on: bool, cancellable: bool = False) -> None:
@@ -585,6 +634,7 @@ class App:
                 self._thread_log(f"✅ 名單已更新（來源 {res['profile']}，{res['bytes']} bytes）")
                 self.root.after(0, self._mark_list_fresh)
                 self.root.after(0, self._refresh_products)
+                self.root.after(0, self._rescan_and_redraw)
             else:
                 self._thread_log(f"❌ 抓取失敗：{res.get('error')}")
         except Exception as e:  # noqa: BLE001
@@ -596,6 +646,41 @@ class App:
             self.root.after(0, self._on_task_done)
 
     # ── 🚀 一鍵完成 ──────────────────────────────
+    def _plan(self, sel: list[dict]) -> dict:
+        """這次實際會做什麼——由「每支缺什麼」算出來，不是由勾選猜出來。
+
+        Edwin 2026-09-15：「我連跟你溝通了幾回都還是沒有很確定現在會出現什麼」。
+        所以動作不再是一堆帶但書的勾選，而是**把缺的補上**，並在按下去之前把清單列給他看。
+        """
+        need_scrape, need_copy, need_code, need_video = [], [], [], []
+        for p in sel:
+            st = self.status.get(p["code"]) or {}
+            if not st.get("抓取"):
+                need_scrape.append(p)
+            if not st.get("文案"):
+                need_copy.append(p)
+            if st.get("品號") is False:
+                need_code.append(p)
+            if self.make_video.get() and not st.get("影片"):
+                need_video.append(p)
+        return {"抓取": need_scrape, "文案": need_copy, "品號": need_code,
+                "影片": need_video, "全部": sel}
+
+    def _plan_text(self, plan: dict) -> str:
+        n = lambda k: len(plan[k])  # noqa: E731
+        sel = len(plan["全部"])
+        lines = [f"這次處理 {sel} 支商品：", ""]
+        lines.append(f"　抓 1688　　{n('抓取')} 支" + (f"（其餘 {sel - n('抓取')} 支用既有資料）" if n('抓取') < sel else ""))
+        lines.append(f"　文案　　　{n('文案')} 支重生" + (f"（其餘 {sel - n('文案')} 支用既有文案）" if n('文案') < sel else "")
+                     + f"　模板：{self.sop_var.get()}")
+        lines.append(f"　SKU 品號　{n('品號')} 支要配號"
+                     + (f"（其餘 {sel - n('品號')} 支 1-1 已經有了，沿用）" if n('品號') < sel else "")
+                     + "，並寫進 1-1「_待貼新品」")
+        lines.append(f"　上架檔　　{sel} 支 → 新的一版（舊版保留）")
+        if self.make_video.get():
+            lines.append(f"　影片　　　{n('影片')} 支要合成" + (f"（其餘 {sel - n('影片')} 支已有）" if n('影片') < sel else ""))
+        return "\n".join(lines)
+
     def _on_run_all(self) -> None:
         if not self.list_fresh:
             messagebox.showwarning(
@@ -621,9 +706,16 @@ class App:
         staging = self._staging_precheck()
         if staging is None:
             return
+        # 按下去之前先把「這次會做什麼」攤開來講 —— 不要讓人從勾選去推
+        plan = self._plan(sel)
+        if not messagebox.askyesno("確認這次要做的事", self._plan_text(plan) + "\n\n開始嗎？"):
+            return
+        # 已經有文案的就沿用（同一個模板才算）——重生文案是第二段的明確動作，不在這裡偷偷發生
+        for p in sel:
+            p["reuse_content"] = bool((self.status.get(p["code"]) or {}).get("文案"))
         self._busy(True, cancellable=True)
         self.cancel_event.clear()
-        self._log(f"🚀 一鍵完成：{len(sel)} 商品（① 抓取 → ② 產出）…")
+        self._log(f"🚀 開始：{len(sel)} 商品（缺什麼補什麼）…")
         threading.Thread(target=self._run_all_worker, args=(sel, *staging), daemon=True).start()
 
     def _run_all_worker(self, products: list[dict], make_staging: bool = False,
@@ -634,11 +726,11 @@ class App:
         try:
             # ① 抓取（已抓過就不重抓——勾了那顆的話）
             ids = [p["item_id"] for p in products]
-            if self.skip_scraped.get():
-                have = [i for i in ids if (Path(RAW_DIR) / f"{i}.json").exists()]
-                ids = [i for i in ids if i not in have]
-                if have:
-                    self._thread_log(f"① 已抓過 {len(have)} 支，跳過（要更新 1688 資料請取消勾選）")
+            # 一鍵＝缺什麼補什麼：抓過的一律跳過。要強制更新 1688 資料走「🔄 重抓 1688」。
+            have = [i for i in ids if (Path(RAW_DIR) / f"{i}.json").exists()]
+            ids = [i for i in ids if i not in have]
+            if have:
+                self._thread_log(f"① 已抓過 {len(have)} 支，跳過（要更新 1688 資料按「🔄 重抓 1688」）")
             if not ids:
                 self._thread_log("① 全部都抓過了 → 直接產出")
                 res = {"success": len(products), "blocked": 0, "failed": 0}
@@ -674,6 +766,7 @@ class App:
             traceback.print_exc()
             self._thread_log(f"一鍵完成錯誤：{e}")
         finally:
+            self.root.after(0, self._rescan_and_redraw)
             self.root.after(0, self._on_task_done)
 
     def _report_batch(self, res: dict) -> None:
@@ -787,18 +880,25 @@ class App:
             if not messagebox.askyesno(
                 "缺抓取資料",
                 f"這些勾選商品還沒抓取（缺 JSON）：\n{', '.join(missing)}\n\n"
-                "缺的會被跳過。要繼續嗎？（建議先按「🔍 只抓取」或用「🚀 一鍵完成」）"):
+                "缺的會被跳過。要繼續嗎？（建議先用上面的「🚀 開始」把缺的補齊）"):
                 return
         if not self._warn_no_category(sel):
             return
         if not self._warn_gpt(sel):
             return
-        staging = self._staging_precheck()
-        if staging is None:
+        if not messagebox.askyesno(
+            "重生文案",
+            f"{len(sel)} 支商品要用「{self.sop_var.get()}」重寫標題／詳情／選項名。\n\n"
+            "· 不會重抓 1688，也不會重配品號\n"
+            "· 產出會是新的一版（文案_vN），舊版完整保留\n"
+            "· 傳之前記得去蝦皮待上架區刪掉上一版，否則會多一筆重複的\n\n"
+            "開始嗎？"):
             return
+        for p in sel:
+            p["reuse_content"] = False          # 這顆的用途就是「不要沿用舊文案」
         self._busy(True)
-        self._log(f"開始產出（{len(sel)} 個勾選商品，影片={'開' if self.make_video.get() else '關'}）…")
-        threading.Thread(target=self._run_worker, args=(sel, *staging), daemon=True).start()
+        self._log(f"✏️ 重生文案（{len(sel)} 支，模板 {self.sop_var.get()}）…")
+        threading.Thread(target=self._run_worker, args=(sel, True, False), daemon=True).start()
 
     def _run_worker(self, products: list[dict], make_staging: bool = False,
                     staging_force: bool = False) -> None:
@@ -826,6 +926,27 @@ class App:
         base = Path(BATCH_DIR) / self.shop_var.get()
         dirs = sorted([d for d in base.glob("*") if d.is_dir()], reverse=True) if base.exists() else []
         return dirs[0] if dirs else None
+
+    def _on_dry_run(self) -> None:
+        """只想看文案長怎樣：不寫 1-1、不配號。產出檔名自帶「試跑」，防手滑上傳。"""
+        if not self._guard():
+            return
+        sel = self._guard_selection()
+        if sel is None:
+            return
+        if not messagebox.askyesno(
+            "試跑",
+            f"{len(sel)} 支商品產一份**不能上架**的預覽檔：\n\n"
+            "· 不寫 1-1、不配 SKU 品號\n"
+            "· 商品選項貨號只會是「HNV7_美規」這種字串\n"
+            "· 檔名會是「上架檔_試跑.xlsx」\n\n"
+            "只是要看文案品質的話按確定。"):
+            return
+        for p in sel:
+            p["reuse_content"] = False
+        self._busy(True)
+        self._log(f"🧪 試跑（{len(sel)} 支，不寫 1-1）…")
+        threading.Thread(target=self._run_worker, args=(sel, False, False), daemon=True).start()
 
     def _on_open_assets(self) -> None:
         """開最新那批的資料夾（上架檔／素材／manifest 都在裡面）；還沒跑過就開 batch 根目錄。"""
