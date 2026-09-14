@@ -208,6 +208,23 @@ python main.py images --ingest-downloads
 把 stdout/stderr `reconfigure(encoding="utf-8")`（main.py 與 gui.py 都早期匯入 settings）。
 ⚠️ 讀舊本機 CSV = 讀到舊資料：實際踩過本機檔停在 2 商品舊版、線上表其實已 48 商品。
 
+## 產出目錄（2026-09-14 定版）
+```
+input/{shop}_ai_list.csv          名單抄本（自動產生，手改會被蓋掉）
+output/
+  raw/{item_id}.json              1688 原料，**刻意扁平不分賣場批次**
+  raw/{item_id}/ai_content.json   文案快取
+  batch/{shop}/{YYYYMMDD}/        ★ 一次跑一夾，舊批次永不被覆蓋
+      上架檔.xlsx ／ 素材/{編號}/ ／ 名單快照.csv ／ manifest.json
+```
+- **raw 為什麼扁平**：key 是 1688 的 `item_id`（全站唯一），同一個連結會被不同批、不同賣場
+  用到；分層放會下載兩份又分不出哪份最新。程式也是拿 item_id 直查。
+- **manifest.json ＝ 編號 ↔ item_id ↔ 品號 的唯一完整對照**。事後問「HNV7 哪天上的、
+  配到哪些品號」翻它就有，不必從 1-1 反推。GUI 清單的「✅ 已產出 MM/DD」也是讀它。
+  （9/9 那批的 manifest 是 9/14 事後補寫的，當時程式還沒有這個檔。）
+- ⚠️ **素材跟著批次不跟著編號**：舊版放 `output/上架素材/{編號}` → 同一支改版重跑直接蓋掉
+  上一版，事後分不出哪個對應哪次上架。
+
 ## 桌面 GUI（gui.py，一條龍、免打指令）
 給非工程使用者的「按幾顆按鈕就上架」全包 App（tkinter，Win/Mac 雙平台）。
 啟動：Mac 雙擊 `run_mac.command`、Windows 雙擊 `run_windows.bat`（皆優先用 `.venv`）。

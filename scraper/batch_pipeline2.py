@@ -34,6 +34,7 @@ manifest 格式（JSON）：
 """
 import asyncio
 import json
+from datetime import datetime
 from pathlib import Path
 
 from collections import Counter
@@ -42,7 +43,7 @@ from loguru import logger
 
 from scraper.weight_parse import dims_cm, weight_kg
 
-from config.settings import OUTPUT_DIR
+from config.settings import BATCH_DIR, OUTPUT_DIR, RAW_DIR
 from scraper.color_policy import base_color, select_first_axis
 from scraper.copywriter import build_variants, generate_listing
 from scraper.downloader import download_product_images_from_json
@@ -151,7 +152,7 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
     product_data = json.loads(product_json.read_text(encoding="utf-8"))
 
     # 文案：快取優先
-    item_dir = Path(OUTPUT_DIR) / item_id
+    item_dir = Path(RAW_DIR) / item_id
     item_dir.mkdir(parents=True, exist_ok=True)
     ai_cache = item_dir / "ai_content.json"
     if entry.get("reuse_content") and ai_cache.exists():
@@ -300,7 +301,7 @@ def _make_video_for(product: dict, video_n: int = 9) -> str | None:
     """
     meta = product["_meta"]
     item_id, code = meta["item_id"], meta["code"]
-    item_dir = Path(OUTPUT_DIR) / item_id
+    item_dir = Path(RAW_DIR) / item_id
     try:
         if not collect_images(item_dir):
             logger.info(f"[{code}] 本機無圖，下載 1688 圖片供影片使用…")
@@ -334,10 +335,10 @@ def _make_video_for(product: dict, video_n: int = 9) -> str | None:
         return None
 
 
-def assemble_upload_assets(code: str, item_id: str) -> Path | None:
+def assemble_upload_assets(code: str, item_id: str, batch_dir: Path | None = None) -> Path | None:
     """把「要手動補到蝦皮」的素材（影片 + 尺寸表）按編號歸到一個好找的資料夾。
 
-    產出 output/上架素材/{編號}/：
+    產出 {這批的資料夾}/素材/{編號}/：
       {編號}_影片.mp4     ← 蝦皮商品影片（大量上架 Excel 沒影片欄，手動補）
       {編號}_尺寸表.png   ← 繁體尺寸表（若有；上傳蝦皮後可取得網址填 Q 欄）
 
@@ -345,8 +346,10 @@ def assemble_upload_assets(code: str, item_id: str) -> Path | None:
     """
     import shutil
 
-    item_dir = Path(OUTPUT_DIR) / item_id
-    dest = Path(OUTPUT_DIR) / "上架素材" / code
+    item_dir = Path(RAW_DIR) / item_id
+    # ⚠️ 素材要跟著「批次」不是跟著「編號」：同一支商品改版重跑會產新影片，
+    #    放 output/上架素材/{編號} 會直接蓋掉上一版、事後分不出哪個是哪次上架用的。
+    dest = (Path(batch_dir) if batch_dir else Path(OUTPUT_DIR)) / "素材" / code
     dest.mkdir(parents=True, exist_ok=True)
 
     copied = []
@@ -365,9 +368,44 @@ def assemble_upload_assets(code: str, item_id: str) -> Path | None:
     return None
 
 
+def _write_manifest(batch_dir: Path, shop: str, prepared: list[dict], failures: list[dict],
+                    excel_path: Path, staging_result: dict | None) -> Path:
+    """這一批做了什麼，寫成一份 manifest.json 留在批次夾裡。
+
+    為什麼要：事後問「HNV7 哪天上的、對應哪個 1688 連結、配到哪些品號」，翻這份就有答案，
+    不必從 1-1 反推或憑記憶。**編號 ↔ item_id ↔ 品號** 三者的對照只有這裡完整記著。
+    """
+    items = []
+    for p in prepared:
+        m = p.get("_meta", {})
+        items.append({
+            "code": m.get("code"),
+            "item_id": m.get("item_id"),
+            "title": m.get("title"),
+            "sku_count": m.get("sku_count"),
+            "skus": sorted((p.get("config") or {}).get("option_sku_map", {}).values()),
+            "video": str(m.get("video")) if m.get("video") else None,
+        })
+    doc = {
+        "shop": shop,
+        "產出時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "上架檔": Path(excel_path).name,
+        "成功": len(prepared),
+        "失敗": len(failures),
+        "待貼新品": {"商品": staging_result.get("written"), "SKU": staging_result.get("sku_rows")}
+                    if staging_result else None,
+        "商品": items,
+        "失敗明細": failures,
+    }
+    out = Path(batch_dir) / "manifest.json"
+    out.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info(f"manifest → {out}")
+    return out
+
+
 def run_batch_two_tier(
     manifest_path: Path | None = None,
-    json_dir: Path = Path("output"),
+    json_dir: Path = RAW_DIR,
     output_path: Path | None = None,
     template_path: Path | None = None,
     make_video: bool = True,
@@ -402,6 +440,10 @@ def run_batch_two_tier(
         return {"total": 0, "success": 0, "failed": 0, "excel_path": None, "failures": []}
     logger.info(f"賣場：{shop}（模板 {tpl.name}）")
 
+    # 這一批的資料夾：batch/{shop}/{YYYYMMDD}/（同一天重跑就沿用同一夾，覆寫自己那批）
+    batch_dir = Path(BATCH_DIR) / shop / datetime.now().strftime("%Y%m%d")
+    batch_dir.mkdir(parents=True, exist_ok=True)
+
     # 同一個 1688 網址被名單多列共用（會被拆成多個蝦皮商品）→ 影響重量的可信度
     _offer_uses = Counter(str(e.get("item_id")) for e in entries)
 
@@ -418,7 +460,7 @@ def run_batch_two_tier(
                 if make_video:
                     p["_meta"]["video"] = _make_video_for(p, video_n)
                 # 影片 + 尺寸表歸到 output/上架素材/{編號}/ 方便手動補上蝦皮
-                assemble_upload_assets(p["_meta"]["code"], p["_meta"]["item_id"])
+                assemble_upload_assets(p["_meta"]["code"], p["_meta"]["item_id"], batch_dir)
                 prepared.append(p)
         except Exception as e:
             logger.error(f"[{code}] 例外：{e}")
@@ -430,7 +472,7 @@ def run_batch_two_tier(
                 "excel_path": None, "failures": failures}
 
     if output_path is None:
-        output_path = Path(OUTPUT_DIR) / sp.excel_name   # per-shop 檔名，多賣場不互相覆蓋
+        output_path = batch_dir / "上架檔.xlsx"   # 每批一夾 → 舊批次的上架檔不會被蓋掉
     # ⚠️ 順序：**先配號再產 Excel**。Excel 的 O 商品選項貨號要填 SKU 品號，
     #    而品號是建檔那一步配的（讀 1-1、append-only）。舊版是 Excel 先產、建檔後跑
     #    → O 欄只能填 `HNV7_美規`，而獲利表是拿「蝦皮選項貨號 ＝ SKU 品號」去 join
@@ -456,6 +498,8 @@ def run_batch_two_tier(
         logger.info(f"待貼分頁：{staging_result['written']} 商品 / "
                     f"{staging_result['sku_rows']} SKU 列 → 1-1「{staging_result['tab']}」")
 
+    _write_manifest(batch_dir, shop, prepared, failures, output_path, staging_result)
+
     summary = {
         "total": len(entries),
         "success": len(prepared),
@@ -464,6 +508,7 @@ def run_batch_two_tier(
         "failures": failures,
         "products": [p["_meta"] for p in prepared],
         "staging": staging_result,
+        "batch_dir": batch_dir,
     }
     logger.info(f"{'='*50}\n批次完成：{summary['success']}/{summary['total']} 成功"
                 f"，Excel：{output_path}")

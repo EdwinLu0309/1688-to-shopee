@@ -21,7 +21,14 @@ COOKIE_PATH = BASE_DIR / "config" / "cookies.json"
 BROWSER_PROFILE_DIR = BASE_DIR / "config" / "browser_profile"
 OUTPUT_DIR = BASE_DIR / "output"
 IMAGE_DIR = BASE_DIR / "output" / "images"
-BATCH_OUTPUT_DIR = BASE_DIR / "output" / "batch"
+# 產出分兩層（2026-09-14 Edwin 要求「之後才知道去哪邊找貨、不會亂掉」）：
+#   RAW_DIR   ＝ 1688 原料，檔名是 1688 的 item_id（全站唯一）→ **刻意扁平、不分賣場批次**：
+#               同一個連結可能被不同批、不同賣場用到，分層放會下載兩份又分不出哪份最新。
+#   BATCH_DIR ＝ 每次跑一個資料夾 batch/{shop}/{YYYYMMDD}/，上架檔／素材／名單快照／manifest
+#               都在裡面 → 舊批次永遠不被覆蓋，回頭查得到「這支哪天上的、配到哪些品號」。
+RAW_DIR = BASE_DIR / "output" / "raw"
+BATCH_DIR = BASE_DIR / "output" / "batch"
+BATCH_OUTPUT_DIR = BATCH_DIR      # 舊名沿用
 LOG_DIR = BASE_DIR / "logs"
 
 HEADLESS = False

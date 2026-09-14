@@ -31,12 +31,12 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env", override=True)
 sys.path.insert(0, str(BASE_DIR))
 
-from config.settings import OUTPUT_DIR  # noqa: E402
+from config.settings import BATCH_DIR, OUTPUT_DIR, RAW_DIR  # noqa: E402
 from scraper.shops import SHOPS, get_shop  # noqa: E402
 
 STATE_PATH = BASE_DIR / "config" / "gui_state.json"
 DEFAULT_CSV = BASE_DIR / "input" / "lady_ai_list.csv"
-ASSETS_DIR = Path(OUTPUT_DIR) / "上架素材"
+ASSETS_DIR = Path(BATCH_DIR)     # 📁 素材夾 → 最新那批的資料夾（見 _on_open_assets）
 
 # 賣場下拉選單顯示名（key → 顯示）
 _SHOP_LABELS = {"lady": "Lady 女裝", "nail": "Nail 美甲", "baby": "Baby 母嬰"}
@@ -94,6 +94,9 @@ class App:
         self.csv_path = tk.StringVar(value=str(self._load_last_csv()))
         self.make_video = tk.BooleanVar(value=True)
         self.make_staging = tk.BooleanVar(value=False)  # 正式新品：產 1-1「_待貼新品」分頁
+        # 已抓過就不重抓（Edwin 2026-09-14）：改標題/詳情規範後重生文案是常態，
+        # 那時 1688 的規格圖片都沒變，重抓只是白打 1688 一次（有風控成本，實測連開十幾次會吃滑塊）。
+        self.skip_scraped = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="就緒")
         # ⚠️ 「這次開工有沒有按過『⬇️ 更新名單』」——沒按過就不讓按 🚀 一鍵完成（Edwin 2026-09-14 要求）。
         #    本機 CSV 只是線上名單的抄本，不更新就是拿舊抄本去跑，而**線上新增的商品根本不在清單裡**
@@ -223,6 +226,21 @@ class App:
         # ── 一鍵完成（主按鈕）──
         # macOS 的 tk.Button 會忽略 bg（用原生白按鈕），故改用 Frame+Label 自己上色，
         # Label 的 bg 在 mac 才會真的渲染 → 綠底白字看得到。
+        # ── 產出選項（放在「一鍵完成」之前：先設定再執行才合邏輯，Edwin 2026-09-14）──
+        tk.Checkbutton(self.root, text="產出時順便合成短影片（缺圖自動下載）", variable=self.make_video,
+                       font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
+                       activebackground=BG).pack(anchor="w", padx=24, pady=(2, 0))
+        tk.Checkbutton(self.root,
+                       text="🆕 建檔：同時產 1-1「_待貼新品」分頁（正式/預購都走這條，貼進商品表+SKU表即接上訂貨）",
+                       variable=self.make_staging,
+                       font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
+                       activebackground=BG).pack(anchor="w", padx=24, pady=(0, 0))
+        tk.Checkbutton(self.root,
+                       text="已抓過的就不重抓 1688（只重生文案／Excel；1688 那邊真的改了才取消勾選）",
+                       variable=self.skip_scraped,
+                       font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
+                       activebackground=BG).pack(anchor="w", padx=24, pady=(0, 4))
+
         hero = tk.Frame(self.root, padx=24, pady=8, bg=BG)
         hero.pack(fill="x")
         self.hero_bg = tk.Frame(hero, bg="#1a7f37", height=60, cursor="hand2")
@@ -235,15 +253,6 @@ class App:
             w.bind("<Button-1>", lambda e: (None if self.running else self._on_run_all()))
         tk.Label(self.root, text="③ 勾好商品按這顆：自動去 1688 抓資料，再做文案+挑色+影片+蝦皮 Excel，一次到底",
                  font=F_HINT, fg="#888", bg=BG).pack(anchor="w", padx=24)
-
-        tk.Checkbutton(self.root, text="產出時順便合成短影片（缺圖自動下載）", variable=self.make_video,
-                       font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
-                       activebackground=BG).pack(anchor="w", padx=24, pady=(2, 0))
-        tk.Checkbutton(self.root,
-                       text="🆕 建檔：同時產 1-1「_待貼新品」分頁（正式/預購都走這條，貼進商品表+SKU表即接上訂貨）",
-                       variable=self.make_staging,
-                       font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
-                       activebackground=BG).pack(anchor="w", padx=24, pady=(0, 4))
 
         # ── 分步 / 其他 ──
         tk.Label(self.root, text="分步執行（需要時才個別按）：", font=F_HINT, fg="#666",
@@ -318,6 +327,7 @@ class App:
             return
 
         cat_names = _cat_names(self.shop_var.get())
+        done = self._done_map()
         for p in self.products:
             sel_var = tk.BooleanVar(value=False)
             gpt_var = tk.BooleanVar(value=False)
@@ -327,7 +337,9 @@ class App:
             row.pack(fill="x", anchor="w")
             cat = cat_names.get(p.get("category", ""), p.get("category", ""))
             warn = "" if p.get("category") else " ⚠️"
-            label = f"{p['code']}　[{cat}{warn}]　{p.get('name','')[:18]}"
+            d = done.get(str(p.get("item_id")))
+            tag = f"　✅ 已產出 {d[4:6]}/{d[6:8]}" if d and len(d) == 8 else ""
+            label = f"{p['code']}　[{cat}{warn}]　{p.get('name','')[:18]}{tag}"
             tk.Checkbutton(row, text="✨GPT", variable=gpt_var, font=("Arial", 12),
                            bg="#ffffff", fg="#7a3ea8", selectcolor="#ffffff",
                            activebackground="#f0f0f0", command=self._update_count).pack(side="right", padx=6)
@@ -336,6 +348,28 @@ class App:
                            activebackground="#f0f0f0", command=self._update_count,
                            padx=4, pady=2).pack(side="left", fill="x", expand=True)
         self._update_count()
+
+    def _done_map(self) -> dict[str, str]:
+        """item_id → 最近一次產出的日期（掃 batch/{shop}/*/manifest.json）。
+
+        Edwin 2026-09-14：「已經有產出的商品要不要備註」——名單上的舊商品和新商品長得
+        一模一樣，誤勾就會重跑一支已經上架的。這個對照讓清單直接標出來。
+        ⚠️ key 用 item_id 不用編號：同一個編號會有多個款式／多次改版，item_id 才是 1688 那一支。
+        """
+        out: dict[str, str] = {}
+        base = Path(BATCH_DIR) / self.shop_var.get()
+        if not base.exists():
+            return out
+        for mf in sorted(base.glob("*/manifest.json")):
+            day = mf.parent.name
+            try:
+                doc = json.loads(mf.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            for it in doc.get("商品", []):
+                if it.get("item_id"):
+                    out[str(it["item_id"])] = day      # 後面的批次覆蓋前面 → 留最近一次
+        return out
 
     def _set_all_checks(self, val: bool) -> None:
         for v in self.check_vars:
@@ -530,20 +564,29 @@ class App:
         from scraper.batch_pipeline2 import run_batch_two_tier
         shop = self.shop_var.get()
         try:
-            # ① 抓取
+            # ① 抓取（已抓過就不重抓——勾了那顆的話）
             ids = [p["item_id"] for p in products]
-            self._thread_log(f"① 去 1688 抓 {len(ids)} 商品…")
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                res = loop.run_until_complete(scrape_many(
-                    ids, cookie_path=self._shop().cookie_path, out_dir=Path(OUTPUT_DIR),
-                    headless=False, progress_cb=self._thread_log,
-                    cancel_check=self.cancel_event.is_set))
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-            self._thread_log(f"① 抓取完成：成功 {res['success']} / 被擋 {res['blocked']} / 失敗 {res['failed']}")
+            if self.skip_scraped.get():
+                have = [i for i in ids if (Path(RAW_DIR) / f"{i}.json").exists()]
+                ids = [i for i in ids if i not in have]
+                if have:
+                    self._thread_log(f"① 已抓過 {len(have)} 支，跳過（要更新 1688 資料請取消勾選）")
+            if not ids:
+                self._thread_log("① 全部都抓過了 → 直接產出")
+                res = {"success": len(products), "blocked": 0, "failed": 0}
+            else:
+                self._thread_log(f"① 去 1688 抓 {len(ids)} 商品…")
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    res = loop.run_until_complete(scrape_many(
+                        ids, cookie_path=self._shop().cookie_path, out_dir=Path(RAW_DIR),
+                        headless=False, progress_cb=self._thread_log,
+                        cancel_check=self.cancel_event.is_set))
+                finally:
+                    loop.close()
+                    asyncio.set_event_loop(None)
+                self._thread_log(f"① 抓取完成：成功 {res['success']} / 被擋 {res['blocked']} / 失敗 {res['failed']}")
             if self.cancel_event.is_set():
                 self._thread_log("已取消，未產出")
                 return
@@ -553,7 +596,7 @@ class App:
                 return
             # ② 產出（run_batch_two_tier 內部自帶 asyncio.run，須無 running loop）
             self._thread_log(f"② 產出 {len(products)} 商品（文案+挑色+影片+Excel）…")
-            res2 = run_batch_two_tier(json_dir=Path(OUTPUT_DIR),
+            res2 = run_batch_two_tier(json_dir=Path(RAW_DIR),
                                       make_video=self.make_video.get(), products=products,
                                       shop=shop, make_staging=make_staging,
                                       staging_force=staging_force)
@@ -576,6 +619,16 @@ class App:
         if st:
             self._thread_log(f"🆕 待貼分頁：{st['written']} 商品 / {st['sku_rows']} SKU 列 → "
                              f"1-1「{st['tab']}」（補黃底欄後貼進商品表/SKU表）")
+        bdir = res.get("batch_dir")
+        if bdir:
+            try:    # 名單快照：這批是拿哪一版名單跑的，事後對得回去
+                import shutil
+                csv = Path(self.csv_path.get())
+                if csv.exists():
+                    shutil.copy2(csv, Path(bdir) / "名單快照.csv")
+            except Exception as e:  # noqa: BLE001
+                self._thread_log(f"⚠️ 名單快照沒存成：{e}")
+            self._thread_log(f"📁 這批的資料夾：{bdir}")
         excel = res.get("excel_path")
         if excel:
             self._thread_log(f"📄 蝦皮 Excel：{excel}")
@@ -634,7 +687,7 @@ class App:
         asyncio.set_event_loop(loop)
         try:
             res = loop.run_until_complete(scrape_many(
-                item_ids, cookie_path=self._shop().cookie_path, out_dir=Path(OUTPUT_DIR),
+                item_ids, cookie_path=self._shop().cookie_path, out_dir=Path(RAW_DIR),
                 headless=False, progress_cb=self._thread_log,
                 cancel_check=self.cancel_event.is_set))
             self._thread_log(
@@ -660,8 +713,8 @@ class App:
         if sel is None:
             return
         missing = [p["code"] for p in sel
-                   if not (Path(OUTPUT_DIR) / f"{p['item_id']}.json").exists()
-                   and not (Path(OUTPUT_DIR) / p["item_id"] / f"{p['item_id']}.json").exists()]
+                   if not (Path(RAW_DIR) / f"{p['item_id']}.json").exists()
+                   and not (Path(RAW_DIR) / p["item_id"] / f"{p['item_id']}.json").exists()]
         if missing:
             if not messagebox.askyesno(
                 "缺抓取資料",
@@ -683,7 +736,7 @@ class App:
                     staging_force: bool = False) -> None:
         from scraper.batch_pipeline2 import run_batch_two_tier
         try:
-            res = run_batch_two_tier(json_dir=Path(OUTPUT_DIR),
+            res = run_batch_two_tier(json_dir=Path(RAW_DIR),
                                      make_video=self.make_video.get(), products=products,
                                      shop=self.shop_var.get(), make_staging=make_staging,
                                      staging_force=staging_force)
@@ -700,9 +753,17 @@ class App:
             _open_path(excel.parent)
 
     # ── 📁 素材夾 ──────────────────────────────
+    def _latest_batch_dir(self) -> Path | None:
+        """這個賣場最後跑的那一批資料夾（batch/{shop}/{YYYYMMDD}/）。"""
+        base = Path(BATCH_DIR) / self.shop_var.get()
+        dirs = sorted([d for d in base.glob("*") if d.is_dir()], reverse=True) if base.exists() else []
+        return dirs[0] if dirs else None
+
     def _on_open_assets(self) -> None:
-        ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-        _open_path(ASSETS_DIR)
+        """開最新那批的資料夾（上架檔／素材／manifest 都在裡面）；還沒跑過就開 batch 根目錄。"""
+        target = self._latest_batch_dir() or Path(BATCH_DIR)
+        target.mkdir(parents=True, exist_ok=True)
+        _open_path(target)
 
     # ── 其他 ──────────────────────────────
     def _on_pick_csv(self) -> None:
