@@ -472,7 +472,9 @@ def run_batch_two_tier(
                 "excel_path": None, "failures": failures}
 
     if output_path is None:
-        output_path = batch_dir / "上架檔.xlsx"   # 每批一夾 → 舊批次的上架檔不會被蓋掉
+        # 每批一夾 → 舊批次的上架檔不會被蓋掉。沒建檔＝沒配品號，檔名直接標「試跑」——
+        # 這種檔上架後獲利表會對不到成本與銷量，而且不會有任何錯誤訊息，只能靠檔名擋住人手。
+        output_path = batch_dir / ("上架檔.xlsx" if make_staging else "上架檔_試跑.xlsx")
     # ⚠️ 順序：**先配號再產 Excel**。Excel 的 O 商品選項貨號要填 SKU 品號，
     #    而品號是建檔那一步配的（讀 1-1、append-only）。舊版是 Excel 先產、建檔後跑
     #    → O 欄只能填 `HNV7_美規`，而獲利表是拿「蝦皮選項貨號 ＝ SKU 品號」去 join

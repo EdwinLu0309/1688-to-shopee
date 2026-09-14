@@ -197,8 +197,9 @@ def generate2(ctx: click.Context, product_json: str, code: str, price: int, stoc
 @click.option("--template", "-t", type=click.Path(exists=True), default=None, help="蝦皮模板（預設用該賣場的 config/shopee_template_{shop}.xlsx）")
 @click.option("--video/--no-video", default=True, help="每商品順便合成短影片（預設開；缺圖會先下載）")
 @click.option("--video-n", type=int, default=9, help="影片挑幾張圖")
-@click.option("--staging/--no-staging", default=False,
-              help="建檔：同時把商品寫進該賣場 1-1 的「_待貼新品」分頁（正式與預購都走這條，接訂貨流程）")
+@click.option("--staging/--no-staging", default=True,
+              help="建檔：把商品寫進該賣場 1-1 的「_待貼新品」＋配 SKU 品號（**預設開**；"
+                   "正式與預購都要。--no-staging 只用於試跑，產出的檔名會標「試跑」不可上架）")
 @click.option("--staging-force", is_flag=True, default=False,
               help="_待貼新品 還有上一批未貼走時直接覆蓋（預設會拒絕）")
 @click.pass_context

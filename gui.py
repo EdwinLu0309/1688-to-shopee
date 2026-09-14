@@ -93,7 +93,11 @@ class App:
         self.shop_var = tk.StringVar(value=self._load_last_shop())
         self.csv_path = tk.StringVar(value=str(self._load_last_csv()))
         self.make_video = tk.BooleanVar(value=True)
-        self.make_staging = tk.BooleanVar(value=False)  # 正式新品：產 1-1「_待貼新品」分頁
+        # ⚠️ 建檔**預設開**（Edwin 2026-09-14 改）：正式與預購都住 1-1、都要有品號，
+        #    所以「不建檔的產出」不是正常路徑而是試跑。不勾的話 Excel 的 O 商品選項貨號
+        #    只能退回「HNV7_美規」這種字串，而獲利表是拿「蝦皮選項貨號＝SKU 品號」去 join
+        #    成本與銷量的 → 這批商品的生意在獲利表裡會整片是黑的。
+        self.make_staging = tk.BooleanVar(value=True)
         # 已抓過就不重抓（Edwin 2026-09-14）：改標題/詳情規範後重生文案是常態，
         # 那時 1688 的規格圖片都沒變，重抓只是白打 1688 一次（有風控成本，實測連開十幾次會吃滑塊）。
         self.skip_scraped = tk.BooleanVar(value=True)
@@ -231,7 +235,7 @@ class App:
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
                        activebackground=BG).pack(anchor="w", padx=24, pady=(2, 0))
         tk.Checkbutton(self.root,
-                       text="🆕 建檔：同時產 1-1「_待貼新品」分頁（正式/預購都走這條，貼進商品表+SKU表即接上訂貨）",
+                       text="🆕 建檔：產 1-1「_待貼新品」＋配 SKU 品號（正式/預購都要；取消＝只試跑，產出的檔不可上架）",
                        variable=self.make_staging,
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
                        activebackground=BG).pack(anchor="w", padx=24, pady=(0, 0))
@@ -483,6 +487,14 @@ class App:
         背景執行緒不跳 UI。預檢連線失敗就照常跑（write_staging 端還有同一道防線）。
         """
         if not self.make_staging.get():
+            if not messagebox.askyesno(
+                "沒有建檔＝這份檔不能拿去上架",
+                "「🆕 建檔」沒有勾。\n\n"
+                "不建檔就配不到 SKU 品號，Excel 的「商品選項貨號」只能填「HNV7_美規」這種字串。\n"
+                "獲利表是靠『蝦皮選項貨號＝SKU 品號』去對成本與銷量的——\n"
+                "**這批商品上架後，在獲利表裡會整片是黑的，而且沒有任何錯誤訊息。**\n\n"
+                "確定只是試跑嗎？（產出的檔名會標成「上架檔_試跑.xlsx」提醒你別傳）"):
+                return None
             return (False, False)
         shop = self.shop_var.get()
         try:
