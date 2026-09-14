@@ -84,10 +84,29 @@ class ShopProfile:
                 f"（分頁非第一頁時另設 AI_LIST_SHEET_GID_{self.key.upper()}）")
         return cfg["id"], str(cfg.get("gid") or "0")
 
-    def sop_texts(self) -> list[tuple[str, str]]:
-        """[(檔名, 全文)]。SOP 檔缺失時明確報錯（文案規範是過審依據，不可靜默略過）。"""
-        out = []
+    def copy_templates(self) -> list[Path]:
+        """這個賣場有哪幾份文案模板可選（config/sop/{shop}/*.md）。
+
+        Edwin 2026-09-14：「不如我們用不同的形式去做，不斷優化討論就可以定版」——
+        所以模板不寫死在程式裡，**加一份 md 就多一個選項**，GUI 下拉直接掃資料夾。
+        """
+        base = BASE_DIR / "config" / "sop"
+        found = sorted((base / self.key).glob("*.md")) if (base / self.key).exists() else []
+        # ⚠️ Lady 的 SOP 早期直接放在 config/sop/ 根目錄（沒有 lady/ 子夾）→ 只掃子夾會列不到，
+        #    下拉變成只有「預設」而看不出它其實有兩份。把 profile 自己指定的那幾份也併進來。
         for rel in self.sop_files:
+            p = base / rel
+            if p.exists() and p not in found:
+                found.append(p)
+        return found
+
+    def sop_texts(self, override: list[str] | None = None) -> list[tuple[str, str]]:
+        """[(檔名, 全文)]。SOP 檔缺失時明確報錯（文案規範是過審依據，不可靜默略過）。
+
+        override＝這次指定要用的模板（相對 config/sop/ 的路徑），沒給就用 profile 的預設。
+        """
+        out = []
+        for rel in (override or self.sop_files):
             p = BASE_DIR / "config" / "sop" / rel
             if not p.exists():
                 raise FileNotFoundError(f"缺文案 SOP：{p}（{self.key} 賣場的文案規範）")

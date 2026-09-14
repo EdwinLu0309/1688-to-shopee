@@ -135,7 +135,7 @@ def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], 
 
 
 def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
-                     shared_offer: bool = False) -> dict | None:
+                     shared_offer: bool = False, sop_override: list[str] | None = None) -> dict | None:
     """把一個 manifest 商品項處理成 generate_batch_two_tier_excel 需要的 dict。"""
     from scraper.shops import get_shop
 
@@ -154,7 +154,9 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
     # 文案：快取優先
     item_dir = Path(RAW_DIR) / item_id
     item_dir.mkdir(parents=True, exist_ok=True)
-    ai_cache = item_dir / "ai_content.json"
+    # ⚠️ 換文案模板＝不同產物，快取要分開存（否則選了新模板卻讀到舊模板的快取）
+    tpl_tag = _template_tag(sop_override)
+    ai_cache = item_dir / (f"ai_content_{tpl_tag}.json" if tpl_tag else "ai_content.json")
     if entry.get("reuse_content") and ai_cache.exists():
         ai_content = json.loads(ai_cache.read_text(encoding="utf-8"))
         logger.info(f"[{code}] 使用快取文案")
@@ -165,7 +167,7 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
             "demand": entry.get("demand", ""),
             "category": entry.get("category", ""),
             "style_note": entry.get("style_filter", ""),  # 第一層：Edwin 的款式備註
-        }, shop=shop)
+        }, shop=shop, sop_override=sop_override)
         if ai_content.get("error"):
             logger.error(f"[{code}] 文案生成失敗：{ai_content.get('error')}")
             return None
@@ -368,8 +370,49 @@ def assemble_upload_assets(code: str, item_id: str, batch_dir: Path | None = Non
     return None
 
 
+def _template_tag(sop_override: list[str] | None) -> str:
+    """模板檔名 → 短標記（給快取檔名與 manifest 用）。沒指定回空字串＝該賣場預設。"""
+    if not sop_override:
+        return ""
+    return Path(sop_override[0]).stem.replace(" ", "")[:24]
+
+
+def _next_version_dir(batch_dir: Path, kind: str = "文案") -> tuple[Path, int]:
+    """這批的下一個版本夾：{批次夾}/{kind}_v{N}/。
+
+    ⚠️ **永不覆蓋舊版**（Edwin 2026-09-14）：「你不能確定版本二比版本一好，如果三個版本
+    都不如預期，有可能直接採用版本一重新上傳」。所以每次產出一律開新號，舊的整份留著。
+    文案與圖片各自編號——圖片不滿意重生時，文案可能是好的，不該被迫一起重跑。
+    """
+    n = 1 + max([int(d.name.rsplit("_v", 1)[1])
+                 for d in batch_dir.glob(f"{kind}_v*") if d.is_dir()
+                 and d.name.rsplit("_v", 1)[-1].isdigit()] or [0])
+    d = batch_dir / f"{kind}_v{n}"
+    d.mkdir(parents=True, exist_ok=True)
+    return d, n
+
+
+def _append_batch_note(batch_dir: Path, row: dict) -> None:
+    """把這次產出追加到「批次說明.md」——最後一欄「你的評語」留白給 Edwin 自己填。
+
+    他要的動線：跑幾版 → 在待上架區逐版看品質 → 自己標 OK/NG → 最後挑一版重傳。
+    那張表就是他做這個決定時唯一要看的東西。
+    """
+    f = batch_dir / "批次說明.md"
+    if not f.exists():
+        head = (f"# {batch_dir.parent.name} / {batch_dir.name} 批次\n\n"
+                "產出一次就追加一列，**舊版一律保留**。最後一欄自己填 OK / NG，"
+                "之後要挑哪一版重傳就看這張表。\n\n"
+                "| 版本 | 時間 | 模板 | 商品數 | 你的評語 |\n"
+                "|---|---|---|---|---|\n")
+        f.write_text(head, encoding="utf-8")
+    with f.open("a", encoding="utf-8") as fh:
+        fh.write(f"| {row['版本']} | {row['時間']} | {row['模板']} | {row['商品數']} |  |\n")
+
+
 def _write_manifest(batch_dir: Path, shop: str, prepared: list[dict], failures: list[dict],
-                    excel_path: Path, staging_result: dict | None) -> Path:
+                    excel_path: Path, staging_result: dict | None,
+                    version: str = "", template: str = "") -> Path:
     """這一批做了什麼，寫成一份 manifest.json 留在批次夾裡。
 
     為什麼要：事後問「HNV7 哪天上的、對應哪個 1688 連結、配到哪些品號」，翻這份就有答案，
@@ -388,6 +431,8 @@ def _write_manifest(batch_dir: Path, shop: str, prepared: list[dict], failures: 
         })
     doc = {
         "shop": shop,
+        "版本": version,
+        "文案模板": template,
         "產出時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "上架檔": Path(excel_path).name,
         "成功": len(prepared),
@@ -414,6 +459,7 @@ def run_batch_two_tier(
     shop: str = "lady",
     make_staging: bool = False,
     staging_force: bool = False,
+    sop_override: list[str] | None = None,
 ) -> dict:
     """逐商品處理（文案+變體，選配影片）→ 合併蝦皮二階 Excel。
 
@@ -440,9 +486,15 @@ def run_batch_two_tier(
         return {"total": 0, "success": 0, "failed": 0, "excel_path": None, "failures": []}
     logger.info(f"賣場：{shop}（模板 {tpl.name}）")
 
-    # 這一批的資料夾：batch/{shop}/{YYYYMMDD}/（同一天重跑就沿用同一夾，覆寫自己那批）
+    # 這一批的資料夾：batch/{shop}/{YYYYMMDD}/，底下每跑一次開一個 文案_vN（舊版永不覆蓋）
     batch_dir = Path(BATCH_DIR) / shop / datetime.now().strftime("%Y%m%d")
     batch_dir.mkdir(parents=True, exist_ok=True)
+    ver_dir, ver_no = _next_version_dir(batch_dir, "文案")
+    tpl_name = _template_tag(sop_override) or "預設"
+    logger.info(f"這批：{batch_dir.name} / 文案_v{ver_no}（模板 {tpl_name}）")
+    if ver_no > 1:
+        logger.warning(f"⚠️ 這是第 {ver_no} 版。傳之前先去蝦皮「待上架區」把上一版那批刪掉，"
+                       f"否則會多一筆重複的（蝦皮不會依商品貨號覆蓋）")
 
     # 同一個 1688 網址被名單多列共用（會被拆成多個蝦皮商品）→ 影響重量的可信度
     _offer_uses = Counter(str(e.get("item_id")) for e in entries)
@@ -453,14 +505,15 @@ def run_batch_two_tier(
         logger.info(f"{'='*50}\n處理 {code} (item_id: {entry.get('item_id')})")
         try:
             p = _prepare_product(entry, json_dir, shop=shop,
-                                 shared_offer=_offer_uses[str(entry.get("item_id"))] > 1)
+                                 shared_offer=_offer_uses[str(entry.get("item_id"))] > 1,
+                                 sop_override=sop_override)
             if p is None:
                 failures.append({"code": code, "error": "缺 JSON 或文案失敗"})
             else:
                 if make_video:
                     p["_meta"]["video"] = _make_video_for(p, video_n)
                 # 影片 + 尺寸表歸到 output/上架素材/{編號}/ 方便手動補上蝦皮
-                assemble_upload_assets(p["_meta"]["code"], p["_meta"]["item_id"], batch_dir)
+                assemble_upload_assets(p["_meta"]["code"], p["_meta"]["item_id"], ver_dir)
                 prepared.append(p)
         except Exception as e:
             logger.error(f"[{code}] 例外：{e}")
@@ -474,7 +527,7 @@ def run_batch_two_tier(
     if output_path is None:
         # 每批一夾 → 舊批次的上架檔不會被蓋掉。沒建檔＝沒配品號，檔名直接標「試跑」——
         # 這種檔上架後獲利表會對不到成本與銷量，而且不會有任何錯誤訊息，只能靠檔名擋住人手。
-        output_path = batch_dir / ("上架檔.xlsx" if make_staging else "上架檔_試跑.xlsx")
+        output_path = ver_dir / ("上架檔.xlsx" if make_staging else "上架檔_試跑.xlsx")
     # ⚠️ 順序：**先配號再產 Excel**。Excel 的 O 商品選項貨號要填 SKU 品號，
     #    而品號是建檔那一步配的（讀 1-1、append-only）。舊版是 Excel 先產、建檔後跑
     #    → O 欄只能填 `HNV7_美規`，而獲利表是拿「蝦皮選項貨號 ＝ SKU 品號」去 join
@@ -500,7 +553,11 @@ def run_batch_two_tier(
         logger.info(f"待貼分頁：{staging_result['written']} 商品 / "
                     f"{staging_result['sku_rows']} SKU 列 → 1-1「{staging_result['tab']}」")
 
-    _write_manifest(batch_dir, shop, prepared, failures, output_path, staging_result)
+    _write_manifest(ver_dir, shop, prepared, failures, output_path, staging_result,
+                    version=f"文案_v{ver_no}", template=tpl_name)
+    _append_batch_note(batch_dir, {"版本": f"文案_v{ver_no}",
+                                   "時間": datetime.now().strftime("%m/%d %H:%M"),
+                                   "模板": tpl_name, "商品數": len(prepared)})
 
     summary = {
         "total": len(entries),
@@ -511,6 +568,8 @@ def run_batch_two_tier(
         "products": [p["_meta"] for p in prepared],
         "staging": staging_result,
         "batch_dir": batch_dir,
+        "version_dir": ver_dir,
+        "version": f"文案_v{ver_no}",
     }
     logger.info(f"{'='*50}\n批次完成：{summary['success']}/{summary['total']} 成功"
                 f"，Excel：{output_path}")

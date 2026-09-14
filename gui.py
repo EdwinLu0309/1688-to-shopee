@@ -101,6 +101,8 @@ class App:
         # 已抓過就不重抓（Edwin 2026-09-14）：改標題/詳情規範後重生文案是常態，
         # 那時 1688 的規格圖片都沒變，重抓只是白打 1688 一次（有風控成本，實測連開十幾次會吃滑塊）。
         self.skip_scraped = tk.BooleanVar(value=True)
+        # 文案模板：掃 config/sop/{shop}/*.md，加一份 md 就多一個選項（Edwin 2026-09-14）
+        self.sop_var = tk.StringVar(value="（該賣場預設）")
         self.status_var = tk.StringVar(value="就緒")
         # ⚠️ 「這次開工有沒有按過『⬇️ 更新名單』」——沒按過就不讓按 🚀 一鍵完成（Edwin 2026-09-14 要求）。
         #    本機 CSV 只是線上名單的抄本，不更新就是拿舊抄本去跑，而**線上新增的商品根本不在清單裡**
@@ -115,6 +117,7 @@ class App:
 
         self._build_ui()
         self._refresh_hero()          # 開檔當下就是「沒更新名單」＝灰色鎖住
+        self._refresh_sop_menu()
         self.root.minsize(760, 860)
         self._refresh_cookie_status()
         self._refresh_products()
@@ -162,6 +165,7 @@ class App:
                               else sp.csv_path))
         self._save_state()
         self.list_fresh = False          # 換賣場＝換一份名單，要重抓
+        self._refresh_sop_menu()
         self._refresh_hero()
         self._refresh_cookie_status()
         self._refresh_products()
@@ -231,6 +235,15 @@ class App:
         # macOS 的 tk.Button 會忽略 bg（用原生白按鈕），故改用 Frame+Label 自己上色，
         # Label 的 bg 在 mac 才會真的渲染 → 綠底白字看得到。
         # ── 產出選項（放在「一鍵完成」之前：先設定再執行才合邏輯，Edwin 2026-09-14）──
+        sop_frame = tk.Frame(self.root, padx=24, pady=2, bg=BG)
+        sop_frame.pack(fill="x")
+        tk.Label(sop_frame, text="文案模板：", font=F_LBL_B, bg=BG, fg=FG).pack(side="left")
+        self.sop_menu = tk.OptionMenu(sop_frame, self.sop_var, "（該賣場預設）")
+        self.sop_menu.config(font=F_BTN_SM)
+        self.sop_menu.pack(side="left")
+        tk.Label(sop_frame, text="（換一份規範就是另一版文案；產出會標版本，舊版不會被蓋掉）",
+                 font=F_HINT, fg="#888", bg=BG).pack(side="left", padx=6)
+
         tk.Checkbutton(self.root, text="產出時順便合成短影片（缺圖自動下載）", variable=self.make_video,
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
                        activebackground=BG).pack(anchor="w", padx=24, pady=(2, 0))
@@ -427,6 +440,30 @@ class App:
                 text=f"❌ {_SHOP_LABELS[self.shop_var.get()]} 未登入（先按「🔑 登入 1688」）",
                 fg="#cf222e")
 
+    def _refresh_sop_menu(self) -> None:
+        """依目前賣場重建文案模板下拉（掃 config/sop/{shop}/*.md）。"""
+        from scraper.shops import get_shop
+        names = ["（該賣場預設）"] + [p.stem for p in get_shop(self.shop_var.get()).copy_templates()]
+        menu = self.sop_menu["menu"]
+        menu.delete(0, "end")
+        for n in names:
+            menu.add_command(label=n, command=lambda v=n: self.sop_var.set(v))
+        if self.sop_var.get() not in names:
+            self.sop_var.set(names[0])
+
+    def _sop_override(self) -> list[str] | None:
+        """下拉選的模板 → sop_texts 用的相對路徑；選預設回 None。"""
+        v = self.sop_var.get()
+        if v.startswith("（"):
+            return None
+        from config.settings import BASE_DIR
+        from scraper.shops import get_shop
+        base = Path(BASE_DIR) / "config" / "sop"
+        for p in get_shop(self.shop_var.get()).copy_templates():
+            if p.stem == v:
+                return [str(p.relative_to(base))]     # sop_texts 吃的是相對 config/sop 的路徑
+        return None
+
     def _mark_list_fresh(self) -> None:
         self.list_fresh = True
         self._refresh_hero()
@@ -608,7 +645,7 @@ class App:
                 return
             # ② 產出（run_batch_two_tier 內部自帶 asyncio.run，須無 running loop）
             self._thread_log(f"② 產出 {len(products)} 商品（文案+挑色+影片+Excel）…")
-            res2 = run_batch_two_tier(json_dir=Path(RAW_DIR),
+            res2 = run_batch_two_tier(json_dir=Path(RAW_DIR), sop_override=self._sop_override(),
                                       make_video=self.make_video.get(), products=products,
                                       shop=shop, make_staging=make_staging,
                                       staging_force=staging_force)
@@ -640,7 +677,7 @@ class App:
                     shutil.copy2(csv, Path(bdir) / "名單快照.csv")
             except Exception as e:  # noqa: BLE001
                 self._thread_log(f"⚠️ 名單快照沒存成：{e}")
-            self._thread_log(f"📁 這批的資料夾：{bdir}")
+            self._thread_log(f"📁 這批的資料夾：{bdir}（{res.get('version','')}）")
         excel = res.get("excel_path")
         if excel:
             self._thread_log(f"📄 蝦皮 Excel：{excel}")
@@ -748,7 +785,7 @@ class App:
                     staging_force: bool = False) -> None:
         from scraper.batch_pipeline2 import run_batch_two_tier
         try:
-            res = run_batch_two_tier(json_dir=Path(RAW_DIR),
+            res = run_batch_two_tier(json_dir=Path(RAW_DIR), sop_override=self._sop_override(),
                                      make_video=self.make_video.get(), products=products,
                                      shop=self.shop_var.get(), make_staging=make_staging,
                                      staging_force=staging_force)

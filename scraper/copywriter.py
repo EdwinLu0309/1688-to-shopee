@@ -75,10 +75,13 @@ _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文
 }}"""
 
 
-def _build_system(sp) -> str:
-    """組 system prompt：角色 + 該賣場全部 SOP 全文（字串拼接，SOP 含大括號也安全）。"""
+def _build_system(sp, sop_override: list[str] | None = None) -> str:
+    """組 system prompt：角色 + 該賣場 SOP 全文（字串拼接，SOP 含大括號也安全）。
+
+    sop_override＝這次選的文案模板（GUI 下拉），沒給就用該賣場預設那份。
+    """
     parts = [_ROLE_HEAD.format(shop_desc=sp.shop_desc)]
-    for name, text in sp.sop_texts():
+    for name, text in sp.sop_texts(sop_override):
         parts.append(f"\n=== {name} ===\n{text}\n")
     return "".join(parts)
 
@@ -89,7 +92,8 @@ def _title_rule(sp) -> str:
     return rule + (sp.title_extra or "")
 
 
-def generate_listing(product_data: dict, sheet_ctx: dict, shop: str = "lady") -> dict:
+def generate_listing(product_data: dict, sheet_ctx: dict, shop: str = "lady",
+                     sop_override: list[str] | None = None) -> dict:
     """
     生成單一商品的蝦皮上架文案。
 
@@ -111,7 +115,7 @@ def generate_listing(product_data: dict, sheet_ctx: dict, shop: str = "lady") ->
         return {"error": "no_api_key", "flags": ["缺少 ANTHROPIC_API_KEY"]}
 
     sp = get_shop(shop)
-    system_text = _build_system(sp)
+    system_text = _build_system(sp, sop_override)
 
     colors = list(product_data.get("sku_images", {}).keys()) or \
         [s.get("attributes", {}).get("规格", "") for s in product_data.get("skus", [])]
