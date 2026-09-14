@@ -392,22 +392,32 @@ def _next_version_dir(batch_dir: Path, kind: str = "文案") -> tuple[Path, int]
     return d, n
 
 
-def _append_batch_note(batch_dir: Path, row: dict) -> None:
-    """把這次產出追加到「批次說明.md」——最後一欄「你的評語」留白給 Edwin 自己填。
+def _append_batch_note(batch_dir: Path, *, 版本: str, 模板: str, 範疇: str,
+                       產出: list[str], 說明: str = "") -> None:
+    """把這次產出追加到「批次說明.md」。
 
-    他要的動線：跑幾版 → 在待上架區逐版看品質 → 自己標 OK/NG → 最後挑一版重傳。
-    那張表就是他做這個決定時唯一要看的東西。
+    Edwin 2026-09-14：「點進去批次檔就可以知道 9/9 生出的這批，文案 1 是用什麼方式建的、
+    文案 2 是用什麼方式建的、素材是用什麼方式建的」——所以這份不是流水帳，要寫得下
+    **每一版的建法**：用哪份規範、涵蓋哪些商品、產出哪些檔案。
+    最後的「評語」留白給他自己標 OK / NG，挑版重傳時只看這一份。
     """
     f = batch_dir / "批次說明.md"
     if not f.exists():
-        head = (f"# {batch_dir.parent.name} / {batch_dir.name} 批次\n\n"
-                "產出一次就追加一列，**舊版一律保留**。最後一欄自己填 OK / NG，"
-                "之後要挑哪一版重傳就看這張表。\n\n"
-                "| 版本 | 時間 | 模板 | 商品數 | 你的評語 |\n"
-                "|---|---|---|---|---|\n")
-        f.write_text(head, encoding="utf-8")
+        f.write_text(
+            f"# {batch_dir.parent.name} / {batch_dir.name} 批次\n\n"
+            "每產出一次就追加一段，**舊版一律保留**。\n"
+            "「評語」自己填 OK / NG；之後要挑哪一版重傳，看這份就夠。\n\n"
+            "---\n\n", encoding="utf-8")
+    ts = datetime.now().strftime("%m/%d %H:%M")
+    lines = [f"## {版本}　（{ts}）\n",
+             f"- **怎麼建的**：{模板}\n",
+             f"- **範疇**：{範疇}\n",
+             f"- **產出**：{'、'.join(產出) if 產出 else '（無）'}\n"]
+    if 說明:
+        lines.append(f"- **備註**：{說明}\n")
+    lines.append("- **評語**：\n\n")
     with f.open("a", encoding="utf-8") as fh:
-        fh.write(f"| {row['版本']} | {row['時間']} | {row['模板']} | {row['商品數']} |  |\n")
+        fh.write("".join(lines))
 
 
 def _write_manifest(batch_dir: Path, shop: str, prepared: list[dict], failures: list[dict],
@@ -499,7 +509,7 @@ def run_batch_two_tier(
     # 同一個 1688 網址被名單多列共用（會被拆成多個蝦皮商品）→ 影響重量的可信度
     _offer_uses = Counter(str(e.get("item_id")) for e in entries)
 
-    prepared, failures = [], []
+    prepared, failures, with_assets = [], [], []
     for entry in entries:
         code = entry.get("code", entry.get("item_id"))
         logger.info(f"{'='*50}\n處理 {code} (item_id: {entry.get('item_id')})")
@@ -512,12 +522,38 @@ def run_batch_two_tier(
             else:
                 if make_video:
                     p["_meta"]["video"] = _make_video_for(p, video_n)
-                # 影片 + 尺寸表歸到 output/上架素材/{編號}/ 方便手動補上蝦皮
-                assemble_upload_assets(p["_meta"]["code"], p["_meta"]["item_id"], ver_dir)
+                with_assets.append((p["_meta"]["code"], p["_meta"]["item_id"]))
                 prepared.append(p)
         except Exception as e:
             logger.error(f"[{code}] 例外：{e}")
             failures.append({"code": code, "error": str(e)})
+
+    # 素材（影片／尺寸表／GPT 生圖）走**自己的版本線**：圖不滿意重生時，文案可能是好的，
+    # 不該被迫跟著重跑；所以 文案_vN 與 素材_vN 各自編號。
+    # ⚠️ 先探有沒有東西可搬再開資料夾——上一版每支都先 mkdir，結果留下 28 個空夾。
+    asset_ver, asset_no = None, 0
+    used_gpt = False
+    for code, item_id in with_assets:
+        src = Path(RAW_DIR) / item_id
+        gen = src / "images" / "generated"
+        gpt = list(gen.glob("gpt_*.png")) if gen.exists() else []
+        used_gpt = used_gpt or bool(gpt)
+        has = ((src / "video" / f"{code}.mp4").exists()
+               or (gen / f"size_chart_{code}.png").exists()
+               or bool(gpt))
+        if not has:
+            continue
+        if asset_ver is None:
+            asset_ver, asset_no = _next_version_dir(batch_dir, "素材")
+        assemble_upload_assets(code, item_id, asset_ver)
+    if asset_ver is not None:
+        _append_batch_note(
+            batch_dir,
+            版本=f"素材_v{asset_no}",
+            模板=("GPT 生圖" if used_gpt else "1688 原圖合成"),
+            範疇=f"{len(list(asset_ver.glob('*')))} 支商品的影片／尺寸表",
+            產出=[f"素材_v{asset_no}/{{編號}}/"],
+            說明="蝦皮大量上架 Excel 沒有影片欄，影片要在後台手動補")
 
     if not prepared:
         logger.warning("沒有成功處理的商品，不產生 Excel")
@@ -555,9 +591,16 @@ def run_batch_two_tier(
 
     _write_manifest(ver_dir, shop, prepared, failures, output_path, staging_result,
                     version=f"文案_v{ver_no}", template=tpl_name)
-    _append_batch_note(batch_dir, {"版本": f"文案_v{ver_no}",
-                                   "時間": datetime.now().strftime("%m/%d %H:%M"),
-                                   "模板": tpl_name, "商品數": len(prepared)})
+    _append_batch_note(
+        batch_dir,
+        版本=f"文案_v{ver_no}",
+        模板=(f"文案模板「{tpl_name}」" if tpl_name != "預設" else "該賣場預設的文案規範"),
+        範疇=f"{len(prepared)} 支商品"
+             + (f"（失敗 {len(failures)} 支）" if failures else "")
+             + "｜" + ("有建檔：配了 SKU 品號、寫了 1-1 待貼新品" if make_staging
+                       else "⚠️ 沒建檔＝試跑，這版的上架檔不可上傳"),
+        產出=[Path(output_path).name, "manifest.json"],
+        說明=("上架前先去蝦皮待上架區刪掉上一版，否則會多一筆重複的" if ver_no > 1 else ""))
 
     summary = {
         "total": len(entries),
