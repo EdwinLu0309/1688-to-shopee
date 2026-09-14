@@ -217,6 +217,16 @@ class App:
         tk.Button(list_lbl, text="全選", font=F_BTN_SM,
                   command=lambda: self._set_all_checks(True)).pack(side="right", padx=3)
 
+        # 表頭：狀態欄要有欄名，寬度與資料列一致才對得齊
+        hdr = tk.Frame(self.root, padx=24, bg=BG)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="　", width=2, bg=BG).pack(side="right")
+        for name, w in reversed((("抓取", 6), ("文案", 6), ("品號", 6), ("上架檔", 9), ("影片", 6))):
+            tk.Label(hdr, text=name, width=w, anchor="center", font=F_HINT,
+                     bg=BG, fg="#888").pack(side="right")
+        tk.Label(hdr, text="編號　　　分類　　　品名", anchor="w", font=F_HINT,
+                 bg=BG, fg="#888").pack(side="left")
+
         list_outer = tk.Frame(self.root, padx=24, bg=BG)
         list_outer.pack(fill="both", expand=True)
         self.canvas = tk.Canvas(list_outer, height=210, bg="#ffffff",
@@ -245,7 +255,7 @@ class App:
         tk.Label(sop_frame, text="（決定標題與詳情怎麼寫）",
                  font=F_HINT, fg="#888", bg=BG).pack(side="left", padx=6)
 
-        tk.Checkbutton(self.root, text="🎬 合成短影片：挑 9 張圖做一支商品影片（蝦皮 Excel 沒有影片欄，要在後台手動補）",
+        tk.Checkbutton(self.root, text="🎬 合成短影片（選配：不勾就不做，也不算「缺」；蝦皮 Excel 沒有影片欄，要在後台手動補）",
                        variable=self.make_video,
                        font=F_HINT, bg=BG, fg=FG, selectcolor="#ffffff",
                        activebackground=BG).pack(anchor="w", padx=24, pady=(2, 0))
@@ -342,6 +352,9 @@ class App:
             return
 
         cat_names = _cat_names(self.shop_var.get())
+        # 版面＝表格（Edwin 2026-09-15：「東西都擠在一起、前後數據不對齊」）：
+        # 左半是可變長度的商品資訊、右半是固定寬度的狀態欄，逐列對得整整齊齊。
+        W = (("抓取", 6), ("文案", 6), ("品號", 6), ("上架檔", 9), ("影片", 6))
         for p in self.products:
             sel_var = tk.BooleanVar(value=False)
             gpt_var = tk.BooleanVar(value=False)
@@ -351,14 +364,28 @@ class App:
             row.pack(fill="x", anchor="w")
             cat = cat_names.get(p.get("category", ""), p.get("category", ""))
             warn = "" if p.get("category") else " ⚠️"
-            label = f"{p['code']}　[{cat}{warn}]　{p.get('name','')[:16]}　{self._badges(p['code'])}"
             tk.Checkbutton(row, text="✨GPT", variable=gpt_var, font=("Arial", 12),
                            bg="#ffffff", fg="#7a3ea8", selectcolor="#ffffff",
-                           activebackground="#f0f0f0", command=self._update_count).pack(side="right", padx=6)
-            tk.Checkbutton(row, text=label, variable=sel_var, anchor="w", font=F_CHK,
+                           activebackground="#f0f0f0", command=self._update_count).pack(side="right", padx=(4, 6))
+            st = self.status.get(p["code"]) or {}
+            for name, w in reversed(W):
+                v = st.get(name if name != "上架檔" else "上架檔")
+                if name == "上架檔":
+                    txt = f"{v[4:6]}/{v[6:8]}" if v and len(str(v)) == 8 else "—"
+                    fg = "#1a7f37" if v else "#bbbbbb"
+                else:
+                    txt = "✓" if v else ("—" if v is False else "?")
+                    fg = "#1a7f37" if v else ("#cc7a00" if v is None else "#bbbbbb")
+                tk.Label(row, text=txt, width=w, anchor="center", font=F_CHK,
+                         bg="#ffffff", fg=fg).pack(side="right")
+            tk.Checkbutton(row, text=f"{p['code']:<8}", variable=sel_var, anchor="w", font=F_CHK,
                            bg="#ffffff", fg="#111111", selectcolor="#ffffff",
                            activebackground="#f0f0f0", command=self._update_count,
-                           padx=4, pady=2).pack(side="left", fill="x", expand=True)
+                           padx=4, pady=2, width=10).pack(side="left")
+            tk.Label(row, text=f"[{cat}{warn}]", width=10, anchor="w", font=F_CHK,
+                     bg="#ffffff", fg="#666666").pack(side="left")
+            tk.Label(row, text=p.get("name", "")[:18], anchor="w", font=F_CHK,
+                     bg="#ffffff", fg="#111111").pack(side="left", fill="x", expand=True)
         self._update_count()
 
     # ── 每支商品「做到哪了」──────────────────────────────
@@ -679,6 +706,8 @@ class App:
         lines.append(f"　上架檔　　{sel} 支 → 新的一版（舊版保留）")
         if self.make_video.get():
             lines.append(f"　影片　　　{n('影片')} 支要合成" + (f"（其餘 {sel - n('影片')} 支已有）" if n('影片') < sel else ""))
+        else:
+            lines.append("　影片　　　不做（沒勾「合成短影片」）")
         return "\n".join(lines)
 
     def _on_run_all(self) -> None:
