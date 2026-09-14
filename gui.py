@@ -111,6 +111,10 @@ class App:
 
         self.products: list[dict] = []
         self.status: dict[str, dict] = {}
+        # 清單欄位（名稱, 最小像素寬）——表頭與每一列共用，grid 才會對齊
+        self.COLS = (("選取", 120), ("分類", 96), ("品名", 240),
+                     ("抓取", 56), ("文案", 56), ("品號", 56), ("上架檔", 78), ("影片", 56),
+                     ("生圖", 72))
         self.check_vars: list[tk.BooleanVar] = []
         self.route_vars: list[tk.BooleanVar] = []   # True = ✨GPT 生圖；False = 🖼 1688 直用
         self.action_buttons: list[tk.Button] = []
@@ -217,15 +221,17 @@ class App:
         tk.Button(list_lbl, text="全選", font=F_BTN_SM,
                   command=lambda: self._set_all_checks(True)).pack(side="right", padx=3)
 
-        # 表頭：狀態欄要有欄名，寬度與資料列一致才對得齊
+        # ⚠️ 表頭在捲動區外、資料列在捲動區內，兩個容器寬度不同 → 用「各排各的」一定對不齊
+        #    （2026-09-15 跑版）。改成**兩邊套同一份欄寬定義並用 grid**，欄位由格線決定位置。
         hdr = tk.Frame(self.root, padx=24, bg=BG)
         hdr.pack(fill="x")
-        tk.Label(hdr, text="　", width=2, bg=BG).pack(side="right")
-        for name, w in reversed((("抓取", 6), ("文案", 6), ("品號", 6), ("上架檔", 9), ("影片", 6))):
-            tk.Label(hdr, text=name, width=w, anchor="center", font=F_HINT,
-                     bg=BG, fg="#888").pack(side="right")
-        tk.Label(hdr, text="編號　　　分類　　　品名", anchor="w", font=F_HINT,
-                 bg=BG, fg="#888").pack(side="left")
+        for i, (name, w) in enumerate(self.COLS):
+            hdr.grid_columnconfigure(i, minsize=w, weight=(1 if name == "品名" else 0))
+            tk.Label(hdr, text=("" if name in ("選取",) else name), anchor=("w" if i <= 2 else "center"),
+                     font=F_HINT, bg=BG, fg="#888").grid(row=0, column=i, sticky="ew")
+        # 最右邊補一格＝捲軸＋畫布邊框的寬度。寫死會差幾個 px（實測 7），所以開窗後量實際值再補。
+        self._hdr = hdr
+        hdr.grid_columnconfigure(len(self.COLS), minsize=18)
 
         list_outer = tk.Frame(self.root, padx=24, bg=BG)
         list_outer.pack(fill="both", expand=True)
@@ -235,10 +241,14 @@ class App:
         self.checks_frame = tk.Frame(self.canvas, bg="#ffffff")
         self.checks_frame.bind(
             "<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.create_window((0, 0), window=self.checks_frame, anchor="nw")
+        self._checks_win = self.canvas.create_window((0, 0), window=self.checks_frame, anchor="nw")
+        self.canvas.bind("<Configure>",
+                         lambda e: self.canvas.itemconfig(self._checks_win, width=e.width))
         self.canvas.configure(yscrollcommand=scroll.set)
         self.canvas.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        self._scrollbar = scroll
+        self.root.after(200, self._sync_header_gutter)
         self.canvas.bind_all("<MouseWheel>",
                              lambda e: self.canvas.yview_scroll(int(-1 * (e.delta / 3)), "units"))
 
@@ -354,38 +364,39 @@ class App:
         cat_names = _cat_names(self.shop_var.get())
         # 版面＝表格（Edwin 2026-09-15：「東西都擠在一起、前後數據不對齊」）：
         # 左半是可變長度的商品資訊、右半是固定寬度的狀態欄，逐列對得整整齊齊。
-        W = (("抓取", 6), ("文案", 6), ("品號", 6), ("上架檔", 9), ("影片", 6))
-        for p in self.products:
+        for i, (name, w) in enumerate(self.COLS):
+            self.checks_frame.grid_columnconfigure(i, minsize=w, weight=(1 if name == "品名" else 0))
+        for r, p in enumerate(self.products):
             sel_var = tk.BooleanVar(value=False)
             gpt_var = tk.BooleanVar(value=False)
             self.check_vars.append(sel_var)
             self.route_vars.append(gpt_var)
-            row = tk.Frame(self.checks_frame, bg="#ffffff")
-            row.pack(fill="x", anchor="w")
             cat = cat_names.get(p.get("category", ""), p.get("category", ""))
             warn = "" if p.get("category") else " ⚠️"
-            tk.Checkbutton(row, text="✨GPT", variable=gpt_var, font=("Arial", 12),
-                           bg="#ffffff", fg="#7a3ea8", selectcolor="#ffffff",
-                           activebackground="#f0f0f0", command=self._update_count).pack(side="right", padx=(4, 6))
             st = self.status.get(p["code"]) or {}
-            for name, w in reversed(W):
-                v = st.get(name if name != "上架檔" else "上架檔")
-                if name == "上架檔":
+
+            tk.Checkbutton(self.checks_frame, text=p["code"], variable=sel_var, anchor="w",
+                           font=F_CHK, bg="#ffffff", fg="#111111", selectcolor="#ffffff",
+                           activebackground="#f0f0f0", command=self._update_count,
+                           padx=2, pady=2).grid(row=r, column=0, sticky="w")
+            tk.Label(self.checks_frame, text=f"[{cat}{warn}]", anchor="w", font=F_CHK,
+                     bg="#ffffff", fg="#666666").grid(row=r, column=1, sticky="w")
+            tk.Label(self.checks_frame, text=p.get("name", "")[:18], anchor="w", font=F_CHK,
+                     bg="#ffffff", fg="#111111").grid(row=r, column=2, sticky="w")
+            for ci, key in enumerate(("抓取", "文案", "品號", "上架檔", "影片"), start=3):
+                v = st.get(key)
+                if key == "上架檔":
                     txt = f"{v[4:6]}/{v[6:8]}" if v and len(str(v)) == 8 else "—"
                     fg = "#1a7f37" if v else "#bbbbbb"
                 else:
                     txt = "✓" if v else ("—" if v is False else "?")
                     fg = "#1a7f37" if v else ("#cc7a00" if v is None else "#bbbbbb")
-                tk.Label(row, text=txt, width=w, anchor="center", font=F_CHK,
-                         bg="#ffffff", fg=fg).pack(side="right")
-            tk.Checkbutton(row, text=f"{p['code']:<8}", variable=sel_var, anchor="w", font=F_CHK,
-                           bg="#ffffff", fg="#111111", selectcolor="#ffffff",
-                           activebackground="#f0f0f0", command=self._update_count,
-                           padx=4, pady=2, width=10).pack(side="left")
-            tk.Label(row, text=f"[{cat}{warn}]", width=10, anchor="w", font=F_CHK,
-                     bg="#ffffff", fg="#666666").pack(side="left")
-            tk.Label(row, text=p.get("name", "")[:18], anchor="w", font=F_CHK,
-                     bg="#ffffff", fg="#111111").pack(side="left", fill="x", expand=True)
+                tk.Label(self.checks_frame, text=txt, anchor="center", font=F_CHK,
+                         bg="#ffffff", fg=fg).grid(row=r, column=ci, sticky="ew")
+            tk.Checkbutton(self.checks_frame, text="✨GPT", variable=gpt_var, font=("Arial", 12),
+                           bg="#ffffff", fg="#7a3ea8", selectcolor="#ffffff",
+                           activebackground="#f0f0f0",
+                           command=self._update_count).grid(row=r, column=8, sticky="w")
         self._update_count()
 
     # ── 每支商品「做到哪了」──────────────────────────────
@@ -430,10 +441,33 @@ class App:
                 "影片": (rd / "video" / f"{code}.mp4").exists(),
             }
 
+    def _sync_header_gutter(self) -> None:
+        """對齊表頭與資料列的右半欄。
+
+        ⚠️ 算不準：捲軸寬、畫布邊框、平台邊距加起來實測差 7px，寫死在不同機器上還是會歪。
+        所以**量了再校**——比對同一欄在表頭與第一列的實際 x，差多少就把最右邊那格補多少。
+        """
+        try:
+            rows = self.checks_frame.grid_slaves(row=0)
+            if not rows:
+                return
+            col = 3          # 第一個狀態欄，右半段的起點
+            hx = next((w.winfo_rootx() for w in self._hdr.grid_slaves()
+                       if w.grid_info()["column"] == col), None)
+            rx = next((w.winfo_rootx() for w in rows if w.grid_info()["column"] == col), None)
+            if hx is None or rx is None:
+                return
+            now = int(self._hdr.grid_columnconfigure(len(self.COLS))["minsize"])
+            self._hdr.grid_columnconfigure(len(self.COLS), minsize=max(0, now + (hx - rx)))
+            self._hdr.update_idletasks()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _rescan_and_redraw(self) -> None:
         self._status("掃描每支商品做到哪了…")
         self._scan_status()
         self._refresh_products()
+        self.root.after(50, self._sync_header_gutter)
         self._status("就緒")
 
     def _badges(self, code: str) -> str:
