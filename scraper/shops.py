@@ -200,7 +200,9 @@ _NAIL = ShopProfile(
         (["营养油", "營養油", "底油", "护色", "護色"], "101615"),
         (["美甲", "指甲"], "102035"),                                    # 兜底：指甲保養/其他
     ],
-    sop_files=["nail/JoysLu_Nail_上架SOP_草案v0.md"],
+    # 預設＝現行版（實作 Edwin 的「NAIL 標題優化規範 v2.1」＋實測搜尋詞庫）。
+    # ⚠️ 草案 v0 留在資料夾裡不刪——GUI 下拉仍選得到，方便兩版並排比對產出。
+    sop_files=["nail/JoysLu_Nail_上架SOP_v1.0.md"],
     color_policy="cap_only",       # 美甲色號是商品本體，不套女裝砍色政策；只守 100 SKU
     max_base_colors=0,             # cap_only 不用
     enabled_channels=_STD_CHANNELS,    # 公版 6 個（Edwin 2026-08-15 定案，三賣場一律）

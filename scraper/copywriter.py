@@ -135,6 +135,18 @@ def generate_listing(product_data: dict, sheet_ctx: dict, shop: str = "lady",
         price_cny=product_data.get("price_cny", 0),
     )
 
+    # 搜尋詞庫：把「這一類實際有搜尋量、且客群對的詞」餵給模型。
+    # ⚠️ 不餵的話模型會自己編關鍵字（實測會寫出「美甲店專用 0」「美甲除塵器 0」這種零量詞），
+    #    而標題版位是有限的，塞零量詞＝白白浪費字數。
+    try:
+        from scraper.keyword_pool import prompt_block
+        kw = prompt_block(sheet_ctx.get("product_name", "") or sheet_ctx.get("code", ""),
+                          extra=product_data.get("title", ""))
+        if kw:
+            task += "\n\n" + kw
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"搜尋詞庫讀取失敗，本次標題不套用關鍵字清單：{e}")
+
     client = anthropic.Anthropic(api_key=api_key)
     logger.info(f"[{sheet_ctx.get('code')}] Claude 生成文案中…")
     try:
@@ -151,6 +163,14 @@ def generate_listing(product_data: dict, sheet_ctx: dict, shop: str = "lady",
             if text.startswith("json"):
                 text = text[4:]
         result = json.loads(text)
+        # ⚠️ 簡體殘留要用程式轉，不能只寫在規範裡：實測 HNV7 的標題吃了 1688 規格名的
+        #    「美规」直接寫進去（規範明文禁簡體）。模型會漏，轉換器不會。
+        from scraper.product_card import _to_tw as to_tw
+        for k in ("title", "description", "product_short_name"):
+            if result.get(k):
+                result[k] = to_tw(result[k])
+        if isinstance(result.get("color_map"), dict):
+            result["color_map"] = {kk: to_tw(vv) for kk, vv in result["color_map"].items()}
         if result.get("description"):
             result["description"] = scrub_jin(result["description"])
         logger.info(f"[{sheet_ctx.get('code')}] 標題：{result.get('title','')[:40]}")

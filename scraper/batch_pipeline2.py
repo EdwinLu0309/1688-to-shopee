@@ -177,6 +177,7 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
             "demand": entry.get("demand", ""),
             "category": entry.get("category", ""),
             "style_note": entry.get("style_filter", ""),  # 第一層：Edwin 的款式備註
+            "product_name": entry.get("name", ""),        # 名單品名 → 搜尋詞庫分類判斷
         }, shop=shop, sop_override=sop_override)
         if ai_content.get("error"):
             logger.error(f"[{code}] 文案生成失敗：{ai_content.get('error')}")
