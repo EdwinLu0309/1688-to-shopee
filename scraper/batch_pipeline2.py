@@ -33,6 +33,7 @@ manifest 格式（JSON）：
 }
 """
 import asyncio
+import re
 import json
 from datetime import datetime
 from pathlib import Path
@@ -143,6 +144,38 @@ def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], 
     return selected, color_map
 
 
+def ai_cache_path(entry: dict, tpl_tag: str = "") -> Path:
+    """文案快取檔：一列名單一份。
+
+    ⚠️ 不可只用 1688 網址當 key（2026-09-17 抓到）：同一個網址常被名單多列用——
+    HNV2／HNV5 是兩個編號、HNV11 三列（吸塵器／二合一／濾網）用款式備註挑不同款——
+    舊版全擠同一份快取，第二列起直接沿用第一列的標題與挑款結果，
+    HNV5 標題＝HNV2、HNV11 三個選項全變成 G1S 吸塵器，而且沒有任何錯誤訊息。
+    """
+    import hashlib
+    item_id = str(entry["item_id"])
+    code = re.sub(r"[^\w-]", "_", str(entry.get("code", "") or item_id))
+    key = "|".join(str(entry.get(k, "") or "") for k in ("code", "name", "style_filter", "colors"))
+    h = hashlib.md5(key.encode("utf-8")).hexdigest()[:8]
+    base = f"ai_content_{tpl_tag}" if tpl_tag else "ai_content"
+    return Path(RAW_DIR) / item_id / f"{base}__{code}_{h}.json"
+
+
+def cache_is_fresh(path: Path, sp) -> bool:
+    """快取存在、而且是現行詳情／標題規則產的（規則改了換版號就會變成不新鮮）。"""
+    if not path.exists():
+        return False
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return False
+    if sp.detail_version and d.get("detail_version") != sp.detail_version:
+        return False
+    if sp.title_version and d.get("title_version") != sp.title_version:
+        return False
+    return True
+
+
 def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
                      shared_offer: bool = False, sop_override: list[str] | None = None,
                      img_template: str | None = None) -> dict | None:
@@ -166,7 +199,7 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
     item_dir.mkdir(parents=True, exist_ok=True)
     # ⚠️ 換文案模板＝不同產物，快取要分開存（否則選了新模板卻讀到舊模板的快取）
     tpl_tag = _template_tag(sop_override)
-    ai_cache = item_dir / (f"ai_content_{tpl_tag}.json" if tpl_tag else "ai_content.json")
+    ai_cache = ai_cache_path(entry, tpl_tag)
     cached = json.loads(ai_cache.read_text(encoding="utf-8")) if ai_cache.exists() else None
     if cached and sp.detail_version and cached.get("detail_version") != sp.detail_version:
         logger.info(f"[{code}] 快取文案是舊的詳情規則（{cached.get('detail_version') or '8 區塊'}）→ 重生")

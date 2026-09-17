@@ -34,6 +34,24 @@ USER_AGENT = (
 )
 
 # 抽取邏輯：與 extract_1688.js 同一套選擇器，但回傳完整 data（不做 Blob 下載）。
+# 抓取器版本：改了抽取內容（新增欄位）就 +1。「🚀 開始」遇到版本較舊的 raw 會當成缺、自動重抓
+# （2026-09-17：規格圖片改讀 skuProps 後，9/9 抓的 26 支因為「抓過就跳過」一張圖都沒補上）。
+SCRAPER_REV = 2
+
+
+def raw_is_fresh(raw_path) -> bool:
+    """raw json 存在、而且是現行版本抓取器抓的。"""
+    import json as _json
+    from pathlib import Path as _P
+    p = _P(raw_path)
+    if not p.exists():
+        return False
+    try:
+        return int(_json.loads(p.read_text(encoding="utf-8")).get("scraper_rev") or 1) >= SCRAPER_REV
+    except Exception:  # noqa: BLE001
+        return False
+
+
 EXTRACT_JS = r"""() => {
   const norm = (u) => { if(!u) return ""; u=String(u).trim(); if(u.startsWith("//")) u="https:"+u; return u.startsWith("http")?u:""; };
   const orig = (u) => { u=norm(u); if(!u) return ""; const m=u.match(/\.(jpg|jpeg|png|webp|gif)/i); return m?u.slice(0,m.index)+m[0]:u; };
@@ -295,6 +313,7 @@ async def scrape_offer(
             await _scroll(page)
             await _hover_thumbnails(page)
             data = await page.evaluate(EXTRACT_JS)
+            data["scraper_rev"] = SCRAPER_REV
             return data
         finally:
             await browser.close()
@@ -370,6 +389,7 @@ async def scrape_many(
                 n_sku = len(data.get("sku_images", {}))
                 is_blocked = bool(data.get("_blocked")) or n_main == 0
 
+                data["scraper_rev"] = SCRAPER_REV
                 (out_dir / f"{item_id}.json").write_text(
                     json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
                 )

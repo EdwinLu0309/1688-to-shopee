@@ -354,9 +354,18 @@ Lady/Baby 還沒建 → `.env` 設 `CHECK_SHEET_ID_{SHOP}`，沒設就在 log �
   買區列 `.expand-view-item` 的 `<img>`＋`.item-label` 補位；key 存「原名」＋「去空白」兩份
   （買區列名稱是去空白切出來的：`5包-M3 吸尘器` vs `5包-M3吸尘器`，不存兩份就對不上）。
 - 實測 4 頁：集塵器 5/5、美甲燈 4/5（缺的是旺旺咨询那列）、磨甲機 25 支全有、女裝色票 48/48 照舊。
-- ⚠️ **已經抓過的商品不會自己補圖**：「🚀 開始」是抓過就不重抓 → 舊商品要重上架得按「🔄 重抓 1688」。
+- **抓取器版本 `SCRAPER_REV`（現為 2）寫進 raw json**：「🚀 開始」遇到舊版抓的 raw 當成缺、自動重抓（GUI「抓取」欄也不打勾）。
+  2026-09-17 之前是「抓過就跳過」→ 9/9 那批按開始重產，規格圖照樣全空。**改了抽取內容就把 SCRAPER_REV +1**。
 - 只改了 GUI 用的 `playwright_scraper.py`；`extract_1688.js`（Chrome MCP 手動備援）沒跟上。
 - 回歸測試 `tests/test_sku_images.py`（7 項，真 Chromium 開靜態頁）。
+
+## 文案快取＝一列名單一份（`ai_cache_path`，2026-09-17 修）
+`raw/{item_id}/ai_content[_模板]__{編號}_{hash(編號|品名|款式備註|colors)}.json`。
+- ⚠️⚠️ **舊版只用 1688 網址當 key**：同網址被名單多列用時第二列起沿用第一列的文案——
+  HNV5 標題＝HNV2、**HNV11 三列（吸塵器／二合一／濾網）三個選項全變成 G1S 吸塵器**，不報錯（9/17 核對表抓到）。
+- 「文案做過沒」＝快取存在**且** detail_version／title_version 是現行的（`cache_is_fresh`），GUI 狀態欄與開始流程同一個判準。
+- 9/17 遷移：名單只用一次的網址把舊 `ai_content.json` 複製成新檔名（21 支沿用），共用網址的 5 列重產。
+- 回歸測試 `tests/test_cache_keys.py`。
 
 ## 上架動線分兩段（2026-09-15 Edwin 定，GUI 照這個長）
 

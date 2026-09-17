@@ -440,13 +440,17 @@ class App:
             self._log(f"⚠️ 讀 1-1 失敗，品號狀態這欄先留空：{e}")
             coded = None
         done = self._done_map()
+        from scraper.batch_pipeline2 import ai_cache_path, cache_is_fresh
+        from scraper.playwright_scraper import raw_is_fresh
+        from scraper.shops import get_shop
+        sp = get_shop(self.shop_var.get())
         for p in self.products:
             item, code = str(p.get("item_id")), p.get("code", "")
             rd = Path(RAW_DIR) / item
-            cache = rd / (f"ai_content_{tpl_tag}.json" if tpl_tag else "ai_content.json")
             self.status[code] = {
-                "抓取": (Path(RAW_DIR) / f"{item}.json").exists(),
-                "文案": cache.exists(),
+                # 抓取／文案都要「是現行版本」才算做過（舊版＝缺，開始時自動補）
+                "抓取": raw_is_fresh(Path(RAW_DIR) / f"{item}.json"),
+                "文案": cache_is_fresh(ai_cache_path(p, tpl_tag), sp),
                 "品號": (code in coded) if coded is not None else None,
                 "上架檔": done.get(item),          # 有值＝哪天產過
                 "影片": (rd / "video" / f"{code}.mp4").exists(),
@@ -847,11 +851,18 @@ class App:
         try:
             # ① 抓取（已抓過就不重抓——勾了那顆的話）
             ids = [p["item_id"] for p in products]
-            # 一鍵＝缺什麼補什麼：抓過的一律跳過。要強制更新 1688 資料走「🔄 重抓 1688」。
-            have = [i for i in ids if (Path(RAW_DIR) / f"{i}.json").exists()]
+            # 一鍵＝缺什麼補什麼：抓過的一律跳過；**舊版抓取器抓的算缺**（例：沒有規格圖）。
+            # 要強制更新 1688 資料走「🔄 重抓 1688」。
+            from scraper.playwright_scraper import raw_is_fresh
+            ids = list(dict.fromkeys(str(i) for i in ids))
+            old = [i for i in ids if (Path(RAW_DIR) / f"{i}.json").exists()
+                   and not raw_is_fresh(Path(RAW_DIR) / f"{i}.json")]
+            have = [i for i in ids if raw_is_fresh(Path(RAW_DIR) / f"{i}.json")]
             ids = [i for i in ids if i not in have]
             if have:
                 self._thread_log(f"① 已抓過 {len(have)} 支，跳過（要更新 1688 資料按「🔄 重抓 1688」）")
+            if old:
+                self._thread_log(f"① {len(old)} 支是舊版抓取器抓的（缺規格圖等）→ 重抓")
             if not ids:
                 self._thread_log("① 全部都抓過了 → 直接產出")
                 res = {"success": len(products), "blocked": 0, "failed": 0}
