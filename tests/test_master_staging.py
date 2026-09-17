@@ -210,6 +210,16 @@ def test_formal_branch():
     check("不是預購", not skus[0]["preorder"])
 
 
+def test_new_mark_goes_to_j_not_tag():
+    print("\n[8b] 新品記號 #NEW：寫 SKU表 J 選項註記，絕不進 D 標籤（訂貨彙總逐字比對標籤）")
+    from scraper.master_staging import NEW_MARK, SKU_FILL_COLS
+    eq("記號", NEW_MARK, "#NEW")
+    eq("J 是選項註記", SKU_HEADERS[9], "選項註記")
+    check("J 欄標綠（可貼）", 9 in SKU_FILL_COLS)
+    _, skus = build_blocks("lady", [_prepared("H-c2", demand="現貨", tag="#LM_1st #NEW")], CTX)
+    eq("名單標籤夾帶 #NEW 會被拿掉", skus[0]["tag"], "#LM_1st")
+
+
 def test_sku_row_fields():
     print("\n[9] SKU 列：品號用規則生成、品名格式正確、原文逐字")
     _, skus = build_blocks("lady", [_prepared("H-c2", demand="預購")], CTX)
@@ -282,6 +292,7 @@ if __name__ == "__main__":
                test_selling_price_uses_final_not_list_price,
                test_special_order_ratio_is_one_not_hundred,
                test_subcategory_from_list_wins, test_preorder_branch, test_formal_branch,
+               test_new_mark_goes_to_j_not_tag,
                test_sku_row_fields, test_new_color_gets_new_code,
                test_unsupported_shop_leaves_blank_not_wrong_code,
                test_bad_code_does_not_kill_batch, test_single_axis_product, test_sku_cost_unit_scale):

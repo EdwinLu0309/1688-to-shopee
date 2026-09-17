@@ -75,6 +75,10 @@ PREORDER_TAG = "#PO_Sale"          # 預購專屬標籤（比照三家共用的 
 SKU_COST_SCALE = 100
 
 PREORDER_SAFETY_STOCK = "200"      # 預購品安全存量（蝦皮端庫存也開 200）
+NEW_MARK = "#NEW"                  # 新品記號：寫在 SKU表 J 選項註記（Edwin 2026-09-17，訂貨時篩新品用）
+# ⚠️ 不可放 D 標籤：訂貨彙總 B4 用「標籤＝"#N_機器"」逐字比對 25 種標籤、訂貨表 M 用「≠"#PO_Sale"」
+#    排除預購——標籤多一個 #NEW 就整批從訂貨彙總消失、預購品被算進補貨，而且不報錯。
+#    J 欄只有訂貨表 Q 用 VLOOKUP 原樣帶去顯示，沒有任何比對。商品表不標（Edwin）。
 SPECIAL_ORDER_RATIO = 1            # J 特殊訂貨%：PERCENT 格式，實值 1 ＝ 顯示 100%
 
 # ── 表頭底色＝貼上指南（Edwin 2026-09-09 定，取代一堆文字範圍）──────────
@@ -89,7 +93,7 @@ FONT_SIZE = 14                      # Edwin 要求
 
 # 程式會填值的欄（0-based）＝表頭標綠的那些；其餘一律標黃。
 PRODUCT_FILL_COLS = [0, 1, 2, 3, 4, 6, 9, 10, 11]   # A編號 B分類 C子分類 D品名 E成本 G售價 J特殊% K廠商 L網址
-SKU_FILL_COLS = [0, 1, 2, 3, 5, 6, 7, 11, 12]       # A品號 B品名 C分類 D標籤 F成本 G幣別 H安全存量 L規格一 M規格二
+SKU_FILL_COLS = [0, 1, 2, 3, 5, 6, 7, 9, 11, 12]    # A品號 B品名 C分類 D標籤 F成本 G幣別 H安全存量 J選項註記(#NEW) L規格一 M規格二
 GREY_TEXT = {"red": 0.55, "green": 0.55, "blue": 0.55}
 BLUE_HDR = {"red": 0.85, "green": 0.9, "blue": 0.97}
 
@@ -282,7 +286,9 @@ def build_blocks(shop: str, prepared: list[dict],
         row[11] = _clean_url(item_id)                        # L 代表網址（正規化）
         products.append(row)
 
-        tag = PREORDER_TAG if preorder else str(cfg.get("tag", "")).strip()
+        # 名單標籤若有人順手打了 #NEW，拿掉——#NEW 只寫 J 欄（見 NEW_MARK）
+        tag = PREORDER_TAG if preorder else " ".join(
+            t for t in str(cfg.get("tag", "")).split() if t.upper() != NEW_MARK)
         sku_cat = ctx.sku_category(code)
         variants = p.get("variants", {})
         tier1 = variants.get("規格1_顏色") or []
@@ -578,6 +584,7 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
         # H 安全存量：預購統一 200；正式品用名單填的（Edwin 2026-09-09 要求帶入——
         # 他名單上已經填過一次，不該再手打第二次）
         row[7] = PREORDER_SAFETY_STOCK if s["preorder"] else s.get("safety_stock", "")
+        row[9] = NEW_MARK                   # J 選項註記：新品記號（訂貨時篩新品）
         row[11] = s["spec1"]                # L 規格一（1688 原文逐字）
         row[12] = s["spec2"]                # M 規格二（1688 原文逐字）
         rows2.append(row + [s["item_id"], s["display"]])
