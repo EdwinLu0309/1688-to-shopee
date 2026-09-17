@@ -77,6 +77,40 @@ EXTRACT_JS = r"""() => {
     if(name)skus.push({sku_id:"",attributes:{规格:name},price:0,stock:0,image_url:u});
   });
 
+  // ⚠️ 規格圖片不能只靠色票按鈕（2026-09-17）：美甲的機器/耗材頁多半是「一列一個規格」
+  //    （圖＋名稱＋¥價＋库存），沒有 .sku-filter-button → 9/9 那批 26 支選項圖**全空**。
+  //    1688 頁面狀態 skuModel.skuProps[].value[] 兩種版面都帶 {name, imageUrl}（原圖），
+  //    以它為準；再用買區列的 <img>＋.item-label 補。
+  //    key 同時存「原名」與「去空白」兩份：買區列的名稱是 textContent 去空白後切出來的
+  //    （size_stock 的 key），跟 skuProps 原名差在空白（「5包-M3 吸尘器」vs「5包-M3吸尘器」）。
+  const putImg = (name, u) => {
+    name = (name || "").trim(); u = u ? orig(u) : "";
+    if (!name || !u) return;
+    for (const k of [name, name.replace(/\s+/g, "")]) if (!sku_images[k]) sku_images[k] = u;
+  };
+  {
+    const seen = new WeakSet(); let props = null;
+    const walk = (o, d) => {
+      if (props || d > 8 || !o || typeof o !== "object" || seen.has(o)) return;
+      seen.add(o);
+      for (const k in o) {
+        try {
+          if (k === "skuProps" && Array.isArray(o[k]) && o[k].length) { props = o[k]; return; }
+          const v = o[k];
+          if (v && typeof v === "object") walk(v, d + 1);
+        } catch (e) {}
+      }
+    };
+    for (const k of Object.keys(window)) { try { walk(window[k], 0); } catch (e) {} if (props) break; }
+    (props || []).forEach(p => (p.value || []).forEach(v => putImg(v.name, v.imageUrl)));
+  }
+  document.querySelectorAll(".module-od-sku-selection .expand-view-item").forEach(row => {
+    const img = row.querySelector("img");
+    const lab = row.querySelector(".item-label");
+    if (img && lab) putImg(lab.getAttribute("title") || lab.textContent,
+                           img.getAttribute("src") || img.getAttribute("data-src"));
+  });
+
   // 細節圖：商品描述 HTML 內的 <img>
   const detailHtml=(window.offer_details&&window.offer_details.content)||"";
   const detail=[];
@@ -116,7 +150,7 @@ EXTRACT_JS = r"""() => {
   if(skus.length===0){
     for(const k of Object.keys(size_stock)){
       skus.push({sku_id:"",attributes:{规格:k},price:size_stock[k].price||0,
-                 stock:size_stock[k].stock||0,image_url:""});
+                 stock:size_stock[k].stock||0,image_url:sku_images[k]||""});
     }
   }
 
