@@ -897,7 +897,13 @@ class App:
         except Exception as e:  # noqa: BLE001
             import traceback
             traceback.print_exc()
-            self._thread_log(f"一鍵完成錯誤：{e}")
+            from scraper.master_staging import SpecGapBlocked
+            if isinstance(e, SpecGapBlocked):
+                # 守門員：既有列規格空白會重發品號 → 擋下來並把要做什麼講清楚
+                self._thread_log("⛔ 配號守門員擋下：既有列的 1688 規格原文是空的（未產出）")
+                self.root.after(0, lambda m=str(e): messagebox.showerror("⛔ 先補 1688 規格再跑", m))
+            else:
+                self._thread_log(f"一鍵完成錯誤：{e}")
         finally:
             self.root.after(0, self._rescan_and_redraw)
             self.root.after(0, self._on_task_done)

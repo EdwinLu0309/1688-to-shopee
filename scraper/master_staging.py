@@ -408,6 +408,54 @@ def build_blocks(shop: str, prepared: list[dict],
     return products, skus
 
 
+class SpecGapBlocked(Exception):
+    """既有列的 1688 規格原文是空的 → 配號比不到、會重發新號，故擋下不做。
+
+    `gaps`：{商品編號: [(品號, 品名), …]}
+    """
+
+    def __init__(self, gaps: dict[str, list[tuple[str, str]]]):
+        self.gaps = gaps
+        super().__init__(spec_gap_message(gaps))
+
+
+def spec_gap_message(gaps: dict[str, list[tuple[str, str]]]) -> str:
+    n = sum(len(v) for v in gaps.values())
+    lines = [f"這 {len(gaps)} 支商品在 1-1 SKU表 有 {n} 列「1688規格一」是空的，先補再跑：", ""]
+    for code, rows in gaps.items():
+        lines.append(f"　{code}（{len(rows)} 列）")
+        for sku, name in rows[:5]:
+            lines.append(f"　　{sku}　{name[:28]}")
+        if len(rows) > 5:
+            lines.append(f"　　…還有 {len(rows) - 5} 列")
+    lines += ["", "為什麼要擋：配號是拿「1688 規格原文」比對既有列的。",
+              "那一格空白就比不到，程式會把已經有品號的選項當成新的、**再發一個品號**——",
+              "同一個選項兩個品號，蝦皮算一邊、成本算另一邊，獲利表對不起來，而且不會報錯。",
+              "",
+              "處理方式：①把那幾列的 L 規格一（1688 簡體原文）補上　"
+              "②那幾列本來就不去 1688 下單（NG／組合附贈）→ 標停售讓它退出　"
+              "③這次先不做這支，從勾選清單拿掉"]
+    return "\n".join(lines)
+
+
+def existing_spec_gaps(shop: str, prepared: list[dict], ctx: "MasterContext") -> dict[str, list[tuple[str, str]]]:
+    """這批商品在 1-1 既有的列裡，哪些「1688規格一」是空的（＝配號比不到）。
+
+    只看**這次要做的商品編號**——整張表的空白不關這次的事（多半是早就停售的舊資料）。
+    全新編號查不到既有列，自然回空，不會擋到新品。
+    """
+    gaps: dict[str, list[tuple[str, str]]] = {}
+    for p in prepared:
+        code = str(p.get("_meta", {}).get("code") or p.get("config", {}).get("code") or "").strip()
+        if not code or code in gaps:
+            continue
+        bad = [(r.sku_code, r.name) for r in collect_existing(ctx.sku_rows, code)
+               if not str(r.spec1 or "").strip()]
+        if bad:
+            gaps[code] = bad
+    return gaps
+
+
 def plan_blocks(shop: str, prepared: list[dict], sa_json: str | Path | None = None):
     """只讀 1-1、配好品號，**不寫任何東西**。回 (ctx, products, skus)。
 
@@ -420,6 +468,9 @@ def plan_blocks(shop: str, prepared: list[dict], sa_json: str | Path | None = No
     中間有人動了 1-1，兩邊就會不一致，而且不會有任何錯誤訊息。
     """
     ctx = load_master_context(shop, sa_json)
+    gaps = existing_spec_gaps(shop, prepared, ctx)
+    if gaps:
+        raise SpecGapBlocked(gaps)              # 守門員：寧可擋住人，也不要默默多發一個品號
     products, skus = build_blocks(shop, prepared, ctx)
     return ctx, products, skus
 
@@ -516,6 +567,8 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
     if not prepared:
         return {"written": 0}
     sh, sheet_id = _open_master(shop, sa_json)
+    # 守門員：既有列的 1688 規格原文空白時會重發品號（見 SpecGapBlocked）。
+    # plan_blocks 已經擋過一次，這裡是走別條路（沒先 plan）時的第二道。
 
     old = None
     try:
@@ -538,6 +591,9 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
     verify_headers(sh, shop)
 
     ctx = load_master_context(shop, sa_json)
+    gaps = existing_spec_gaps(shop, prepared, ctx)
+    if gaps:
+        raise SpecGapBlocked(gaps)
     products, skus = build_blocks(shop, prepared, ctx)
     n_pre = sum(1 for s in skus if s["preorder"])
 
