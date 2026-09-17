@@ -57,7 +57,7 @@ _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文
 1. 判子品類（{subcategory_line}）
 2. 商品簡稱：依商品名濃縮成 2-5 字繁體台灣用語（如「冰丝阔腿裤」→「冰絲寬褲」）
 3. 蝦皮標題：{title_rule}
-4. 完整詳情頁（通用 8 區塊全文，套規範固定文案：賣場介紹/退換貨/推薦三款）
+4. 詳情頁：{detail_rule}
 5. 顏色簡繁對照：把每個第一軸顏色轉成繁體乾淨名（去掉廠商括號贅字，如「米白色【长裤】」→「米白色」；款式差異若需保留另說）
 {size_rule}
 7. flags：字典待擴充的新顏色/材質詞、廠商備註、疑似違規詞、子品類不確定、尺碼數據缺漏
@@ -67,7 +67,7 @@ _TASK = """根據以下 1688 商品資料 + 賣場設定，產出蝦皮上架文
   "subcategory": "子品類",
   "product_short_name": "商品簡稱（繁體）",
   "title": "蝦皮標題",
-  "description": "完整 8 區塊詳情頁文案（含換行）",
+  "description": "詳情頁文案（含換行，依上面第 4 點）",
   "style_kept": ["依款式備註保留的第一軸原始選項名（簡體照原文）"],
   "color_map": {{"1688簡體顏色": "繁體乾淨顏色"}},
   "size_labels": {{"尺碼": "尺碼+公斤數據或純尺碼，如 S（40-47.5kg）；體重一律 kg 不可用斤"}},
@@ -117,10 +117,18 @@ def generate_listing(product_data: dict, sheet_ctx: dict, shop: str = "lady",
     sp = get_shop(shop)
     system_text = _build_system(sp, sop_override)
 
-    colors = list(product_data.get("sku_images", {}).keys()) or \
-        [s.get("attributes", {}).get("规格", "") for s in product_data.get("skus", [])]
+    # 第一軸選項以 skus 為準；sku_images 的 key 另存了「去空白」版本供查圖用，
+    # 直接拿它當選項清單會讓每個選項出現兩次（2026-09-17 實測 AI 回報「重複選項」）
+    colors, _seen = [], set()
+    for c in ([s.get("attributes", {}).get("规格", "") for s in product_data.get("skus", [])]
+              or list(product_data.get("sku_images", {}).keys())):
+        k = "".join(str(c).split())
+        if c and k not in _seen:
+            _seen.add(k)
+            colors.append(c)
     task = _TASK.format(
         subcategory_line=sp.subcategory_line,
+        detail_rule=sp.detail_rule or "完整詳情頁（通用 8 區塊全文，套規範固定文案：賣場介紹/退換貨/推薦三款）",
         title_rule=_title_rule(sp),
         size_rule=sp.size_rule,
         code=sheet_ctx.get("code", ""),
@@ -173,6 +181,8 @@ def generate_listing(product_data: dict, sheet_ctx: dict, shop: str = "lady",
             result["color_map"] = {kk: to_tw(vv) for kk, vv in result["color_map"].items()}
         if result.get("description"):
             result["description"] = scrub_jin(result["description"])
+        if sp.detail_version:
+            result["detail_version"] = sp.detail_version   # 快取帶版號，規則改了就重生
         logger.info(f"[{sheet_ctx.get('code')}] 標題：{result.get('title','')[:40]}")
         if result.get("flags"):
             for fl in result["flags"]:

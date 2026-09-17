@@ -167,8 +167,12 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
     # ⚠️ 換文案模板＝不同產物，快取要分開存（否則選了新模板卻讀到舊模板的快取）
     tpl_tag = _template_tag(sop_override)
     ai_cache = item_dir / (f"ai_content_{tpl_tag}.json" if tpl_tag else "ai_content.json")
-    if entry.get("reuse_content") and ai_cache.exists():
-        ai_content = json.loads(ai_cache.read_text(encoding="utf-8"))
+    cached = json.loads(ai_cache.read_text(encoding="utf-8")) if ai_cache.exists() else None
+    if cached and sp.detail_version and cached.get("detail_version") != sp.detail_version:
+        logger.info(f"[{code}] 快取文案是舊的詳情規則（{cached.get('detail_version') or '8 區塊'}）→ 重生")
+        cached = None
+    if entry.get("reuse_content") and cached:
+        ai_content = cached
         logger.info(f"[{code}] 使用快取文案")
     else:
         ai_content = generate_listing(product_data, {
@@ -234,6 +238,14 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
 
     variants = build_variants(code, short_name, color_map,
                               selected_colors, size_labels, selected_sizes)
+
+    # 詳情＝AI 三段＋程式款式說明＋固定注意事項（Nail；快取只存 AI 那一半）
+    if sp.detail_rule:
+        from scraper.detail_builder import assemble_description
+        ai_content = {**ai_content, "description": assemble_description(
+            ai_content.get("description", ""), variants, str(entry.get("category", "")),
+            short_name=f"{entry.get('name', '')} {short_name}".strip(),
+            title_1688=product_data.get("title", ""))}
 
     # ⚠️⚠️ 第二軸漏掉的守門員（Edwin 2026-09-09 指出）：我們的第二軸只認商品屬性表的
     #    「尺码」那一列。頁面若是「色票 × 功率／型號／套餐」這種第二個下拉選單，
