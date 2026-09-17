@@ -902,6 +902,11 @@ class App:
         if st:
             self._thread_log(f"🆕 待貼分頁：{st['written']} 商品 / {st['sku_rows']} SKU 列 → "
                              f"1-1「{st['tab']}」（補黃底欄後貼進商品表/SKU表）")
+        ck = res.get("check_sheet")
+        if ck and ck.get("error"):
+            self._thread_log(f"⚠️ 上架核對表沒寫進去：{ck['error']}")
+        elif ck:
+            self._thread_log(f"📋 上架核對表：分頁「{ck['tab']}」新增 {ck['added']} 支、更新 {ck['updated']} 支")
         bdir = res.get("batch_dir")
         if bdir:
             try:    # 名單快照：這批是拿哪一版名單跑的，事後對得回去

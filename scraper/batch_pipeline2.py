@@ -623,7 +623,18 @@ def run_batch_two_tier(
         產出=[Path(output_path).name, "manifest.json"],
         說明=("上架前先去蝦皮待上架區刪掉上一版，否則會多一筆重複的" if ver_no > 1 else ""))
 
+    # 上架核對表（Edwin 2026-09-17 定版）：試跑不寫；失敗不擋（上架檔已產好），但要喊出來
+    check_result = None
+    if make_staging:
+        try:
+            from scraper.listing_check import sync_check_sheet
+            check_result = sync_check_sheet(shop, Path(output_path), prepared, f"文案_v{ver_no}")
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"⚠️ 上架核對表沒寫進去（{e}）——上架檔已產好，員工核對表要手動補或重跑")
+            check_result = {"error": str(e)}
+
     summary = {
+        "check_sheet": check_result,
         "total": len(entries),
         "success": len(prepared),
         "failed": len(failures),
