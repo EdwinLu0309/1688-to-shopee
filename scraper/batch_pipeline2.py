@@ -147,7 +147,7 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
                      shared_offer: bool = False, sop_override: list[str] | None = None,
                      img_template: str | None = None) -> dict | None:
     """把一個 manifest 商品項處理成 generate_batch_two_tier_excel 需要的 dict。"""
-    from scraper.shops import get_shop
+    from scraper.shops import channels_for, get_shop
 
     sp = get_shop(shop)
     item_id = str(entry["item_id"])
@@ -273,7 +273,7 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
             # 實際成交價（折後）→ 1-1 商品表 G；沒填就退回掛牌價並在 staging 警告
             "final_price": entry.get("final_price") or 0,
             "cost_cny": entry.get("cost_cny", ""),      # 名單填的 1688 進價（優先於抓取價）
-            "stock_per_option": entry.get("stock", 10),
+            "stock_per_option": entry.get("stock"),   # 預購 200／現貨＝安全存量（見 ai_list_reader）
             # 重量：名單填了就用名單的，否則抓 1688 頁面的重量表。
             # ⚠️ 兩者都沒有 → None，Excel 留空並 warning，**不退回寫死的 0.1kg**
             #    （假重量會讓蝦皮運費與獲利表的結構版國際運費一起算錯且看起來像真的）
@@ -296,7 +296,8 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
             #    依 1688 原始屬性名判斷（实测 HNV7 集塵器）。
             "axis1_name": _axis1_name_for(product_data, sp),
             "axis2_name": sp.axis2_name,
-            "enabled_channels": set(sp.enabled_channels),
+            # 現貨多開「蝦皮店到店－隔日到貨」；預購不可開（shops.channels_for）
+            "enabled_channels": channels_for(sp, entry.get("demand", "")),
         },
         "_meta": {"code": code, "item_id": item_id,
                   "sku_count": sku_count,
@@ -508,6 +509,13 @@ def run_batch_two_tier(
         logger.warning("沒有商品可處理")
         return {"total": 0, "success": 0, "failed": 0, "excel_path": None, "failures": []}
     logger.info(f"賣場：{shop}（模板 {tpl.name}）")
+
+    # 現貨沒填安全存量 → 整批不做（試跑不擋：那份檔本來就不能上架）
+    if make_staging:
+        from scraper.ai_list_reader import missing_safety_stock, missing_stock_message
+        miss = missing_safety_stock(entries)
+        if miss:
+            raise ValueError(missing_stock_message(miss))
 
     # 這一批的資料夾：batch/{shop}/{YYYYMMDD}/，底下每跑一次開一個 文案_vN（舊版永不覆蓋）
     batch_dir = Path(BATCH_DIR) / shop / datetime.now().strftime("%Y%m%d")

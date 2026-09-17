@@ -120,6 +120,27 @@ class ShopProfile:
 _STD_CHANNELS = frozenset({"30020", "30006", "30005", "30017", "30015", "30018"})
 _LADY_CHANNELS = _STD_CHANNELS  # 舊名保留（Lady 註解沿用）
 
+# ★現貨加開「蝦皮店到店－隔日到貨」（Edwin 2026-09-16 定）：
+#   現貨＝較長備貨天數留空 → 走賣場的一般備貨天數（三家都設 1 天）→ 可以開隔日到貨，
+#   開法跟 7-11／全家一樣填「開啟」。預購＝較長備貨天數 10 天，蝦皮規定這種商品
+#   **不能**勾隔日到貨，所以預購絕不加這個頻道。
+NEXT_DAY_CHANNEL = "30019"
+PREORDER_STOCK = 200          # 預購品上架庫存固定 200（與 1-1 安全存量同一個數）
+PREORDER_DAYS = 10            # 預購品較長備貨天數（Nail 分類可填範圍 2~15）
+
+
+def is_preorder(demand) -> bool:
+    """AI 名單「訂貨需求」含「預購」＝預購；其餘（現貨／空白）一律當現貨。"""
+    return "預購" in str(demand or "")
+
+
+def channels_for(sp, demand) -> set[str]:
+    """這支商品要開的物流：公版 6 個，現貨再加隔日到貨。"""
+    ch = set(sp.enabled_channels)
+    if not is_preorder(demand):
+        ch.add(NEXT_DAY_CHANNEL)
+    return ch
+
 # ══════════════════════════════════════════════════════════════
 # Lady（女裝）— 現行正線，行為與單賣場版完全一致
 # ══════════════════════════════════════════════════════════════

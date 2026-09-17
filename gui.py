@@ -663,6 +663,15 @@ class App:
                 f"這些勾選商品沒有分類 ID（上傳蝦皮會被擋）：\n{', '.join(nocat)}\n\n要繼續嗎？")
         return True
 
+    def _block_missing_stock(self, sel: list[dict]) -> bool:
+        """現貨沒填安全存量 → 擋下並列出編號（Edwin 2026-09-16：請去名單填好再重建）。"""
+        from scraper.ai_list_reader import missing_safety_stock, missing_stock_message
+        miss = missing_safety_stock(sel)
+        if miss:
+            messagebox.showerror("安全存量沒填", missing_stock_message(miss))
+            return False
+        return True
+
     def _warn_gpt(self, sel: list[dict]) -> bool:
         gpt = [p["code"] for p in sel if p.get("route") == "gpt"]
         if not gpt:
@@ -810,6 +819,8 @@ class App:
         if sel is None:
             return
         if not self._warn_no_category(sel):
+            return
+        if not self._block_missing_stock(sel):
             return
         if not self._warn_gpt(sel):
             return
@@ -994,6 +1005,8 @@ class App:
                 "缺的會被跳過。要繼續嗎？（建議先用上面的「🚀 開始」把缺的補齊）"):
                 return
         if not self._warn_no_category(sel):
+            return
+        if not self._block_missing_stock(sel):
             return
         if not self._warn_gpt(sel):
             return

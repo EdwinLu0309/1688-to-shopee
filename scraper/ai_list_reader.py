@@ -11,7 +11,7 @@
 - 「訂貨需求」(預購/現貨)  → 預購標記（也決定建檔走預購或正式，見 master_staging）
 - 「子分類」(b. 內衣…)    → 1-1 商品表 C 子分類（2026-08-28 新增）
 - 「標籤」(#LM_1st…)      → 1-1 SKU表 D 標籤（2026-08-28 新增；預購品由程式蓋成 #PO_Sale）
-- 「安全存量」(2)         → 上架 Excel 的庫存欄（2026-09-08 起；以前是寫死 10）
+- 「安全存量」(2)         → 上架 Excel 的庫存欄（現貨；沒填會被擋下。預購一律 200，2026-09-16）
 
 ⚠️ 「歸屬」欄已於 2026-09-08 移除——商品序改由「商品編號存不存在」決定（新編號開新序、
 既有編號接款式），該欄描述的情境（新編號＋掛既有系列）在真實操作中不存在。
@@ -30,7 +30,7 @@ from loguru import logger
 # 分類對照 / 商品名推斷規則：#S165 三賣場化後移到 scraper/shops.py 的各賣場 profile
 # （category_map / name_rules），本模組帶 shop 參數查表。下面兩個模組層名稱保留＝Lady 的
 # （向後相容：舊呼叫端 import CATEGORY_MAP 仍可用）。
-from scraper.shops import get_shop
+from scraper.shops import PREORDER_DAYS, PREORDER_STOCK, get_shop, is_preorder
 
 CATEGORY_MAP = get_shop("lady").category_map
 _NAME_CATEGORY_RULES = get_shop("lady").name_rules
@@ -188,6 +188,12 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
         style = _cell(r, colmap.get("style"))
         size_text = _cell(r, colmap.get("sizes"))
         demand = _cell(r, colmap.get("demand"))
+        preorder = is_preorder(demand)
+        # 庫存（Edwin 2026-09-16 定）：預購固定 200（名單不填）；
+        # 現貨＝安全存量（首批訂貨量），**沒填就是 None**，由 missing_safety_stock()
+        # 擋下來請人補——不可退回寫死的 10 件，那會讓上架庫存與實際進貨量對不上。
+        safety = _num_cell(r, colmap.get("safety_stock"))
+        stock = PREORDER_STOCK if preorder else (safety or None)
 
         products.append({
             "item_id": iid,
@@ -195,7 +201,7 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
             "price": price,
             "final_price": _num_cell(r, colmap.get("final_price")),  # → 1-1 商品表 G
             "cost_cny": _cell(r, colmap.get("cost")),   # → 商品表 E / SKU表 F（優先於抓取價）
-            "stock": _num_cell(r, colmap.get("safety_stock")) or stock_default,
+            "stock": stock,
             "category": cat_id,
             "style_filter": style,       # 「三色長褲」等 → batch 端配合色卡挑
             "sizes": "all" if ("全" in size_text or not size_text) else size_text,
@@ -203,7 +209,7 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
             "subcategory": _cell(r, colmap.get("subcategory")),   # → 商品表 C
             "tag": _cell(r, colmap.get("tag")),                   # → SKU表 D
             # 預購品填較長備貨天數（AP 欄）；現貨留空
-            "pre_order_days": 10 if "預購" in demand else None,
+            "pre_order_days": PREORDER_DAYS if preorder else None,
             "name": name,
             "reuse_content": False,
             "_category_text": cat_text,
@@ -216,3 +222,16 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
 
     logger.info(f"AI 名單共解析 {len(products)} 筆")
     return products
+
+
+def missing_safety_stock(products: list[dict]) -> list[str]:
+    """現貨卻沒填安全存量的編號（要擋下來請人去名單補，不可自己猜一個數字）。"""
+    return [str(p.get("code") or p.get("item_id")) for p in products
+            if not is_preorder(p.get("demand")) and not p.get("stock")]
+
+
+def missing_stock_message(codes: list[str]) -> str:
+    return ("這幾支是「現貨」，但 AI 上架名單的「安全存量」沒填：\n"
+            f"{', '.join(codes)}\n\n"
+            "安全存量＝首批訂貨量，也是上架的庫存數。\n"
+            "請去名單填好，按「⬇️ 更新名單」後再重新建立檔案。")

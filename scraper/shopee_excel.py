@@ -378,7 +378,8 @@ def build_two_tier_rows(
                 if dims.get(_k) and _k in COL:   # 舊模板沒這三欄 → 跳過不炸
                     row[COL[_k]] = str(dims[_k])
             row[COL["price"]] = str(int(round(float(price))))
-            row[COL["stock"]] = str(int(round(float(stock))))
+            # 庫存沒有（只會出現在試跑）→ 留空，不猜數字
+            row[COL["stock"]] = str(int(round(float(stock)))) if stock else ""
             # 規格欄位：每行都填；識別碼相同 → 歸成同一商品
             # 軸名依賣場（config 帶入；lady=顏色/尺碼、nail=顏色/規格，見 scraper/shops.py）
             row[COL["var_id"]] = str(int(var_group_id))
