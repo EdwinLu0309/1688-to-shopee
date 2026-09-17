@@ -218,6 +218,11 @@ def test_new_mark_goes_to_j_not_tag():
     check("J 欄標綠（可貼）", 9 in SKU_FILL_COLS)
     _, skus = build_blocks("lady", [_prepared("H-c2", demand="現貨", tag="#LM_1st #NEW")], CTX)
     eq("名單標籤夾帶 #NEW 會被拿掉", skus[0]["tag"], "#LM_1st")
+    _, skus = build_blocks("lady", [_prepared("H-c2", demand="現貨", tag="#LM_1st #NEW 0909")], CTX)
+    eq("連日期一起拿掉", skus[0]["tag"], "#LM_1st")
+    from datetime import datetime
+    from scraper.master_staging import new_mark
+    eq("記號帶建檔日期 MMDD", new_mark(datetime(2026, 9, 9)), "#NEW 0909")
 
 
 def test_sku_row_fields():

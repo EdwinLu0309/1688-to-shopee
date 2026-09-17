@@ -76,6 +76,12 @@ SKU_COST_SCALE = 100
 
 PREORDER_SAFETY_STOCK = "200"      # 預購品安全存量（蝦皮端庫存也開 200）
 NEW_MARK = "#NEW"                  # 新品記號：寫在 SKU表 J 選項註記（Edwin 2026-09-17，訂貨時篩新品用）
+
+
+def new_mark(when=None) -> str:
+    """「#NEW 0917」＝新品＋建檔日期（MMDD，Edwin 2026-09-17）。搜「#NEW」照樣抓得到。"""
+    from datetime import datetime
+    return f"{NEW_MARK} {(when or datetime.now()).strftime('%m%d')}"
 # ⚠️ 不可放 D 標籤：訂貨彙總 B4 用「標籤＝"#N_機器"」逐字比對 25 種標籤、訂貨表 M 用「≠"#PO_Sale"」
 #    排除預購——標籤多一個 #NEW 就整批從訂貨彙總消失、預購品被算進補貨，而且不報錯。
 #    J 欄只有訂貨表 Q 用 VLOOKUP 原樣帶去顯示，沒有任何比對。商品表不標（Edwin）。
@@ -287,8 +293,8 @@ def build_blocks(shop: str, prepared: list[dict],
         products.append(row)
 
         # 名單標籤若有人順手打了 #NEW，拿掉——#NEW 只寫 J 欄（見 NEW_MARK）
-        tag = PREORDER_TAG if preorder else " ".join(
-            t for t in str(cfg.get("tag", "")).split() if t.upper() != NEW_MARK)
+        tag = PREORDER_TAG if preorder else re.sub(
+            r"\s*#NEW(\s*\d{4})?", "", str(cfg.get("tag", "")), flags=re.I).strip()
         sku_cat = ctx.sku_category(code)
         variants = p.get("variants", {})
         tier1 = variants.get("規格1_顏色") or []
@@ -584,7 +590,7 @@ def write_staging(shop: str, prepared: list[dict], force: bool = False,
         # H 安全存量：預購統一 200；正式品用名單填的（Edwin 2026-09-09 要求帶入——
         # 他名單上已經填過一次，不該再手打第二次）
         row[7] = PREORDER_SAFETY_STOCK if s["preorder"] else s.get("safety_stock", "")
-        row[9] = NEW_MARK                   # J 選項註記：新品記號（訂貨時篩新品）
+        row[9] = new_mark()                 # J 選項註記：新品記號＋建檔日期（訂貨時篩新品）
         row[11] = s["spec1"]                # L 規格一（1688 原文逐字）
         row[12] = s["spec2"]                # M 規格二（1688 原文逐字）
         rows2.append(row + [s["item_id"], s["display"]])
