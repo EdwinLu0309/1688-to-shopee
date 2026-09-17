@@ -87,6 +87,8 @@ def _build_system(sp, sop_override: list[str] | None = None) -> str:
 
 
 def _title_rule(sp) -> str:
+    if sp.title_rule:
+        return sp.title_rule
     aud = f"+「{sp.audience_word}」" if sp.audience_word else ""
     rule = f"依 SOP 標題規則，含{sp.brand_tag}+ 核心關鍵字 {aud}+ 編號，57-60 字寬內。"
     return rule + (sp.title_extra or "")
@@ -183,6 +185,8 @@ def generate_listing(product_data: dict, sheet_ctx: dict, shop: str = "lady",
             result["description"] = scrub_jin(result["description"])
         if sp.detail_version:
             result["detail_version"] = sp.detail_version   # 快取帶版號，規則改了就重生
+        if sp.title_version:
+            result["title_version"] = sp.title_version
         logger.info(f"[{sheet_ctx.get('code')}] 標題：{result.get('title','')[:40]}")
         if result.get("flags"):
             for fl in result["flags"]:

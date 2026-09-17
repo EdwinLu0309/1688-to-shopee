@@ -41,17 +41,24 @@ TAB_CANDIDATES = ("搜尋詞庫", "詞池", "關鍵字", "keywords")
 CATEGORY_RULES: list[tuple[tuple[str, ...], str]] = [
     # ⚠️ 繁簡都要列：品名是我們寫的繁體，1688 原標題是簡體，兩邊都會拿來認
     #    （實測「SUN3 48W 智能二代」品名裡沒有「燈」字，只有 1688 標題的「美甲灯」認得出來）
+    # ⚠️ 順序＝優先權（2026-09-17 v2.2 重排）：
+    #    貓眼**膠**要落「膠」池（貓眼膠 13,644／貓眼指甲油 16,963 在那裡），「貓眼」池是磁鐵／貓眼筆這類配件；
+    #    凝膠清潔液、解膠劑含「膠」字但是溶劑 → 溶劑排在膠前面。
     (("集塵", "吸塵", "粉塵", "濾網", "過濾", "濾紙", "濾棉",
       "集尘", "吸尘", "粉尘", "滤网", "过滤", "滤纸", "滤棉"), "集塵器"),
     (("打磨", "磨甲", "磨頭", "拋光", "卸甲機", "磨头", "抛光", "卸甲机"), "打磨機"),
     (("光療燈", "美甲燈", "烤燈", "一字燈", "手持燈", "燈",
       "光疗灯", "美甲灯", "烤灯", "灯"), "美甲燈"),
     (("收納", "工具箱", "推車", "收纳", "推车"), "收納"),
-    (("貓眼",), "貓眼"),
+    (("卸甲水", "去光水", "清潔液", "洗筆", "解膠劑", "凝清",
+      "卸甲水", "去光水", "清洁液", "洗笔", "解胶剂"), "溶劑"),
+    (("卸甲膠", "卸甲包", "卸甲液", "卸甲膏", "卸甲胶"), "卸甲"),
+    (("指緣油", "指緣", "護甲", "硬甲油", "養甲", "軟化劑",
+      "指缘油", "护甲", "养甲", "软化剂"), "保養"),
+    (("膠", "胶", "封層", "封层", "甲油"), "膠"),
+    (("貓眼", "猫眼"), "貓眼"),
     (("甲片", "穿戴"), "甲片"),
-    (("膠", "封層", "底膠"), "膠"),
-    (("筆刷", "彩繪筆", "拉線筆"), "美甲筆"),
-    (("卸甲水", "清潔液", "洗筆"), "溶劑"),
+    (("筆刷", "彩繪筆", "拉線筆", "美甲筆", "笔刷"), "美甲筆"),
 ]
 
 
@@ -100,8 +107,11 @@ def category_of(product_name: str, extra: str = "", fallback: str = "") -> str:
 
 
 @lru_cache(maxsize=1)
-def _load() -> list[Word]:
-    """讀整張搜尋詞庫（只取能用的：美甲相關、啟用、非品牌）。"""
+def _load_rows() -> tuple[list[Word], list[str]]:
+    """讀整張搜尋詞庫 → (可用詞, 不可進標題的詞)。
+
+    不可進標題＝泛用（客群不對）／品牌（他牌）／非啟用（死詞）——標題檢查拿它把混進來的詞挑出來。
+    """
     import gspread
     from google.oauth2.service_account import Credentials
 
@@ -117,23 +127,22 @@ def _load() -> list[Word]:
         logger.warning(f"搜尋詞庫找不到 {TAB_CANDIDATES} 任一分頁，改用第一個分頁「{tab}」")
     rows = sh.worksheet(tab).get_all_values()
     if not rows:
-        return []
+        return [], []
     h = {name: i for i, name in enumerate(rows[0])}
     need = ("詞", "搜尋量", "分類", "位階", "相關性", "狀態")
     missing = [c for c in need if c not in h]
     if missing:
         # 欄位被改名就講出來——靜默回空會讓標題默默退回沒有關鍵字的版本
         logger.warning(f"搜尋詞庫缺欄位 {missing}，本次不套用搜尋詞庫")
-        return []
+        return [], []
     out: list[Word] = []
+    banned: list[str] = []
     for r in rows[1:]:
         if len(r) <= max(h.values()) or not r[h["詞"]].strip():
             continue
-        if r[h["狀態"]].strip() != "啟用":
-            continue
-        if r[h["相關性"]].strip() != "美甲":
-            continue
-        if r[h["位階"]].strip() == "品牌":        # 競品／他牌字：可投廣告，不可進標題
+        if (r[h["狀態"]].strip() != "啟用" or r[h["相關性"]].strip() != "美甲"
+                or r[h["位階"]].strip() == "品牌"):   # 死詞／泛用／他牌：可投廣告，不可進標題
+            banned.append(r[h["詞"]].strip())
             continue
         try:
             vol = int(str(r[h["搜尋量"]]).replace(",", "").strip())
@@ -141,8 +150,44 @@ def _load() -> list[Word]:
             continue
         out.append(Word(r[h["詞"]].strip(), vol, r[h["分類"]].strip(), r[h["位階"]].strip()))
     out.sort(key=lambda w: -w.量)
-    logger.info(f"搜尋詞庫載入 {len(out)} 個可用詞（已排除泛用／品牌／死詞）")
-    return out
+    logger.info(f"搜尋詞庫載入 {len(out)} 個可用詞（已排除泛用／品牌／死詞 {len(banned)} 個）")
+    return out, banned
+
+
+def _load() -> list[Word]:
+    return _load_rows()[0]
+
+
+def banned_words() -> set[str]:
+    """不可進標題的詞（泛用／他牌／死詞）。自家品牌詞（喬伊盧…）若被標品牌也會在這裡，呼叫端自行放行。"""
+    return set(_load_rows()[1])
+
+
+# 需要 PIF 的品類（化粧品）：標題公式要放 ✅PIF合規（v2.2）
+PIF_CATEGORIES = {"膠", "溶劑", "保養"}
+
+
+def needs_pif(category: str, product_name: str = "") -> bool:
+    """標題要不要放 ✅PIF合規：化粧品類（膠／溶劑／保養；卸甲只有膠液膏類，卸甲包不算）。"""
+    if category in PIF_CATEGORIES:
+        return True
+    return category == "卸甲" and any(w in (product_name or "") for w in ("膠", "液", "膏", "油"))
+
+
+def first_line_candidates(p: "Pool", product_name: str, n: int = 8) -> list[str]:
+    """第一行大詞候選：本類的詞，和品名有共同字眼的排前面，其餘依量。
+
+    只看本類（不含「美甲」這種廣域詞，那個放尾段當保險）。實測「膠」池同時有
+    貓眼指甲油／底膠／建構膠，只照量排會讓底膠商品開頭寫「貓眼指甲油」→ 先比字眼。
+    """
+    own = [w for w in p.words if p.分類 in {c.strip() for c in w.分類.split(",")}]
+    name = product_name or ""
+    grams = {name[i:i + 2] for i in range(len(name) - 1)}
+
+    def hit(w):
+        return any(w.詞[i:i + 2] in grams for i in range(len(w.詞) - 1))
+    ranked = [w for w in own if hit(w)] + [w for w in own if not hit(w)]
+    return [w.詞 for w in ranked[:n]]
 
 
 def pool_for(product_name: str, category: str = "", extra: str = "") -> Pool:
@@ -163,16 +208,29 @@ def pool_for(product_name: str, category: str = "", extra: str = "") -> Pool:
 
 def prompt_block(product_name: str, category: str = "", extra: str = "",
                  n: int = 16, budget: int = 40) -> str:
-    """給文案 prompt 用的一段：可用詞清單＋建議尾串。
+    """給文案 prompt 用的一段（標題 v2.2）：第一行大詞＋可用詞清單＋建議尾串。
 
     ⚠️ 只給「可以用的詞」，不解釋為什麼別的不能用——prompt 越短模型越照做。
     """
     p = pool_for(product_name, category, extra)
     if not p.words:
         return ""
+    if needs_pif(p.分類, product_name):
+        # 化粧品標題不可出現「療」（貓眼光療膠／光療指甲油都不行）→ 清單裡就不給
+        p = Pool(p.分類, [w for w in p.words if "療" not in w.詞])
+    # 第一行＝本類大詞（不算「美甲」這種廣域詞——那個放尾段當保險）
+    vol = {w.詞: w.量 for w in p.words}
+    cand = first_line_candidates(p, f"{product_name} {extra}")
     lines = [f"【可用關鍵字（{p.分類 or '廣域'}，依蝦皮實際搜尋量降冪）】"]
     lines += [f"　{w.詞}（{w.量}）" for w in p.words[:n]]
+    if cand:
+        lines.append("【第一行大詞候選】" + " ".join(f"{c}（{vol[c]}）" for c in cand)
+                     + "\n　→ 從這裡挑**真正描述這支商品**、量最大的 1~2 個放標題最前面（大的在前），"
+                       "接著放這支商品自己的真實形態詞（例：冰透晶石貓眼、爆裂卸甲膠、手持一字燈），每支不同")
     lines.append(f"【建議尾串】{p.tail(budget)}")
+    if needs_pif(p.分類, product_name):
+        lines.append("【這支要放 ✅PIF合規】放在「大詞＋形態詞」之後、品牌之前；✅ 前面的內容要落在手機搜尋卡的第二行"
+                     "（中文算 1 寬、英數與空格算 0.5 寬，✅ 前總寬 9.5~20）。膠類標題全文不可出現「療」字。")
     lines.append("只能用上面列出的詞；沒列的詞代表沒有搜尋量或不是美甲客群，不要自己發明。")
     lines.append("⚠️ 標題要**填到 58-60 字**——60 字是免費版位，少一個字就少一次被搜到的機會。"
                  "數過字數若不足 58，從清單往下再補詞。")

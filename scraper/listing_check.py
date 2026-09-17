@@ -297,6 +297,15 @@ def sync_check_sheet(shop: str, xlsx_path: Path, prepared: list[dict], version: 
              "demand": p.get("config", {}).get("demand", "")} for p in prepared]
     rows = build_check_rows(read_upload_rows(Path(xlsx_path)), meta,
                             when.strftime("%Y-%m-%d"), version)
+    # 標題檢查的提醒掛在標題格下一行（程式區，員工核「標題 OK」時一眼看到）
+    warns: dict[str, list[str]] = {}
+    for p in prepared:
+        for w in (p.get("ai_content") or {}).get("title_warnings") or []:
+            warns.setdefault(str(p["_meta"]["code"]), []).append(w)
+    ti = PROG_HEADERS.index("蝦皮標題")
+    for r in rows:
+        if warns.get(r[CODE_COL]):
+            r[ti] = r[ti] + "\n" + "\n".join(f"⚠️ {w}" for w in dict.fromkeys(warns[r[CODE_COL]]))
     res = write_check_sheet(shop, rows, when.strftime("%m%d"))
     logger.info(f"上架核對表：分頁「{res['tab']}」新增 {res['added']} 支、更新 {res['updated']} 支")
     return res

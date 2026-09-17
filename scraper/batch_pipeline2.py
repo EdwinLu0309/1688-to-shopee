@@ -171,6 +171,9 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
     if cached and sp.detail_version and cached.get("detail_version") != sp.detail_version:
         logger.info(f"[{code}] 快取文案是舊的詳情規則（{cached.get('detail_version') or '8 區塊'}）→ 重生")
         cached = None
+    if cached and sp.title_version and cached.get("title_version") != sp.title_version:
+        logger.info(f"[{code}] 快取文案是舊的標題規則（{cached.get('title_version') or '舊版'}）→ 重生")
+        cached = None
     if entry.get("reuse_content") and cached:
         ai_content = cached
         logger.info(f"[{code}] 使用快取文案")
@@ -238,6 +241,31 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
 
     variants = build_variants(code, short_name, color_map,
                               selected_colors, size_labels, selected_sizes)
+
+    # 標題 v2.2 程式檢查（Nail）：能機械判斷的直接修、要判斷的大聲講（快取只存 AI 原文）
+    if sp.title_version:
+        from scraper.keyword_pool import banned_words, category_of, needs_pif
+        from scraper.title_check import check_title
+        name = entry.get("name", "") or short_name
+        try:
+            banned = banned_words()
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[{code}] 搜尋詞庫讀不到，標題不檢查泛用／他牌／死詞：{e}")
+            banned = set()
+        spec_src = [entry.get("name", ""), entry.get("style_filter", ""),
+                    json.dumps(product_data.get("attributes", {}), ensure_ascii=False)]
+        spec_src += [c.get("src_1688", "") for c in variants.get("規格1_顏色", [])]
+        spec_src += [c.get("option_name", "") for c in variants.get("規格1_顏色", [])]
+        spec_src += [s_.get("option_name", "") for s_ in variants.get("規格2_尺碼", [])]
+        new_title, fixed, warns = check_title(
+            ai_content.get("title", ""), code=code,
+            pif=needs_pif(category_of(name, product_data.get("title", "")), name),
+            banned=banned, spec_sources=spec_src)
+        for f_ in fixed:
+            logger.info(f"[{code}] 標題自動修正：{f_}")
+        for w_ in warns:
+            logger.warning(f"[{code}] ⚠️ 標題要人看：{w_}")
+        ai_content = {**ai_content, "title": new_title, "title_warnings": warns}
 
     # 詳情＝AI 三段＋程式款式說明＋固定注意事項（Nail；快取只存 AI 那一半）
     if sp.detail_rule:
