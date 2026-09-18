@@ -98,7 +98,9 @@ def check_title(title: str, *, code: str = "", pif: bool = False,
         hay = re.sub(r"\s+", "", product_words or "").lower()
         def _backed(tok: str) -> bool:
             t_ = tok.lower()
-            if not hay or t_ in hay:
+            if not hay:
+                return False          # 沒給商品資料就無從佐證 → 當成沒依據，寧可提醒
+            if t_ in hay:
                 return True
             # AI 偶爾把特徵串成一長串（「薄款垂感無彈力」）→ 拆成兩字一組全都找得到就算有依據
             segs = [t_[i:i + 2] for i in range(0, len(t_) - 1, 2)]
