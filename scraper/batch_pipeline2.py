@@ -281,7 +281,7 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
         from scraper.title_check import check_title
         name = entry.get("name", "") or short_name
         try:
-            banned = banned_words()
+            banned = banned_words(shop)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[{code}] 搜尋詞庫讀不到，標題不檢查泛用／他牌／死詞：{e}")
             banned = set()
@@ -290,9 +290,14 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
         spec_src += [c.get("src_1688", "") for c in variants.get("規格1_顏色", [])]
         spec_src += [c.get("option_name", "") for c in variants.get("規格1_顏色", [])]
         spec_src += [s_.get("option_name", "") for s_ in variants.get("規格2_尺碼", [])]
+        try:
+            from scraper.keyword_pool import pool_for
+            _pool = {w.詞 for w in pool_for(name, extra=product_data.get("title", ""), shop=shop).words}
+        except Exception:  # noqa: BLE001
+            _pool = set()
         new_title, fixed, warns = check_title(
-            ai_content.get("title", ""), code=code,
-            pif=needs_pif(category_of(name, product_data.get("title", "")), name),
+            ai_content.get("title", ""), code=code, pool=_pool,
+            pif=needs_pif(category_of(name, product_data.get("title", ""), shop=shop), name, shop=shop),
             banned=banned, spec_sources=spec_src)
         for f_ in fixed:
             logger.info(f"[{code}] 標題自動修正：{f_}")
@@ -306,7 +311,7 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
         ai_content = {**ai_content, "description": assemble_description(
             ai_content.get("description", ""), variants, str(entry.get("category", "")),
             short_name=f"{entry.get('name', '')} {short_name}".strip(),
-            title_1688=product_data.get("title", ""))}
+            title_1688=product_data.get("title", ""), shop=shop)}
 
     # ⚠️⚠️ 第二軸漏掉的守門員（Edwin 2026-09-09 指出）：我們的第二軸只認商品屬性表的
     #    「尺码」那一列。頁面若是「色票 × 功率／型號／套餐」這種第二個下拉選單，

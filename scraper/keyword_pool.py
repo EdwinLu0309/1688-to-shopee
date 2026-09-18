@@ -30,7 +30,10 @@ from functools import lru_cache
 
 from loguru import logger
 
-SHEET_ID = "1lCZ-NP63EyvhKy9RK_KEkBSJrCQIaxvjelFXZCLqjBY"   # 【Nail】搜尋詞庫
+# 搜尋詞庫「一家一張表」（2026-09-18 起分賣場）：欄位契約相同，但分類體系、相關性值、
+# 有沒有「廣域」都不一樣 —— Lady 刻意不設廣域（內褲的標題不該出現絲襪的詞）。
+SHEET_ID = "1lCZ-NP63EyvhKy9RK_KEkBSJrCQIaxvjelFXZCLqjBY"   # 【Nail】搜尋詞庫（舊名保留）
+LADY_SHEET_ID = "1D7oHF8b5RNICTgckPSR21psr2qkZl4sinrK7RdPSn5w"   # 【Lady】搜尋詞庫（460 詞，9/17 建）
 # 分頁名會被改（原本叫「詞池」，2026-09-16 改成「搜尋詞庫」）→ 給候選，
 # 都找不到才退回第一個分頁並**喊一聲**：靜默回空會讓標題默默退回沒有關鍵字的版本。
 TAB_CANDIDATES = ("搜尋詞庫", "詞池", "關鍵字", "keywords")
@@ -60,6 +63,55 @@ CATEGORY_RULES: list[tuple[tuple[str, ...], str]] = [
     (("甲片", "穿戴"), "甲片"),
     (("筆刷", "彩繪筆", "拉線筆", "美甲筆", "笔刷"), "美甲筆"),
 ]
+
+
+# Lady：品名 → 搜尋詞庫分類（表上的分類值）。由具體到籠統，第一個命中就用。
+LADY_CATEGORY_RULES: list[tuple[tuple[str, ...], str]] = [
+    (("bratop", "BraTop", "BRATOP", "背心式內衣", "小可愛"), "BraTop"),
+    (("隱形內衣", "隱形胸貼", "nubra", "NuBra", "胸貼"), "隱形內衣"),
+    (("胸墊", "襯墊"), "胸墊"),
+    (("安全褲",), "安全褲"),
+    (("丁字褲", "內褲", "三角褲", "平口褲", "生理褲", "內裤"), "內褲"),
+    (("內衣", "胸罩", "бра", "無鋼圈", "有鋼圈", "內衣褲"), "內衣"),
+    (("絲襪", "褲襪", "連褲襪", "黑絲", "網襪", "吊帶襪"), "絲襪"),
+    (("襪", "襪子", "船襪", "短襪", "中筒", "長筒"), "襪子"),
+    (("睡衣", "睡裙", "家居服", "睡袍"), "睡衣"),
+    (("泳衣", "泳裝", "比基尼", "泳褲"), "泳衣"),
+    (("瑜珈", "運動內衣", "運動褲", "健身"), "運動"),
+    (("洋裝", "連身裙", "連衣裙", "连衣裙"), "女裝-洋裝"),
+    (("套裝", "两件套", "兩件套"), "女裝-套裝"),
+    (("裙",), "女裝-裙"),
+    (("褲", "裤"), "女裝-褲"),
+    (("上衣", "襯衫", "T恤", "t恤", "背心", "罩衫", "外套", "衛衣", "针织", "針織"), "女裝-上衣"),
+    (("髮", "髮飾", "配件", "包包"), "配件"),
+]
+
+
+@dataclass(frozen=True)
+class PoolConf:
+    """一家賣場的搜尋詞庫設定。欄位契約三家一樣，其餘都不一樣。"""
+
+    sheet_id: str
+    relevance: frozenset          # 相關性欄＝「這些值才可以用」
+    rules: list                   # 品名 → 分類
+    has_broad: bool = False       # 有沒有「廣域」分類（每一類都吃得到）
+    pif_categories: frozenset = frozenset()
+
+
+POOLS = {
+    # Nail：相關性只取「美甲」（泛用詞客群不對）、有廣域、化粧品類要 ✅PIF合規
+    "nail": PoolConf(SHEET_ID, frozenset({"美甲"}), CATEGORY_RULES, True,
+                     frozenset({"膠", "溶劑", "保養"})),
+    # Lady：相關性「內著」＝現有商品、「預購」＝女裝與泳衣（自動上架做的正是這種，所以要收）；
+    #       位階「錯字」有量但不進標題（品牌詞在 _load_rows 已排除）
+    "lady": PoolConf(LADY_SHEET_ID, frozenset({"內著", "預購"}), LADY_CATEGORY_RULES, False),
+}
+
+
+# prompt 裡的例子與客群詞（別讓 Lady 的 prompt 出現貓眼與美甲）
+_FORM_EXAMPLES = {"nail": "冰透晶石貓眼、爆裂卸甲膠、手持一字燈",
+                  "lady": "冰絲丁字褲、分段壓力長筒襪、莫代爾蕾絲邊三角內褲"}
+_AUDIENCE = {"nail": "美甲", "lady": "本賣場"}
 
 
 @dataclass
@@ -93,21 +145,23 @@ class Pool:
         return " ".join(out)
 
 
-def category_of(product_name: str, extra: str = "", fallback: str = "") -> str:
+def category_of(product_name: str, extra: str = "", fallback: str = "", shop: str = "nail") -> str:
     """從品名（＋1688 原標題）推搜尋詞庫分類；推不出回 fallback。
 
     先看品名、再看 1688 標題：品名是 Edwin 寫的、比較準；1688 標題是備援，
     但它描述的是**整頁最強那款**，所以只在品名認不出來時才用。
     """
+    conf = POOLS.get(str(shop).lower())
+    rules = conf.rules if conf else CATEGORY_RULES
     for text in (product_name or "", extra or ""):
-        for keys, cat in CATEGORY_RULES:
+        for keys, cat in rules:
             if any(k in text for k in keys):
                 return cat
     return fallback
 
 
-@lru_cache(maxsize=1)
-def _load_rows() -> tuple[list[Word], list[str]]:
+@lru_cache(maxsize=4)
+def _load_rows(shop: str = "nail") -> tuple[list[Word], list[str]]:
     """讀整張搜尋詞庫 → (可用詞, 不可進標題的詞)。
 
     不可進標題＝泛用（客群不對）／品牌（他牌）／非啟用（死詞）——標題檢查拿它把混進來的詞挑出來。
@@ -119,7 +173,11 @@ def _load_rows() -> tuple[list[Word], list[str]]:
 
     creds = Credentials.from_service_account_file(
         str(resolve_sa_json(None)), scopes=["https://www.googleapis.com/auth/spreadsheets"])
-    sh = gspread.authorize(creds).open_by_key(SHEET_ID)
+    conf = POOLS.get(str(shop).lower())
+    if conf is None:
+        logger.warning(f"{shop} 還沒有搜尋詞庫 → 標題不套關鍵字清單")
+        return [], []
+    sh = gspread.authorize(creds).open_by_key(conf.sheet_id)
     titles = [w.title for w in sh.worksheets()]
     tab = next((t for t in TAB_CANDIDATES if t in titles), None)
     if tab is None:
@@ -140,8 +198,9 @@ def _load_rows() -> tuple[list[Word], list[str]]:
     for r in rows[1:]:
         if len(r) <= max(h.values()) or not r[h["詞"]].strip():
             continue
-        if (r[h["狀態"]].strip() != "啟用" or r[h["相關性"]].strip() != "美甲"
-                or r[h["位階"]].strip() == "品牌"):   # 死詞／泛用／他牌：可投廣告，不可進標題
+        if (r[h["狀態"]].strip() != "啟用"
+                or r[h["相關性"]].strip() not in conf.relevance
+                or r[h["位階"]].strip() in ("品牌", "錯字")):   # 死詞／泛用／他牌／錯字：可投廣告，不可進標題
             banned.append(r[h["詞"]].strip())
             continue
         try:
@@ -154,21 +213,24 @@ def _load_rows() -> tuple[list[Word], list[str]]:
     return out, banned
 
 
-def _load() -> list[Word]:
-    return _load_rows()[0]
+def _load(shop: str = "nail") -> list[Word]:
+    return _load_rows(shop)[0]
 
 
-def banned_words() -> set[str]:
+def banned_words(shop: str = "nail") -> set[str]:
     """不可進標題的詞（泛用／他牌／死詞）。自家品牌詞（喬伊盧…）若被標品牌也會在這裡，呼叫端自行放行。"""
-    return set(_load_rows()[1])
+    return set(_load_rows(shop)[1])
 
 
-# 需要 PIF 的品類（化粧品）：標題公式要放 ✅PIF合規（v2.2）
+# 需要 PIF 的品類（化粧品）：標題公式要放 ✅PIF合規（v2.2）。Lady 沒有這件事。
 PIF_CATEGORIES = {"膠", "溶劑", "保養"}
 
 
-def needs_pif(category: str, product_name: str = "") -> bool:
-    """標題要不要放 ✅PIF合規：化粧品類（膠／溶劑／保養；卸甲只有膠液膏類，卸甲包不算）。"""
+def needs_pif(category: str, product_name: str = "", shop: str = "nail") -> bool:
+    """標題要不要放 ✅PIF合規：Nail 的化粧品類（膠／溶劑／保養；卸甲只有膠液膏類，卸甲包不算）。"""
+    conf = POOLS.get(str(shop).lower())
+    if conf is not None and not conf.pif_categories:
+        return False
     if category in PIF_CATEGORIES:
         return True
     return category == "卸甲" and any(w in (product_name or "") for w in ("膠", "液", "膏", "油"))
@@ -190,14 +252,16 @@ def first_line_candidates(p: "Pool", product_name: str, n: int = 8) -> list[str]
     return [w.詞 for w in ranked[:n]]
 
 
-def pool_for(product_name: str, category: str = "", extra: str = "") -> Pool:
-    """這支商品可用的搜尋詞庫＝該分類 ＋ 廣域（量降冪、去重）。"""
-    cat = category or category_of(product_name, extra)
+def pool_for(product_name: str, category: str = "", extra: str = "", shop: str = "nail") -> Pool:
+    """這支商品可用的搜尋詞庫＝該分類（Nail 再加「廣域」；Lady 刻意沒有廣域）。"""
+    cat = category or category_of(product_name, extra, shop=shop)
+    conf = POOLS.get(str(shop).lower())
+    broad = bool(conf and conf.has_broad)
     seen: set[str] = set()
     words: list[Word] = []
-    for w in _load():
+    for w in _load(shop):
         cats = {c.strip() for c in w.分類.split(",") if c.strip()}
-        if cat not in cats and "廣域" not in cats:
+        if cat not in cats and not (broad and "廣域" in cats):
             continue
         if w.詞 in seen:
             continue
@@ -207,15 +271,15 @@ def pool_for(product_name: str, category: str = "", extra: str = "") -> Pool:
 
 
 def prompt_block(product_name: str, category: str = "", extra: str = "",
-                 n: int = 16, budget: int = 40) -> str:
+                 n: int = 16, budget: int = 40, shop: str = "nail") -> str:
     """給文案 prompt 用的一段（標題 v2.2）：第一行大詞＋可用詞清單＋建議尾串。
 
     ⚠️ 只給「可以用的詞」，不解釋為什麼別的不能用——prompt 越短模型越照做。
     """
-    p = pool_for(product_name, category, extra)
+    p = pool_for(product_name, category, extra, shop=shop)
     if not p.words:
         return ""
-    if needs_pif(p.分類, product_name):
+    if needs_pif(p.分類, product_name, shop=shop):
         # 化粧品標題不可出現「療」（貓眼光療膠／光療指甲油都不行）→ 清單裡就不給
         p = Pool(p.分類, [w for w in p.words if "療" not in w.詞])
     # 第一行＝本類大詞（不算「美甲」這種廣域詞——那個放尾段當保險）
@@ -226,14 +290,21 @@ def prompt_block(product_name: str, category: str = "", extra: str = "",
     if cand:
         lines.append("【第一行大詞候選】" + " ".join(f"{c}（{vol[c]}）" for c in cand)
                      + "\n　→ 從這裡挑**真正描述這支商品**、量最大的 1~2 個放標題最前面（大的在前），"
-                       "接著放這支商品自己的真實形態詞（例：冰透晶石貓眼、爆裂卸甲膠、手持一字燈），每支不同")
+                       f"接著放這支商品自己的真實形態詞（例：{_FORM_EXAMPLES.get(str(shop).lower(), '')}），每支不同")
     lines.append(f"【建議尾串】{p.tail(budget)}")
-    if needs_pif(p.分類, product_name):
+    if needs_pif(p.分類, product_name, shop=shop):
         lines.append("【這支要放 ✅PIF合規】放在「大詞＋形態詞」之後、品牌之前；✅ 前面的內容要落在手機搜尋卡的第二行"
                      "（中文算 1 寬、英數與空格算 0.5 寬，✅ 前總寬 9.5~20）。膠類標題全文不可出現「療」字。")
-    lines.append("只能用上面列出的詞；沒列的詞代表沒有搜尋量或不是美甲客群，不要自己發明。")
-    lines.append("⚠️ 標題要**填到 58-60 字**——60 字是免費版位，少一個字就少一次被搜到的機會。"
-                 "數過字數若不足 58，從清單往下再補詞。")
+    lines.append(f"只能用上面列出的詞；沒列的詞代表沒有搜尋量或不是{_AUDIENCE.get(str(shop).lower(), '本賣場')}客群，"
+                 "不要自己發明。")
+    # ⚠️ 同一類的詞裡本來就混著不同款式（女裝-褲 同時有 工裝褲／吊帶褲／西裝褲／連身褲）。
+    #    湊字數把它們塞進來＝不實標示，而且引來的點擊不會轉換（2026-09-18 Lady 首跑實際發生）。
+    lines.append("⚠️ 清單裡的詞**不是每個都能用**：只放「這支商品本身就是」的品類與形態詞。"
+                 "別種款式的詞（例：闊腿褲不可寫 工裝褲／吊帶褲／西裝褲／連身褲；三角褲不可寫 丁字褲）"
+                 "即使搜尋量很大也一律不放——那是不實標示。單字詞（女、褲）也不要放。")
+    lines.append("標題**盡量填到 58-60 字**（60 字是免費版位），但**寧可短也不要放不符合的詞**："
+                 "把清單裡**所有符合這支商品**的詞都放進去（含同義詞、倒裝寫法、以及這支真的有的顏色詞），"
+                 "放完仍不足 58 字就留短，不要為了字數硬湊別種款式的詞。")
     return "\n".join(lines)
 
 

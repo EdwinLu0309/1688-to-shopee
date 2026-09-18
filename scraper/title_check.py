@@ -30,13 +30,17 @@ def display_width(text: str) -> float:
 
 def check_title(title: str, *, code: str = "", pif: bool = False,
                 banned: set[str] | None = None, spec_sources: list[str] | None = None,
-                allow: set[str] | None = None) -> tuple[str, list[str], list[str]]:
+                allow: set[str] | None = None,
+                pool: set[str] | None = None) -> tuple[str, list[str], list[str]]:
     """回 (修正後標題, 已自動修掉的, 要人看的)。"""
     fixed, warn = [], []
     t = (title or "").replace("　", " ")
 
-    # ✅ 以外的符號（先把 ✅ 保護起來）
-    t2 = _SYMBOLS.sub(" ", t.replace("✅", "\0")).replace("\0", "✅")
+    # ✅ 以外的符號與 emoji（先把 ✅ 保護起來）
+    # ⚠️ 正則清單抓不到 emoji（Lady 舊標題開頭的 🏆、🍃、❤️）→ 另外用 unicodedata 類別掃
+    t2 = _SYMBOLS.sub(" ", t.replace("✅", "\0"))
+    t2 = "".join(" " if (unicodedata.category(ch) in ("So", "Sk", "Cf") and ch != "\0") else ch for ch in t2)
+    t2 = re.sub(r"\s+", " ", t2.replace("\0", "✅")).strip()
     if t2 != t:
         fixed.append("拿掉符號")
     t = t2
@@ -85,6 +89,12 @@ def check_title(title: str, *, code: str = "", pif: bool = False,
     elif "✅" in t:
         warn.append("非化粧品標題出現 ✅（✅ 只用在 PIF合規 前面）")
 
+    # 詞庫外的詞：形態詞（這支商品自己的名字）本來就不在詞庫，所以**只提醒不刪**。
+    # 實測會抓到 AI 自己組的零量詞（「深灰長褲」詞庫只有「黑色褲子」），那是白佔版位。
+    if pool:
+        outside = [x for x in out if x not in pool and "✅" not in x]
+        if len(outside) > 1:      # 第一個通常是形態詞，正常
+            warn.append("這些詞不在搜尋詞庫（形態詞除外，其餘等於零搜尋量）：" + "、".join(outside[1:]))
     if spec_sources is not None:
         from scraper.keyword_pool import unverified_specs
         bad = unverified_specs(t, spec_sources)

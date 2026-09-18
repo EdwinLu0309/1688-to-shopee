@@ -42,7 +42,12 @@ check("第二軸列成可選規格", "可選規格：8ml／15ml" in assemble_des
 
 print("賣場設定")
 check("Nail 有詳情規則與版號", bool(get_shop("nail").detail_rule) and bool(get_shop("nail").detail_version))
-check("Lady 不受影響（沿用 8 區塊）", get_shop("lady").detail_rule == "")
+check("Lady 也走中間版（自己的規則與版號）",
+      get_shop("lady").detail_version == "lady_detail_v1" and "穿搭與洗滌" in get_shop("lady").detail_rule)
+check("Baby 仍沿用 8 區塊", get_shop("baby").detail_rule == "")
+check("Lady 服飾用服飾文案", notice_kind("", "冰絲丁字褲", shop="lady") == "服飾")
+check("Lady 襪類用襪類文案", notice_kind("", "分段壓力長筒襪", shop="lady") == "襪類"
+      and notice_kind("", "0D超薄絲襪", shop="lady") == "襪類")
 
 print()
 if FAILED:

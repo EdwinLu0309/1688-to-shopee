@@ -69,7 +69,13 @@ check("大詞候選不含廣域詞", "美甲" not in first_line_candidates(pool,
 
 print("賣場設定")
 check("Nail 走 v2.2", get_shop("nail").title_version == "nail_title_v2.2" and bool(get_shop("nail").title_rule))
-check("Lady 不受影響", get_shop("lady").title_rule == "" and get_shop("lady").title_version == "")
+check("Lady 走自己的 v1（大詞開頭、零符號、不放品牌與品號）",
+      get_shop("lady").title_version == "lady_title_v1" and "不放品牌標籤" in get_shop("lady").title_rule)
+check("Baby 仍沿用舊規則", get_shop("baby").title_rule == "")
+t4, f4, _ = check_title("🏆免運隔日到貨!【冰絲丁字褲】無痕內褲 丁字褲 H-c53", code="H-c53")
+check("emoji 與符號都拿掉、促銷詞與編號也拿掉", t4 == "冰絲丁字褲 無痕內褲 丁字褲", t4)
+_, _, w4 = check_title("闊腿褲 亞麻寬褲 深灰長褲 褲子", pool={"闊腿褲", "褲子"})
+check("詞庫外的詞會提醒（第一個形態詞除外）", any("深灰長褲" in x for x in w4), w4)
 
 print()
 if FAILED:

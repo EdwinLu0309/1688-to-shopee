@@ -37,6 +37,19 @@ NOTICE = {
         "使用後請清潔並保持乾燥",
         "尖銳或細小物品請放在孩童拿不到的地方",
     ],
+    # ── Lady（服飾／內著）──
+    "服飾": [
+        "尺寸為平量，依測量方式可能有 1~3 公分誤差，請對照尺寸說明選購",
+        "顏色因拍攝光線與螢幕顯色可能略有差異，以實物為準",
+        "初次穿著前建議先手洗；深色衣物請與淺色分開洗滌",
+        "請勿長時間泡水或曝曬，避免變形與褪色",
+    ],
+    "襪類": [
+        "尺寸為平量，具彈性，實際穿著依腳型略有差異",
+        "請避免與有勾扣、粗糙的衣物一起洗滌，以免勾紗",
+        "建議手洗或使用洗衣袋，勿使用漂白劑與烘乾",
+        "顏色因拍攝光線與螢幕顯色可能略有差異，以實物為準",
+    ],
 }
 
 _GEL_CATEGORIES = {"102178", "102029"}            # 美甲凝膠、指甲油
@@ -47,8 +60,16 @@ _ELECTRIC_WORDS = ("燈", "灯", "打磨機", "打磨机", "磨甲機", "磨甲�
 _PART_WORDS = ("濾網", "滤网", "濾紙", "过滤纸", "過濾", "过滤", "濾棉", "滤棉", "收納", "收纳")
 
 
-def notice_kind(category: str, *names: str) -> str:
+# Lady：搜尋詞庫分類 → 注意事項用哪一套（襪子／絲襪走襪類，其餘服飾）
+_LADY_SOCK_CATS = {"襪子", "絲襪"}
+
+
+def notice_kind(category: str, *names: str, shop: str = "nail") -> str:
     """品類 → 注意事項用哪一套。耗材配件（濾網/濾紙）即使名稱含「吸塵器」也歸工具耗材。"""
+    if str(shop).lower() == "lady":
+        from scraper.keyword_pool import category_of
+        cat = category_of(" ".join(n for n in names if n), shop="lady")
+        return "襪類" if cat in _LADY_SOCK_CATS else "服飾"
     if str(category) in _GEL_CATEGORIES:
         return "光療"
     # 先看我們自己的品名（最準），認不出才看 1688 標題——1688 標題描述的是整頁，
@@ -72,7 +93,7 @@ def _strip_ai_extra(ai_desc: str) -> str:
 
 
 def assemble_description(ai_desc: str, variants: dict, category: str,
-                         short_name: str = "", title_1688: str = "") -> str:
+                         short_name: str = "", title_1688: str = "", shop: str = "nail") -> str:
     """AI 三段 ＋ 程式款式說明 ＋ 固定注意事項 → 蝦皮詳情全文。"""
     parts = [_strip_ai_extra(ai_desc)]
 
@@ -84,6 +105,6 @@ def assemble_description(ai_desc: str, variants: dict, category: str,
     if lines:
         parts.append("✦ 款式說明\n" + "\n".join(lines))
 
-    kind = notice_kind(category, short_name, title_1688)
+    kind = notice_kind(category, short_name, title_1688, shop=shop)
     parts.append("✦ 注意事項\n" + "\n".join(f"・{x}" for x in NOTICE[kind]))
     return "\n\n".join(p for p in parts if p)

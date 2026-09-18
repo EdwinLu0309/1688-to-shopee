@@ -151,7 +151,7 @@ def generate_listing(product_data: dict, sheet_ctx: dict, shop: str = "lady",
     try:
         from scraper.keyword_pool import prompt_block
         kw = prompt_block(sheet_ctx.get("product_name", "") or sheet_ctx.get("code", ""),
-                          extra=product_data.get("title", ""))
+                          extra=product_data.get("title", ""), shop=shop)
         if kw:
             task += "\n\n" + kw
     except Exception as e:  # noqa: BLE001
