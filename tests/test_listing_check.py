@@ -52,6 +52,18 @@ check("同網址不重複", h[URL_COL] == ["https://detail.1688.com/offer/1.html
                                     "https://detail.1688.com/offer/2.html"], h[URL_COL])
 check("現貨/預購", h[HEADERS.index("現貨/預購")] == "現貨" and rows[1][HEADERS.index("現貨/預購")] == "預購")
 
+print("選項多就壓縮（服飾 4 色 × 6 尺碼）")
+many = [up("P14AE1", "亞麻闊腿褲", f"寬褲_{c}", "690", f"P14AE1_{c}_{z}", "http://x")
+        for c in ["黑", "白", "灰", "藍"] for z in ["S", "M", "L", "XL", "2XL", "3XL"]]
+for i, r in enumerate(many):
+    r["et_title_option_for_variation_2"] = ["S", "M", "L", "XL", "2XL", "3XL"][i % 6]
+row = build_check_rows(many, [{"code": "P14AE1", "item_id": "1", "demand": "預購"}], "2026-09-18", "文案_v1")[0]
+check("選項數仍是總數", row[HEADERS.index("選項數")] == 24)
+check("選項壓成幾色×幾尺碼", row[HEADERS.index("選項名稱")].startswith("24 個選項＝4 × 6"), row[HEADERS.index("選項名稱")][:40])
+check("尺碼列在最後一行", "尺碼／規格：S／M／L／XL／2XL／3XL" in row[HEADERS.index("選項名稱")])
+check("售價同價就寫一個", row[HEADERS.index("售價")] == "690", row[HEADERS.index("售價")])
+check("品號只列前三個並講總數", row[HEADERS.index("SKU 品號")].endswith("…共 24 個（細項看蝦皮後台）"))
+
 print("重產：照編號更新原列、新的接最後")
 upd, add = plan_rows(["HNV1", "HNV11"], rows)
 check("HNV11 更新第 2 支那一列", list(upd) == [DATA_START + 1], upd.keys())

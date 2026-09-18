@@ -29,7 +29,7 @@ from loguru import logger
 # SA 沒有 Drive 容量，不能自己建檔）。沒設的賣場跳過並 warning。
 CHECK_SHEETS = {
     "nail": os.environ.get("CHECK_SHEET_ID_NAIL", "1FnCcR7Ie0Qxm0ypwXMhDRKLWb3_dxEl0AKNSAtE-pjo"),
-    "lady": os.environ.get("CHECK_SHEET_ID_LADY", ""),
+    "lady": os.environ.get("CHECK_SHEET_ID_LADY", "1yTkrDfKsqmWvk0i-sN09lEjBJJkLccHIv6qtoQTdpHI"),
     "baby": os.environ.get("CHECK_SHEET_ID_BABY", ""),
 }
 
@@ -45,6 +45,7 @@ URL_COL = PROG_HEADERS.index("1688 網址")                   # K
 IMG_COL = PROG_HEADERS.index("規格圖")                      # J
 DONE_COL = NP + EMP_CHECKS.index("已正式上架")               # Q → 整列變綠
 DATA_START = 2                                              # 第 3 列起（0-based 2）
+MAX_LIST = 12               # 一格最多列幾個選項；超過就壓成「幾色 × 幾尺碼」（服飾動輒 72 個）
 
 _M = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
@@ -111,11 +112,25 @@ def build_check_rows(upload_rows: list[dict], prepared_meta: list[dict],
             return f"{a} / {b}" if b else a
         n_img = sum(1 for r in rs if r.get("et_title_image_per_variation"))
         s = src.get(code, {"urls": [], "demand": ""})
+        prices = [r.get("ps_price", "") for r in rs]
+        skus = [r.get("ps_sku_short", "") for r in rs]
+        if len(rs) <= MAX_LIST:
+            price_cell, opt_cell, sku_cell = "\n".join(prices), "\n".join(opt(r) for r in rs), "\n".join(skus)
+        else:
+            # ⚠️ 服飾常常 4 色 × 6 尺碼 ＝ 72 個選項（Lady P14AE1 實況）→ 一格塞 72 行沒人看得完。
+            #    壓成「兩軸各有哪些值」，員工照樣對得到，細項到蝦皮後台看。
+            a1 = list(dict.fromkeys(r.get("et_title_option_for_variation_1", "") for r in rs))
+            a2 = [x for x in dict.fromkeys(r.get("et_title_option_for_variation_2", "") for r in rs) if x]
+            uniq_p = sorted({p for p in prices if p}, key=lambda v: float(v or 0))
+            price_cell = uniq_p[0] if len(uniq_p) == 1 else f"{uniq_p[0]}~{uniq_p[-1]}" if uniq_p else ""
+            opt_cell = (f"{len(rs)} 個選項＝{len(a1)} × {len(a2) or 1}\n"
+                        + "\n".join(f"・{x}" for x in a1[:MAX_LIST])
+                        + (f"\n…共 {len(a1)} 個" if len(a1) > MAX_LIST else "")
+                        + (f"\n尺碼／規格：{'／'.join(a2)}" if a2 else ""))
+            sku_cell = "\n".join(skus[:3]) + f"\n…共 {len(skus)} 個（細項看蝦皮後台）"
         out.append([
             produced, version, code, rs[0].get("ps_product_name", ""), s["demand"], len(rs),
-            "\n".join(r.get("ps_price", "") for r in rs),
-            "\n".join(opt(r) for r in rs),
-            "\n".join(r.get("ps_sku_short", "") for r in rs),
+            price_cell, opt_cell, sku_cell,
             "✅ 全有" if n_img == len(rs) else f"缺 {len(rs) - n_img}/{len(rs)}",
             s["urls"],
         ])
