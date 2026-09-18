@@ -75,7 +75,13 @@ check("Baby 仍沿用舊規則", get_shop("baby").title_rule == "")
 t4, f4, _ = check_title("🏆免運隔日到貨!【冰絲丁字褲】無痕內褲 丁字褲 H-c53", code="H-c53")
 check("emoji 與符號都拿掉、促銷詞與編號也拿掉", t4 == "冰絲丁字褲 無痕內褲 丁字褲", t4)
 _, _, w4 = check_title("闊腿褲 亞麻寬褲 深灰長褲 褲子", pool={"闊腿褲", "褲子"})
-check("詞庫外的詞會提醒（第一個形態詞除外）", any("深灰長褲" in x for x in w4), w4)
+check("詞庫外又沒依據的詞會提醒（第一個形態詞除外）", any("深灰長褲" in x for x in w4), w4)
+_, _, w5 = check_title("闊腿褲 亞麻寬褲 高腰 垂感 薄款", pool={"闊腿褲"},
+                       product_words="高腰直筒 垂感自然 薄款無彈 亞麻混紡")
+check("商品資料裡找得到的特徵詞不提醒", not any("零搜尋量" in x for x in w5), w5)
+_, _, w6 = check_title("闊腿褲 亞麻寬褲 薄款垂感無彈", pool={"闊腿褲"},
+                       product_words="垂感自然 薄款 無彈 亞麻")
+check("串成一長串的特徵詞也認得（拆兩字比對）", not any("零搜尋量" in x for x in w6), w6)
 
 print()
 if FAILED:

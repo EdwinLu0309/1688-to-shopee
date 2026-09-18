@@ -31,7 +31,8 @@ def display_width(text: str) -> float:
 def check_title(title: str, *, code: str = "", pif: bool = False,
                 banned: set[str] | None = None, spec_sources: list[str] | None = None,
                 allow: set[str] | None = None,
-                pool: set[str] | None = None) -> tuple[str, list[str], list[str]]:
+                pool: set[str] | None = None,
+                product_words: str = "") -> tuple[str, list[str], list[str]]:
     """回 (修正後標題, 已自動修掉的, 要人看的)。"""
     fixed, warn = [], []
     t = (title or "").replace("　", " ")
@@ -75,7 +76,8 @@ def check_title(title: str, *, code: str = "", pif: bool = False,
     if n > MAX_LEN:
         warn.append(f"標題 {n} 字，超過 {MAX_LEN} 字上限（蝦皮會擋）")
     elif n < MIN_OK:
-        warn.append(f"標題只有 {n} 字（目標 {TARGET}~{MAX_LEN}），可以再補搜尋詞庫裡的詞")
+        warn.append(f"標題只有 {n} 字（目標 {TARGET}~{MAX_LEN}）：詞庫與商品特徵詞都用完了就留短，"
+                    f"不要放別種款式的詞湊字數")
 
     if pif:
         if PIF_MARK not in t:
@@ -89,12 +91,22 @@ def check_title(title: str, *, code: str = "", pif: bool = False,
     elif "✅" in t:
         warn.append("非化粧品標題出現 ✅（✅ 只用在 PIF合規 前面）")
 
-    # 詞庫外的詞：形態詞（這支商品自己的名字）本來就不在詞庫，所以**只提醒不刪**。
-    # 實測會抓到 AI 自己組的零量詞（「深灰長褲」詞庫只有「黑色褲子」），那是白佔版位。
+    # 詞庫外的詞分兩種（Edwin 2026-09-18）：
+    #   · 商品資料裡找得到的（亞麻／高腰／薄款）＝**刻意補的真實特徵詞**，詞庫湊不滿 58 字時就該用它們 → 不提醒
+    #   · 商品資料裡也找不到的（「深灰長褲」是 AI 自己組的，詞庫只有「黑色褲子」）＝零量又沒依據 → 提醒
     if pool:
-        outside = [x for x in out if x not in pool and "✅" not in x]
+        hay = re.sub(r"\s+", "", product_words or "").lower()
+        def _backed(tok: str) -> bool:
+            t_ = tok.lower()
+            if not hay or t_ in hay:
+                return True
+            # AI 偶爾把特徵串成一長串（「薄款垂感無彈力」）→ 拆成兩字一組全都找得到就算有依據
+            segs = [t_[i:i + 2] for i in range(0, len(t_) - 1, 2)]
+            return len(segs) >= 2 and all(sg in hay for sg in segs)
+        outside = [x for x in out if x not in pool and "✅" not in x and not _backed(x)]
         if len(outside) > 1:      # 第一個通常是形態詞，正常
-            warn.append("這些詞不在搜尋詞庫（形態詞除外，其餘等於零搜尋量）：" + "、".join(outside[1:]))
+            warn.append("這些詞不在搜尋詞庫、商品資料裡也找不到（零搜尋量又沒依據）："
+                        + "、".join(outside[1:]))
     if spec_sources is not None:
         from scraper.keyword_pool import unverified_specs
         bad = unverified_specs(t, spec_sources)

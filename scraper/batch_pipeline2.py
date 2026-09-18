@@ -295,8 +295,12 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
             _pool = {w.詞 for w in pool_for(name, extra=product_data.get("title", ""), shop=shop).words}
         except Exception:  # noqa: BLE001
             _pool = set()
+        _prod_words = " ".join([name, short_name, product_data.get("title", ""),
+                                json.dumps(product_data.get("attributes", {}), ensure_ascii=False),
+                                ai_content.get("description", "")]
+                               + [c.get("option_name", "") for c in variants.get("規格1_顏色", [])])
         new_title, fixed, warns = check_title(
-            ai_content.get("title", ""), code=code, pool=_pool,
+            ai_content.get("title", ""), code=code, pool=_pool, product_words=_prod_words,
             pif=needs_pif(category_of(name, product_data.get("title", ""), shop=shop), name, shop=shop),
             banned=banned, spec_sources=spec_src)
         for f_ in fixed:
