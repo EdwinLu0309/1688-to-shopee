@@ -121,13 +121,34 @@ def _num_cell(row: list[str], idx: int | None) -> int:
     return int(float(raw)) if re.fullmatch(r"\d+(\.\d+)?", raw) else 0
 
 
-def _price_from_row(row: list[str], colmap: dict[str, int]) -> int:
-    """取售價。優先用『售價』表頭欄；沒有表頭（Edwin 的表售價欄常無標題）就取
-    尺寸欄右邊「最後一個純數字」——會跳過利潤率(65.14%)那種帶 % 的欄。"""
+def _discount_from_top(rows: list[list[str]], hdr_idx: int) -> float | None:
+    """表頭上面那列的「蝦皮折扣（最後定價÷這格＝掛牌價）」右邊那格（Nail 0.7／Lady 0.5）。"""
+    for r in rows[:hdr_idx]:
+        for i, c in enumerate(r):
+            if "蝦皮折扣" in c:
+                for v in r[i + 1:]:
+                    v = v.strip()
+                    if re.fullmatch(r"0?\.\d+|1(\.0+)?", v):
+                        return float(v)
+    return None
+
+
+def _price_from_row(row: list[str], colmap: dict[str, int], discount: float | None = None) -> int:
+    """取掛牌價。優先用『蝦皮設定售價』欄；沒有那欄（舊表）才取尺寸欄右邊「最後一個純數字」。
+
+    ⚠️ 有那欄但是空的（公式被刪／沒拉下來）**不可**退回找最後一個數字：那會抓到「最後定價」
+    （折後價）當掛牌價，蝦皮再打一次折 → 賣便宜 30~50% 且不報錯（2026-09-19 Nail LTL142 讀成 69，應為 99）。
+    改用 最後定價 ÷ 表頂的折扣 自己算；折扣也讀不到就回 0 讓上游擋。
+    """
     if "price" in colmap:
         raw = _cell(row, colmap["price"]).replace(",", "")
         if re.fullmatch(r"\d+(\.\d+)?", raw):
             return int(float(raw))
+        final = _num_cell(row, colmap.get("final_price"))
+        if final and discount:
+            logger.warning(f"「蝦皮設定售價」是空的（公式沒拉到這列？）→ 用 最後定價 {final} ÷ 折扣 {discount} 自己算")
+            return int(round(final / discount))
+        return 0
     after = colmap.get("sizes", colmap.get("url", 0))
     for i in range(len(row) - 1, after, -1):
         v = row[i].strip().replace(",", "")
@@ -159,6 +180,7 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
         logger.error(f"表頭找不到「編號」或「進貨網址」欄（表頭列 {hdr_idx}）：{rows[hdr_idx]}")
         return []
     logger.info(f"表頭在第 {hdr_idx} 列，欄位對應：{colmap}")
+    discount = _discount_from_top(rows, hdr_idx)
 
     products = []
     for r in rows[hdr_idx + 1:]:
@@ -184,7 +206,9 @@ def parse_ai_list_csv(csv_path: Path, stock_default: int = 10, shop: str = "lady
             logger.warning(f"[{code}] 分類「{cat_text}」查無 ID、商品名也推不出，"
                            f"請補分類欄或 shops.py [{shop}] 的 category_map")
 
-        price = _price_from_row(r, colmap)
+        price = _price_from_row(r, colmap, discount)
+        if not price:
+            logger.warning(f"[{code}] 算不出掛牌價（蝦皮設定售價、最後定價都空？）→ 上架檔售價會是 0，請補名單")
         style = _cell(r, colmap.get("style"))
         size_text = _cell(r, colmap.get("sizes"))
         demand = _cell(r, colmap.get("demand"))
