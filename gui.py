@@ -1,17 +1,16 @@
 """
 1688 → 蝦皮 上架小幫手 — GUI 啟動器（仿 1688-order launcher）
 
-一條龍：⬇️ 更新名單 → 勾選商品 → 🚀 一鍵完成（抓取→產出）→ 📁 素材夾。
-（🔍 抓取、📦 產出 也可分步個別按；🔑 登入 1688 首次/過期時用。）
+一條龍：⬇️ 更新名單 → 勾選商品 → 🚀 開始（缺什麼補什麼）→ 📁 這批的資料夾。
 
-按鈕對應：
-  ⬇️ 更新名單  sheet_fetcher.fetch_ai_list（#S134：走 Service Account 讀私有 Sheet，不再需要 Google 登入）
-  🚀 一鍵完成  勾選商品 → scrape_many（抓）→ run_batch_two_tier（產）一次到底
-  🔑 登入 1688 subprocess 呼叫 cookie-hub refresh 1688_lady（登入碼收在警衛室）→ 標準庫
-  🔍 抓取商品  playwright_scraper.scrape_many（去 1688 下載資料/圖）→ output/{id}.json
-  📦 產出上架檔 batch_pipeline2.run_batch_two_tier（文案+挑色+影片+蝦皮 Excel）
-  📁 素材夾    output/上架素材/（影片+尺寸表，蝦皮 Excel 無影片欄，手動補）
+分步執行（Edwin 2026-09-19 定：**只換一樣、其餘沿用上一版**；前提＝那幾支按過 🚀 開始）：
+  🔄 重抓 1688   只重抓 1688 資料（不產檔）
+  ✏️ 重生文案    重寫標題＋詳情 → 新一版上架檔（圖、品號沿用；1-1／核對表不動）
+  🖼️ 重生圖片    用「圖片模板」重生 GPT 圖 → 新一版上架檔（文案、品號沿用）
+  🆕 重建 1-1    重寫 _待貼新品＋核對表，上架檔不動（品號跟上一版不同就擋，可選一起換）
+  📁 這批的資料夾
 
+1688 登入：cookie 由 cookie-hub 每小時從 Chrome「訂貨-」設定檔收進標準庫，這裡只顯示狀態。
 跨平台：GUI 邏輯 Win/Mac 皆可。「更新名單」走 inventory-sync SA 讀 AI 上架名單（該表已分享給 SA）。
 """
 import asyncio
@@ -41,6 +40,11 @@ ASSETS_DIR = Path(BATCH_DIR)     # 📁 素材夾 → 最新那批的資料夾�
 
 # 賣場下拉選單顯示名（key → 顯示）
 _SHOP_LABELS = {"lady": "Lady 女裝", "nail": "Nail 美甲", "baby": "Baby 母嬰"}
+
+# 1688 登入已不在這裡做：cookie-hub 每小時從 Chrome 收（Edwin 2026-09-19 拿掉登入鈕）
+_RELOGIN_HINT = ("1688 的登入可能過期了。\n\n"
+                 "到 Chrome 開該賣場的「訂貨-」設定檔登入 1688，"
+                 "cookie-hub 一小時內會自動收進來，之後再按一次就好。")
 
 
 def _cat_names(shop: str) -> dict[str, str]:
@@ -273,7 +277,8 @@ class App:
         self.img_menu = tk.OptionMenu(sop_frame, self.img_var, "（尚未建立）")
         self.img_menu.config(font=F_BTN_SM)
         self.img_menu.pack(side="left")
-        tk.Label(sop_frame, text="（只在勾 ✨GPT 的商品生效）",
+        self.img_hint = tk.StringVar(value="")
+        tk.Label(sop_frame, textvariable=self.img_hint,
                  font=F_HINT, fg="#888", bg=BG).pack(side="left", padx=4)
 
         tk.Checkbutton(self.root, text="🎬 合成短影片（選配：不勾就不做，也不算「缺」；蝦皮 Excel 沒有影片欄，要在後台手動補）",
@@ -296,7 +301,7 @@ class App:
                  font=F_HINT, fg="#888", bg=BG).pack(anchor="w", padx=24)
 
         # ── 分步 / 其他 ──
-        tk.Label(self.root, text="分步執行（需要時才個別按）：", font=F_HINT, fg="#666",
+        tk.Label(self.root, text="分步執行（只換一樣、其餘沿用上一版；要先按過 🚀 開始）：", font=F_HINT, fg="#666",
                  bg=BG).pack(anchor="w", padx=24, pady=(4, 0))
         steps = tk.Frame(self.root, padx=24, pady=2, bg=BG)
         steps.pack(fill="x")
@@ -309,10 +314,10 @@ class App:
 
         # 下半段＝**只重做某一項**。上半段已經「缺什麼補什麼」，所以這裡每顆都是覆寫性的例外動作，
         # 點了才會發生（Edwin 2026-09-15：兩段分開，第一段湊齊、第二段挑不滿意的重做）。
-        step_btn("🔑 登入 1688", self._on_login)
         step_btn("🔄 重抓 1688", self._on_scrape)
-        step_btn("✏️ 重生文案（產新版）", self._on_run)
-        step_btn("🧪 試跑（不寫 1-1）", self._on_dry_run)
+        step_btn("✏️ 重生文案", self._on_regen_copy)
+        step_btn("🖼️ 重生圖片", self._on_regen_images)
+        step_btn("🆕 重建 1-1", self._on_rebuild_staging)
         step_btn("📁 這批的資料夾", self._on_open_assets)
 
         # cookie 狀態
@@ -568,7 +573,7 @@ class App:
                 self.cookie_status.config(text="⚠️ cookie 檔壞了", fg="#cf222e")
         else:
             self.cookie_status.config(
-                text=f"❌ {_SHOP_LABELS[self.shop_var.get()]} 未登入（先按「🔑 登入 1688」）",
+                text=f"❌ {_SHOP_LABELS[self.shop_var.get()]} 未登入（到 Chrome「訂貨-」設定檔登入 1688，一小時內自動收）",
                 fg="#cf222e")
 
     def _refresh_sop_menu(self) -> None:
@@ -583,19 +588,35 @@ class App:
             self.sop_var.set(names[0])
 
     def _refresh_img_menu(self) -> None:
-        """依賣場重建圖片模板下拉（掃 config/design_engine/{shop}/*.md）。"""
-        from scraper.gpt_image_generator import design_templates
-        names = [p.stem for p in design_templates(self.shop_var.get())]
+        """依賣場重建圖片模板下拉（掃 config/design_engine/{shop}/*.md；丟一份 md 就多一個選項）。"""
+        from scraper.image_templates import list_templates
+        names = [p.stem for p in list_templates(self.shop_var.get())]
         menu = self.img_menu["menu"]
         menu.delete(0, "end")
         for n in (names or ["（尚未建立）"]):
-            menu.add_command(label=n, command=lambda v=n: self.img_var.set(v))
+            menu.add_command(label=n, command=lambda v=n: (self.img_var.set(v), self._refresh_img_hint()))
         if self.img_var.get() not in (names or ["（尚未建立）"]):
             self.img_var.set((names or ["（尚未建立）"])[0])
+        self._refresh_img_hint()
+
+    def _refresh_img_hint(self) -> None:
+        t = self._img_template_obj()
+        self.img_hint.set(f"（{t.label}；🚀 開始只用在勾 ✨GPT 的商品，🖼️ 重生圖片也用它）" if t
+                          else "（這個賣場還沒有圖片模板）")
 
     def _img_template(self) -> str | None:
         v = self.img_var.get()
         return None if v.startswith("（") else v
+
+    def _img_template_obj(self):
+        name = self._img_template()
+        if not name:
+            return None
+        from scraper.image_templates import load_template
+        try:
+            return load_template(self.shop_var.get(), name)
+        except Exception:  # noqa: BLE001
+            return None
 
     def _sop_override(self) -> list[str] | None:
         """下拉選的模板 → sop_texts 用的相對路徑；選預設回 None。"""
@@ -677,27 +698,33 @@ class App:
         return True
 
     def _warn_gpt(self, sel: list[dict]) -> bool:
-        gpt = [p["code"] for p in sel if p.get("route") == "gpt"]
+        """🚀 開始時勾了 ✨GPT 的商品：還沒生過的才會生（生過的沿用），先講清楚要花多少。"""
+        gpt = [p for p in sel if p.get("route") == "gpt"]
         if not gpt:
             return True
-        # ⚠️ 沒有該賣場的圖片規範就**擋下來**，不要拿別家的規範生圖：
-        #    上游 load_design_spec() 是把資料夾裡所有 md 串起來，Nail 套到女裝規範
-        #    會得到「人物比例／模特兒位置／穿搭情境」那套，生出來的集塵器會很怪。
-        if not self._img_template():
+        # ⚠️ 沒有該賣場的圖片模板就**擋下來**，不要拿別家的規範生圖（女裝的「人物比例／
+        #    模特兒位置」套在集塵器上會生出很怪的圖）
+        tpl = self._img_template_obj()
+        if tpl is None:
             messagebox.showerror(
-                "還沒有圖片規範",
-                f"{_SHOP_LABELS[self.shop_var.get()]} 還沒有圖片設計規範，"
+                "還沒有圖片模板",
+                f"{_SHOP_LABELS[self.shop_var.get()]} 還沒有圖片模板，"
                 f"這 {len(gpt)} 支不能走 GPT 生圖。\n\n"
-                f"規範要放在 config/design_engine/{self.shop_var.get()}/ 底下（.md）。\n"
-                "沒有規範就沒有風格依據——拿別家的規範生圖會歪掉，所以直接擋下。\n\n"
-                "先取消那幾支的 ✨GPT，或請 Claude 起草一份規範。")
+                f"模板要放在 config/design_engine/{self.shop_var.get()}/ 底下（.md）。\n"
+                "先取消那幾支的 ✨GPT，或請 Claude 起草一份模板。")
             return False
-        cost = len(gpt) * 0.17
+        from scraper.image_templates import PRICE_PER_IMAGE, latest_set
+        new = [p for p in gpt if not latest_set(Path(RAW_DIR) / str(p["item_id"]))]
+        if not new:
+            return True                     # 全都生過了 → 沿用，不花錢
+        n_img = len(new) * tpl.count
+        cost = n_img * PRICE_PER_IMAGE
         return messagebox.askyesno(
             "✨ GPT 生圖確認",
-            f"這 {len(gpt)} 支走 GPT 生圖：{', '.join(gpt)}\n\n"
-            f"模板：{self.img_var.get()}\n"
-            f"費用：約 US${cost:.2f}（台幣 {cost * 32:.0f} 元）＋比較慢，圖會上傳圖床\n\n"
+            f"這 {len(new)} 支要用 GPT 生圖：{', '.join(p['code'] for p in new)}\n"
+            + (f"（另 {len(gpt) - len(new)} 支之前生過，沿用不重生）\n" if len(gpt) > len(new) else "")
+            + f"\n模板：{tpl.name}（每支 {tpl.label}）\n"
+            f"費用：{n_img} 張，約 US${cost:.2f}（台幣 {cost * 32:.0f} 元）＋比較慢，圖會上傳圖床\n\n"
             "要繼續嗎？")
 
     def _staging_precheck(self) -> tuple[bool, bool] | None:
@@ -794,10 +821,13 @@ class App:
         lines.append(f"　上架檔　　{sel} 支 → 新的一版（舊版保留）")
         gpt = [p for p in plan["全部"] if p.get("route") == "gpt"]
         if gpt:
-            tpl = self.img_var.get()
-            cost = len(gpt) * 0.17            # gpt-image-1 1024x1024 high ≈ US$0.17/張
-            lines.append(f"　✨GPT 生圖　{len(gpt)} 支　模板：{tpl}"
-                         f"　約 US${cost:.2f}（台幣 {cost * 32:.0f} 元）")
+            from scraper.image_templates import PRICE_PER_IMAGE, latest_set
+            t = self._img_template_obj()
+            new = [p for p in gpt if not latest_set(Path(RAW_DIR) / str(p["item_id"]))]
+            cost = len(new) * (t.count if t else 1) * PRICE_PER_IMAGE
+            lines.append(f"　✨GPT 生圖　{len(new)} 支要生（每支 {t.label if t else '?'}）"
+                         + (f"、{len(gpt) - len(new)} 支沿用之前生的" if len(gpt) > len(new) else "")
+                         + f"　模板：{self.img_var.get()}　約 US${cost:.2f}（台幣 {cost * 32:.0f} 元）")
         if self.make_video.get():
             lines.append(f"　影片　　　{n('影片')} 支要合成" + (f"（其餘 {sel - n('影片')} 支已有）" if n('影片') < sel else ""))
         else:
@@ -816,8 +846,8 @@ class App:
         if not self._guard():
             return
         if not self._shop().cookie_path.exists():
-            messagebox.showerror("錯誤", f"{_SHOP_LABELS[self.shop_var.get()]} 還沒登入 1688，"
-                                 "請先按「🔑 登入 1688」")
+            messagebox.showerror("錯誤", f"{_SHOP_LABELS[self.shop_var.get()]} 還沒有 1688 登入。\n\n"
+                                 + _RELOGIN_HINT)
             return
         sel = self._guard_selection()
         if sel is None:
@@ -892,7 +922,7 @@ class App:
                                       img_template=self._img_template(),
                                       make_video=self.make_video.get(), products=products,
                                       shop=shop, make_staging=make_staging,
-                                      staging_force=staging_force)
+                                      staging_force=staging_force, mode="start")
             self._report_batch(res2)
         except Exception as e:  # noqa: BLE001
             import traceback
@@ -935,47 +965,19 @@ class App:
                 self._thread_log(f"⚠️ 名單快照沒存成：{e}")
             self._thread_log(f"📁 這批的資料夾：{bdir}（{res.get('version','')}）")
         excel = res.get("excel_path")
+        if res.get("mode") == "staging":
+            self._thread_log("📄 上架檔不動（這顆只重建 1-1 與核對表）")
         if excel:
             self._thread_log(f"📄 蝦皮 Excel：{excel}")
             self.root.after(0, self._prompt_open_excel, Path(excel))
-
-    # ── 🔑 登入 ──────────────────────────────
-    def _on_login(self) -> None:
-        if not self._guard():
-            return
-        if not messagebox.askyesno("登入 1688",
-                                   "即將開瀏覽器讓你登入 1688，登入後自動存 cookie。\n\n繼續嗎？"):
-            return
-        self._busy(True)
-        self._log("開瀏覽器登入 1688…（最多等 5 分鐘）")
-        threading.Thread(target=self._login_worker, daemon=True).start()
-
-    def _login_worker(self) -> None:
-        # #S134 階段4：登入改由 cookie-hub 警衛室統一處理（subprocess 呼叫 refresh 1688_{shop}，
-        # 開瀏覽器登入該賣場帳號並存進標準庫）；本 repo 不再自帶 1688 登入碼。
-        import subprocess
-        from pathlib import Path
-        cookie_hub = Path.home() / "projects" / "cookie-hub" / "cookie_hub.py"
-        try:
-            proc = subprocess.run(
-                [sys.executable, str(cookie_hub), "refresh", self._shop().cookie_hub_key],
-                capture_output=True, text=True, timeout=360,
-            )
-            out = (proc.stdout or "") + (proc.stderr or "")
-            self._thread_log("✅ 登入完成，cookie 已存標準庫" if "✅ 登入成功" in out
-                             else "登入未完成，請重試（或開 cookie-hub 警衛室）")
-        except Exception as e:  # noqa: BLE001
-            self._thread_log(f"登入錯誤：{e}")
-        finally:
-            self.root.after(0, self._on_task_done)
 
     # ── 🔍 只抓取 ──────────────────────────────
     def _on_scrape(self) -> None:
         if not self._guard():
             return
         if not self._shop().cookie_path.exists():
-            messagebox.showerror("錯誤", f"{_SHOP_LABELS[self.shop_var.get()]} 還沒登入，"
-                                 "請先按「🔑 登入 1688」")
+            messagebox.showerror("錯誤", f"{_SHOP_LABELS[self.shop_var.get()]} 還沒有 1688 登入。\n\n"
+                                 + _RELOGIN_HINT)
             return
         sel = self._guard_selection()
         if sel is None:
@@ -1006,62 +1008,134 @@ class App:
             self.root.after(0, self._on_task_done)
 
     def _prompt_relogin(self) -> None:
-        if messagebox.askyesno("可能被擋 / cookie 過期",
-                               "有商品抓到 0 主圖（cookie 可能過期）。要現在重新登入嗎？"):
-            self._on_login()
+        messagebox.showwarning("可能被擋 / cookie 過期", _RELOGIN_HINT)
 
-    # ── 📦 只產出 ──────────────────────────────
-    def _on_run(self) -> None:
+    # ── 分步重生（Edwin 2026-09-19：只換一樣、其餘沿用上一版）──────────────
+    #
+    # 三顆都只處理「有勾的商品」，而且前提是那幾支都按過 🚀 開始（整套齊全）：
+    # 沒有上一版上架檔／沒建 1-1 的商品一律擋——否則會出現「蝦皮有這一版、1-1 沒有品號」。
+    def _prereq_ok(self, sel: list[dict], mode: str) -> bool:
+        from scraper.batch_pipeline2 import missing_prereqs
+        try:
+            miss = missing_prereqs(self.shop_var.get(), sel, mode)
+        except Exception as e:  # noqa: BLE001
+            messagebox.showerror("檢查失敗", f"讀不到上一版的紀錄：{e}")
+            return False
+        if miss:
+            lines = "\n".join(f"　{c}：{'、'.join(w)}" for c, w in list(miss.items())[:15])
+            more = f"\n　…共 {len(miss)} 支" if len(miss) > 15 else ""
+            messagebox.showerror(
+                "先按「🚀 開始」",
+                f"這幾支還沒整套做過（抓取＋文案＋1-1 品號＋上架檔）：\n\n{lines}{more}\n\n"
+                "分步重生是「只換一樣、其餘沿用上一版」，沒有上一版就沒得沿用。\n"
+                "先勾這幾支按「🚀 開始」，做完再回來重生。")
+            return False
+        return True
+
+    def _on_regen_copy(self) -> None:
         if not self._guard():
             return
         sel = self._guard_selection()
-        if sel is None:
+        if sel is None or not self._prereq_ok(sel, "copy"):
             return
-        missing = [p["code"] for p in sel
-                   if not (Path(RAW_DIR) / f"{p['item_id']}.json").exists()
-                   and not (Path(RAW_DIR) / p["item_id"] / f"{p['item_id']}.json").exists()]
-        if missing:
-            if not messagebox.askyesno(
-                "缺抓取資料",
-                f"這些勾選商品還沒抓取（缺 JSON）：\n{', '.join(missing)}\n\n"
-                "缺的會被跳過。要繼續嗎？（建議先用上面的「🚀 開始」把缺的補齊）"):
-                return
-        if not self._warn_no_category(sel):
+        if not messagebox.askyesno(
+            "✏️ 重生文案",
+            f"{len(sel)} 支商品用文案模板「{self.sop_var.get()}」重寫標題＋詳情。\n\n"
+            "· 圖片、SKU 品號沿用上一版（1-1、核對表都不動）\n"
+            "· 產出新一版上架檔（只含這幾支），舊版完整保留\n"
+            "· 到蝦皮刪掉這幾支的舊版，再匯入新的\n\n開始嗎？"):
+            return
+        self._start_step(sel, "copy", f"✏️ 重生文案（{len(sel)} 支，模板 {self.sop_var.get()}）…")
+
+    def _on_regen_images(self) -> None:
+        if not self._guard():
+            return
+        sel = self._guard_selection()
+        if sel is None or not self._prereq_ok(sel, "images"):
+            return
+        tpl = self._img_template_obj()
+        if tpl is None:
+            messagebox.showerror(
+                "還沒有圖片模板",
+                f"{_SHOP_LABELS[self.shop_var.get()]} 還沒有圖片模板。\n\n"
+                f"模板放在 config/design_engine/{self.shop_var.get()}/ 底下（.md），"
+                "放一份進去下拉選單就會出現。")
+            return
+        from scraper.image_templates import PRICE_PER_IMAGE
+        n_img = len(sel) * tpl.count
+        cost = n_img * PRICE_PER_IMAGE
+        if not messagebox.askyesno(
+            "🖼️ 重生圖片（GPT）",
+            f"{len(sel)} 支商品用圖片模板「{tpl.name}」重新生圖（每支 {tpl.label}）。\n\n"
+            f"· 共 {n_img} 張，約 US${cost:.2f}（台幣 {cost * 32:.0f} 元）\n"
+            "· 文案、SKU 品號沿用上一版（1-1、核對表都不動）\n"
+            "· 某一張沒生成功 → 那一格沿用 1688 原圖\n"
+            "· 產出新一版上架檔（只含這幾支），舊版與舊圖完整保留\n\n開始嗎？"):
+            return
+        self._start_step(sel, "images", f"🖼️ 重生圖片（{len(sel)} 支 × {tpl.label}，模板 {tpl.name}）…")
+
+    def _on_rebuild_staging(self) -> None:
+        if not self._guard():
+            return
+        sel = self._guard_selection()
+        if sel is None or not self._prereq_ok(sel, "staging"):
             return
         if not self._block_missing_stock(sel):
             return
-        if not self._warn_gpt(sel):
+        staging = self._staging_precheck()
+        if staging is None:
             return
         if not messagebox.askyesno(
-            "重生文案",
-            f"{len(sel)} 支商品要用「{self.sop_var.get()}」重寫標題／詳情／選項名。\n\n"
-            "· 不會重抓 1688，也不會重配品號\n"
-            "· 產出會是新的一版（文案_vN），舊版完整保留\n"
-            "· 傳之前記得去蝦皮待上架區刪掉上一版，否則會多一筆重複的\n\n"
-            "開始嗎？"):
+            "🆕 重建 1-1",
+            f"{len(sel)} 支商品重新寫一份 1-1「_待貼新品」＋上架核對表。\n\n"
+            "· 上架檔完全不動（不產新版）\n"
+            "· 配出來的品號必須跟上一版上架檔一模一樣，不一樣就停下來告訴你\n\n開始嗎？"):
             return
-        for p in sel:
-            p["reuse_content"] = False          # 這顆的用途就是「不要沿用舊文案」
-        self._busy(True)
-        self._log(f"✏️ 重生文案（{len(sel)} 支，模板 {self.sop_var.get()}）…")
-        threading.Thread(target=self._run_worker, args=(sel, True, False), daemon=True).start()
+        self._start_step(sel, "staging", f"🆕 重建 1-1（{len(sel)} 支）…", staging_force=staging[1])
 
-    def _run_worker(self, products: list[dict], make_staging: bool = False,
-                    staging_force: bool = False) -> None:
-        from scraper.batch_pipeline2 import run_batch_two_tier
+    def _start_step(self, sel: list[dict], mode: str, msg: str, staging_force: bool = False) -> None:
+        self._busy(True)
+        self._log(msg)
+        threading.Thread(target=self._step_worker, args=(sel, mode, staging_force), daemon=True).start()
+
+    def _step_worker(self, products: list[dict], mode: str, staging_force: bool = False) -> None:
+        from scraper.batch_pipeline2 import OptionMismatch, run_batch_two_tier
+        from scraper.master_staging import SpecGapBlocked
         try:
             res = run_batch_two_tier(json_dir=Path(RAW_DIR), sop_override=self._sop_override(),
                                      img_template=self._img_template(),
                                      make_video=self.make_video.get(), products=products,
-                                     shop=self.shop_var.get(), make_staging=make_staging,
-                                     staging_force=staging_force)
+                                     shop=self.shop_var.get(), make_staging=True,
+                                     staging_force=staging_force, mode=mode)
             self._report_batch(res)
+        except OptionMismatch as e:
+            self._thread_log("⛔ 選項跟 1-1 對不上 → 停下來，什麼都沒寫")
+            if mode == "staging":
+                self.root.after(0, self._offer_staging_excel, products, str(e), staging_force)
+            else:
+                self.root.after(0, lambda m=str(e): messagebox.showerror("⛔ 上架檔跟 1-1 對不上", m))
+        except SpecGapBlocked as e:
+            self._thread_log("⛔ 配號守門員擋下：既有列的 1688 規格原文是空的（未寫入）")
+            self.root.after(0, lambda m=str(e): messagebox.showerror("⛔ 先補 1688 規格再跑", m))
         except Exception as e:  # noqa: BLE001
             import traceback
             traceback.print_exc()
             self._thread_log(f"執行錯誤：{e}")
+            self.root.after(0, lambda m=str(e): messagebox.showerror("執行錯誤", m))
         finally:
+            self.root.after(0, self._rescan_and_redraw)
             self.root.after(0, self._on_task_done)
+
+    def _offer_staging_excel(self, products: list[dict], msg: str, staging_force: bool) -> None:
+        """重建 1-1 發現選項變了 → 問要不要 1-1 與上架檔一起換（兩邊永遠一對一）。"""
+        if messagebox.askyesno(
+            "選項變了：1-1 和上架檔要一起換嗎？",
+            msg + "\n\n按「是」＝重建 1-1，同時產一版新的上架檔（文案、圖沿用），"
+                  "兩邊用同一份品號。\n按「否」＝什麼都不做。"):
+            self._busy(True)
+            self._log(f"🆕 重建 1-1＋新版上架檔（{len(products)} 支）…")
+            threading.Thread(target=self._step_worker,
+                             args=(products, "staging_excel", staging_force), daemon=True).start()
 
     def _prompt_open_excel(self, excel: Path) -> None:
         if messagebox.askyesno("完成", f"蝦皮 Excel 已產出：\n{excel}\n\n要打開它所在的資料夾嗎？"):
@@ -1073,27 +1147,6 @@ class App:
         base = Path(BATCH_DIR) / self.shop_var.get()
         dirs = sorted([d for d in base.glob("*") if d.is_dir()], reverse=True) if base.exists() else []
         return dirs[0] if dirs else None
-
-    def _on_dry_run(self) -> None:
-        """只想看文案長怎樣：不寫 1-1、不配號。產出檔名自帶「試跑」，防手滑上傳。"""
-        if not self._guard():
-            return
-        sel = self._guard_selection()
-        if sel is None:
-            return
-        if not messagebox.askyesno(
-            "試跑",
-            f"{len(sel)} 支商品產一份**不能上架**的預覽檔：\n\n"
-            "· 不寫 1-1、不配 SKU 品號\n"
-            "· 商品選項貨號只會是「HNV7_美規」這種字串\n"
-            "· 檔名會是「上架檔_試跑.xlsx」\n\n"
-            "只是要看文案品質的話按確定。"):
-            return
-        for p in sel:
-            p["reuse_content"] = False
-        self._busy(True)
-        self._log(f"🧪 試跑（{len(sel)} 支，不寫 1-1）…")
-        threading.Thread(target=self._run_worker, args=(sel, False, False), daemon=True).start()
 
     def _on_open_assets(self) -> None:
         """開最新那批的資料夾（上架檔／素材／manifest 都在裡面）；還沒跑過就開 batch 根目錄。"""

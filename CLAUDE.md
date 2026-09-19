@@ -152,7 +152,8 @@ A   A     006     0003    01     0000
 │   ├── downloader.py          # 圖片下載（主圖/細節/SKU）
 │   ├── ai_generator.py        # Claude API 生成蝦皮標題/描述（保留備用）
 │   ├── gemini_generator.py    # Gemini API 多模態生成文案+電商圖片（舊，備用）
-│   ├── gpt_image_generator.py # ★GPT 生圖（gpt-image-1，讀 config/design_engine/*.md 規範 + 組圖）
+│   ├── gpt_image_generator.py # GPT 生圖 shim（真碼在 ecommerce-media）
+│   ├── image_templates.py   # ★圖片模板：一份 md＝一個下拉選項，檔頭宣告張數／輸入／板娘（2026-09-19）
 │   ├── image_host.py          # ★Supabase Storage 圖床：本機 PNG → 公開 https URL（GPT 路線用）
 │   ├── sheet_reader.py        # Google Sheet 採購表讀取（hyperlink 提取）
 │   ├── shopee_excel.py        # 蝦皮 Excel 模板填入（zip 直改保留隱藏 sheet）
@@ -402,8 +403,33 @@ Lady/Baby 還沒建 → `.env` 設 `CHECK_SHEET_ID_{SHOP}`，沒設就在 log �
 **第一段＝把一支完整商品湊齊**（🚀 開始）：抓 1688 → 文案 → 配 SKU 品號＋寫 1-1 → 上架檔 → 影片。
 語意是**「缺什麼補什麼」不是「全部重做」**，每一步先看做過沒，做過就跳過。
 
-**第二段＝只重做不滿意的那一項**（分步按鈕）：`🔄 重抓 1688`／`✏️ 重生文案（產新版）`／
-`🧪 試跑（不寫 1-1）`。產出都是新版本號，舊版留著，最後挑一版上傳。
+**第二段＝只換一樣、其餘沿用上一版**（分步按鈕，Edwin 2026-09-19 重定）：
+
+| 按鈕 | 只做這件事 | 沿用上一版 | 產出 |
+|---|---|---|---|
+| 🔄 重抓 1688 | 重抓 1688 資料 | — | 不產檔 |
+| ✏️ 重生文案 | 重寫標題＋詳情（照目前選的文案模板） | 圖、品號 | 新一版上架檔（只含勾的幾支）；1-1／核對表不動 |
+| 🖼️ 重生圖片 | 用「圖片模板」重生 GPT 圖（不看 ✨ 有沒有勾） | 文案、品號 | 新一版上架檔；1-1／核對表不動 |
+| 🆕 重建 1-1 | 重寫 `_待貼新品`＋核對表 | 文案、圖 | **上架檔不動** |
+| 📁 這批的資料夾 | 開資料夾 | — | — |
+
+- 🔑 登入 1688、🧪 試跑 **已拿掉**：cookie 由 cookie-hub 每小時從 Chrome「訂貨-」設定檔收；
+  重生文案不碰 1-1 後本身就安全，試跑沒有存在必要（`🚀 開始` 沒建檔時檔名仍標「試跑」）。
+- ⚠️⚠️ **前提＝勾的每一支都按過 🚀 開始（整套齊全）**：抓過 1688＋有上一版上架檔＋那版有建 1-1（有品號）
+  （＋重生圖片／重建 1-1 要求上一版的文案快取還在）。缺就擋、列出缺什麼、叫人先按 🚀
+  （`batch_pipeline2.missing_prereqs`，GUI 與 `run_batch_two_tier` 各擋一次）。
+  防的是「沒 1-1 的情況下先上架一版、再重生圖片又上一版」→ 蝦皮有、1-1 沒有品號。
+- ⚠️⚠️ **上架檔與 1-1 的選項品號必須一對一**（`compare_option_maps`：多了／少了／改號）：
+  - 重生文案／圖片：這版的選項 key 必須等於上一版的品號對照（重抓 1688 後廠商增減規格就會不等）→ 擋，叫先按重建 1-1。
+  - 重建 1-1：重配出來的品號必須等於上一版上架檔的 → 不等就擋，並**問要不要一起換**
+    （`staging_excel`＝重建 1-1 同時產新版上架檔，文案與圖沿用，兩邊同一份品號）。
+- **「上一版用了什麼」的唯一來源＝該版 `manifest.json`**：每支記 `option_sku_map`（選項↔品號）、
+  `gpt_set`（用的那組 GPT 圖）、`sop`（文案模板）、`staged`。`latest_records()` 依日期＋版號取最新。
+  ⚠️ 2026-09-19 以前的 manifest 只記品號清單 → `legacy`：用到時從 1-1 **唯讀**重配一次，
+  品號清單一模一樣才採信（`_legacy_maps`；Nail LTL142 實測對得上）。
+- **核對表＝核對名單，只在建 1-1 時寫**（🚀 開始、🆕 重建 1-1）。重建 1-1 不產上架檔時，
+  照各支「上一版上架檔」寫（員工要對的是真正傳上去那份）。
+- 回歸測試 `tests/test_stepwise.py`（41 項：模板檔頭／圖片合併／品號比對／防呆／圖從哪來／舊版紀錄）。
 
 - ⚠️⚠️ **「做過沒」一律從真實產物讀，不另存狀態檔**（Edwin 問過「是不是要有內部表格記」）：
   狀態檔會跟現實脫節——檔案刪了它還說做過，而那種 bug 最難查。
@@ -418,18 +444,39 @@ Lady/Baby 還沒建 → `.env` 設 `CHECK_SHEET_ID_{SHOP}`，沒設就在 log �
   Edwin 2026-09-15：「我連溝通了幾回都還是不確定現在會出現什麼」→ 不要讓人從勾選去推。
 - 因此**拿掉了兩個 checkbox**：「建檔」（正式與預購都要，不是選項 → 一律做，試跑改成獨立按鈕）、
   「抓過不重抓」（那是唯一合理行為 → 一律如此，強制重抓改成獨立按鈕）。
-- 真正的選項只剩：**🎬 影片**、**✨GPT 逐支生圖**、**文案模板**、（待做）**圖片模板**。
-- **圖片模板＝一份設計規範 md**：`config/design_engine/{shop}/*.md`，加一份就多一個下拉選項。
-  ⚠️⚠️ 上游 `load_design_spec()` 是「**讀 DESIGN_DIR 底下所有 md 串起來**」，沒有賣場概念 →
-  規範全平放在 `config/design_engine/` 時，Nail/Baby 勾 ✨GPT 會拿到**女裝**那套
-  （人物比例／模特兒位置／穿搭情境），套在集塵器上會生出很怪的圖，而且**看起來像功能有在跑**。
-  現行＝`gpt_image_generator.use_template(shop, template)` 在呼叫前把 `DESIGN_DIR` 指到
-  `{shop}/`（改 env 沒用——那在 import 當下就定案），用完還原；該賣場沒有規範就**擋下不生**
-  （GUI 直接錯誤訊息、pipeline 退回 1688 原圖），絕不拿別家的規範硬生。
-- **生圖要先講錢**：`gpt-image-1` 1024×1024 high ≈ **US$0.17/張**，26 支就 US$4.4。
-  文案一支幾分錢、圖不是同一個量級 → 確認視窗會列張數與估價。
-- **圖片先走 1688 原圖**（Edwin 2026-09-15 選 A）：第一段用免費原圖把商品湊完整能上架，
-  GPT 生圖留在第二段試，試出好模板再拉進第一段當選項。Nail 還沒有圖片設計規範。
+- 真正的選項只剩：**🎬 影片**、**✨GPT 逐支生圖**、**文案模板**、**圖片模板**。
+- **生圖要先講錢**：`gpt-image-1` 1024×1024 high ≈ **US$0.17/張**（`image_templates.PRICE_PER_IMAGE`），
+  九宮格一支就 US$1.5。確認視窗列「幾支 × 幾張」與估價；🚀 開始只算還沒生過的。
+- **✨GPT 勾選與 🖼️ 重生圖片兩個入口都要**（Edwin 2026-09-19）：Nail 有美編自己做圖＝一律不勾，
+  🚀 跑完就結束；Lady 遇到廠商圖好、模板也調好的，第一版就勾、一次到位；不滿意或換模板再按 🖼️ 重生。
+
+## 圖片模板（`scraper/image_templates.py`，2026-09-19 建）
+
+**一份 md＝下拉選單一個選項，丟進 `config/design_engine/{賣場}/` 就出現，程式不用改。**
+檔頭宣告怎麼生（沒寫就是預設值）：
+
+```
+---
+張數: 9            # 預設 1＝只生封面，第 2~9 張沿用 1688 原圖；上限 9
+輸入: 全部參考圖     # 或「對應原圖」＝第 N 張拿 1688 第 N 張主圖去轉
+板娘: 不用          # 用／不用（design_engine/persona/）
+對手參考: 不用       # 用／不用（design_engine/reference/）
+---
+（整份規範）
+### 第 1 張｜封面        ← 有寫「第 N 張」「第 2～5 張」段落就附在那幾張的指令後面
+```
+
+- 每一張的指令＝整份規範＋「請產生第 N 張（共 M 張）」＋那一張的段落。生圖本身呼叫
+  `ecommerce_media.image_gen.generate_image`（工具箱只管「給圖＋給指令→生一張」，張數與規範是本 repo 的政策）。
+- ⚠️ **舊版 GPT 路線只剩 1 張商品圖**：`image_urls` 會整組蓋掉 1688 主圖，只生封面時第 2~9 張全丟。
+  現行 `merge_images`：第 N 格有 GPT 就用、沒有（沒生／失敗）就用 1688 同位置那張。
+- ⚠️ **板娘／對手參考改成模板自己宣告、預設不用**：以前三家共用、一律餵 → Nail 的集塵器也會拿到
+  女裝模特兒的臉。Lady V2 模板也設「不用」（V2 規定不可重畫模特兒）。
+- ⚠️ 舊的「偷換 `DESIGN_DIR` 讓上游只讀一份 md」（`use_template`）已拿掉，改成本模組自己讀模板組指令。
+- 生好的一組存 `output/raw/{item_id}/images/generated/gpt/{模板}_{時間}/`（`set.json` 記每格檔案＋圖床網址），
+  上一版上架檔用哪組記在 manifest → 重生文案照用、不重生也不再付錢。圖床路徑只放英數（模板名可能是中文）。
+- 現況：Lady `JOYSLU_LADY_DESIGN_ENGINE`＝封面 1 張；Nail `草案v0`＝九宮格 9 張（**提示詞尚未校準**，
+  機制先完成、模板內容之後再測）；Baby 還沒有模板。
 
 ## 桌面 GUI（gui.py，一條龍、免打指令）
 給非工程使用者的「按幾顆按鈕就上架」全包 App（tkinter，Win/Mac 雙平台）。
@@ -456,8 +503,8 @@ CLI 同步：`batch2 --staging` 預設 True，要試跑得明寫 `--no-staging`�
    → 解析成**逐商品勾選清單**（顯示
    編號/推斷分類/名稱）。Windows 首次先「🔑 Google 登入」；macOS 免登入自動收割。
 1. **（勾選）** → 先勾 1-2 筆試跑，確認再「全選」整批（`_selected()`；抓取/產出都只做勾選的）。
-2. **🔑 登入 1688** → `playwright_scraper.save_cookies` 開瀏覽器手動登入 → 存 `config/cookies.json`
-   （抄 1688-order launcher 的 `_save_cookies`；偵測跳離 login 頁視為成功，最多等 5 分）。
+2. **1688 登入**：GUI 不再有登入鈕（2026-09-19 拿掉）。cookie-hub 每小時從 Chrome「訂貨-」設定檔
+   收進標準庫，GUI 只顯示狀態；過期就到 Chrome 該設定檔登入 1688。
 3. **🔍 抓取商品** → 勾選商品的 item_id → `playwright_scraper.scrape_many`
    （Playwright+cookie+stealth，共用一個瀏覽器逐頁抓）→ 存 `output/{item_id}.json`。
    抓到 0 主圖 = cookie 過期/被擋 → 彈窗提示重登。
@@ -505,11 +552,8 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
 
 ## 圖片兩條路線（GUI 每支勾選 ✨GPT / 不勾＝1688）
 - **1688 直用（預設）**：Excel 圖片欄直接填 1688 原圖 URL（免圖床）。
-- **✨GPT 生圖**：設計規範全在 `config/design_engine/*.md`（Edwin 維護，現為單一
-  `JOYSLU_LADY_DESIGN_ENGINE.md` V1.0 宣告式規則），Claude 只「讀 md → 收圖 → 呼叫 API」不加工。
-  `gpt_image_generator.generate_cover`：讀 md + 商品圖(main) + 1688 參考(detail) + 板娘(`persona/`)
-  + 對手場景(`reference/`) → gpt-image-1 生圖 → `image_host.upload_images` 上 Supabase 圖床 → URL 塞 Excel。
-  `_normalize` 先把圖轉 RGB PNG（避免舊照片 CMYK 被 API 擋）。GPT 路線在 `batch_pipeline2._gpt_images_for`。
+- **✨GPT 生圖**：見上方「圖片模板」一節（`scraper/image_templates.py`；2026-09-19 取代
+  `batch_pipeline2._gpt_images_for` 與 `generate_cover` 單張封面）。`_normalize` 仍在工具箱裡把參考圖轉 RGB PNG。
 - **⚠️ #S069 待接：正式引擎改 Responses API（gpt-5.5 導演 + image_generation 工具）+ 對話串接**
   （`previous_response_id`）——實測完勝 images.edit（文字全繁體、GPT 自主規劃整套）。原型在
   `scratch_listing.py`（+ `scratch_pure9/responses9.py`），尚未接進 `gpt_image_generator`。詳見全域踩坑筆記。
@@ -521,14 +565,14 @@ Blob 下載是唯一穩定把 JSON 落地的方式。
 - **定案配置**：畫圖模型 `gpt-image-1.5`、品質 `low`、設計規範 `JOYSLU_LADY_DESIGN_ENGINE.md`＝「轉蝦皮版 V2」（保留原圖、smart-crop 裁背景+outpaint 延伸讓人物填滿 82-88%、禁止整張縮小加白邊、簡轉繁、刪英文）。
 - **只轉「全身乾淨模特圖」**（人工看 contact sheet 分類 detail 檔挑全身★★★★+）；純文字/尺碼/面料面板**別餵 AI**（會爛字）→ 尺碼表用 `size_chart_maker.make_size_chart` 程式做繁體版（數據從該商品尺碼細節圖人工讀）。
 - **成本**：gpt-image-1.5 low 每張 ~$0.009、每商品 ~$0.10（含 gpt-5.5 導演）。**費率校正**：每張 = 固定 token(1024²：low272/med1056/high4160) × 模型 output 費率（img-1 $40 / img-1.5 $32 / mini $8 每 1M）。mini-low 便宜但保真差（灰變藍、改姿勢）→ 不用。詳見全域踩坑 #S070。
-- **✅ Supabase URL 塞蝦皮已實測可行**（HTTP 200 公開可讀，蝦皮抓得到）。轉換圖上圖床 → URL 覆蓋進 Excel 商品圖片欄（S 封面 + T~AA）：把 `batch_pipeline2._gpt_images_for` monkeypatch 成「上傳既有轉換圖」+ 各商品 `route='gpt'`、`reuse_content=True` 即可重建 Excel。
+- **✅ Supabase URL 塞蝦皮已實測可行**（HTTP 200 公開可讀，蝦皮抓得到）。轉換圖上圖床 → URL 覆蓋進 Excel 商品圖片欄（S 封面 + T~AA）（當時做法是 monkeypatch `_gpt_images_for`；該函式 2026-09-19 已拿掉，現在要做這件事＝寫一份 `輸入: 對應原圖` 的圖片模板，由 🖼️ 重生圖片產）。
 - **影片**：`video_maker.make_product_video` 合成轉換圖幻燈片；**1688 原始影片**＝抓 `<video>` 元素 src（`playwright_scraper`/`extract_1688.js` 已補 `video_url` 抽取）→ 下載 `cloud.video.taobao.com` mp4 ⚠️**不能帶 `Referer:1688` header**（CDN 回 0 byte），只帶 User-Agent。
 
 ## ★走 A：全自動圖片 pipeline（視覺分類，2026-07-09 #S070，43+13 支實跑）
 取代「人工看 contact sheet 挑圖 + 人工讀尺碼表」。兩支：
 - **`scraper/auto_classify.py`**：`classify_details(item, subdir='detail')` 把細節圖做成 contact sheet → 一次 gpt-5.5 vision 呼叫 → `{fullbody:[stem], sizechart:stem}`（挑全身乾淨模特圖 + 找尺碼表）；`read_size_chart(item,stem)` 讀尺碼表 → `{headers,rows,weight_jin}`。分類器偏保守（寧缺）；體重(斤)常讀不到→尺碼表體重註記可選。
 - **`scratch_auto_pipeline.py`**（`AILIST`/`IDSFILE` 環境變數指定名單）：分類→轉換(3緒+429退避)→尺碼表(斤÷2→kg)。**轉換務必 ≤3 併發+退避**（OpenAI 圖生 6 併發會 429）。存 `output/_auto_classify.json`。
-- **全批流程**：抓取 → 下載圖(`download_product_images_from_json` dest_dir=`output/{item}/images` 要含 /images！) → auto_pipeline → batch2(monkeypatch `_gpt_images_for` 上傳轉換圖) → 影片+打包。
+- **全批流程**：抓取 → 下載圖(`download_product_images_from_json` dest_dir=`output/{item}/images` 要含 /images！) → auto_pipeline → batch2（當年 monkeypatch `_gpt_images_for`，已拿掉，見「圖片模板」） → 影片+打包。
 - **踩坑**：① 分頁 gid 要用 `/export?format=csv&gid=` 端點（gviz 不吃 gid、回預設頁）；② 少數商品 1688 無細節圖(detail=0)→退用 main 圖(帶簡體側欄，AI 常沒翻繁)；③ 安全裤/鲨鱼裤類全身模特圖少、分類器挑得少；④ Anthropic 額度用完 batch2 會「文案失敗」靜默跳過→ console.anthropic.com 儲值(API≠claude.ai 訂閱)。
 
 ## ★尺碼「公斤 vs 斤」三軌分離（2026-07-09 #S070，血淚，務必分清）

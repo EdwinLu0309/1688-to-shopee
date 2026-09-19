@@ -77,50 +77,6 @@ def _axis1_name_for(product_data: dict, sp) -> str:
             break
     return sp.axis1_name
 
-def _gpt_images_for(product_data: dict, code: str, category: str,
-                    item_dir: Path, product_name: str,
-                    shop: str = "lady", img_template: str | None = None) -> list[str]:
-    """✨ GPT 路線：下載 1688 圖當參考 → 生品牌電商圖 → 上傳圖床 → 回公開 URL 清單。
-
-    圖床未設定 / 無參考圖 / 生圖失敗 → 回 []（呼叫端會退回 1688 原圖）。
-    """
-    from scraper.gpt_image_generator import generate_cover
-    from scraper.image_host import is_configured, upload_images
-
-    if not is_configured():
-        logger.warning(f"[{code}] 圖床未設定（SUPABASE_*），GPT 路線退回 1688 圖")
-        return []
-    main_dir = item_dir / "images" / "main"
-    detail_dir = item_dir / "images" / "detail"
-    if not (main_dir.exists() and any(main_dir.glob("*.*"))):
-        logger.info(f"[{code}] 下載 1688 圖當 GPT 參考…")
-        asyncio.run(download_product_images_from_json(product_data, item_dir / "images"))
-    # 依 JoysLu AI Design Engine：主圖＝商品圖（以此為準）、細節圖＝1688 參考（不照抄）
-    main_imgs = sorted(main_dir.glob("*.*"))[:8] if main_dir.exists() else []
-    detail_imgs = sorted(detail_dir.glob("*.*"))[:6] if detail_dir.exists() else []
-    if not (main_imgs or detail_imgs):
-        logger.warning(f"[{code}] 無圖可當參考，GPT 路線退回 1688 圖")
-        return []
-    from scraper.gpt_image_generator import use_template
-    logger.info(f"[{code}] ✨ GPT 生封面（規範：{shop}/{img_template or '全部'}）…")
-    try:
-        with use_template(shop, img_template):
-            cover = generate_cover(main_imgs, detail_imgs,
-                                   item_dir / "images" / "generated" / "cover.png")
-    except FileNotFoundError as e:
-        # 該賣場沒有圖片規範 → 退回 1688 原圖。**不要拿別家的規範硬生**（那會生出風格完全
-        # 不對的圖，而且看起來像「功能有在跑」，比直接不生更難發現。）
-        logger.warning(f"[{code}] {e} → 退回 1688 原圖")
-        return []
-    gen = [cover] if cover else []
-    if not gen:
-        logger.warning(f"[{code}] GPT 沒生出圖，退回 1688 圖")
-        return []
-    urls = upload_images(gen, code, subdir="gpt")
-    logger.info(f"[{code}] ✨ GPT 完成：{len(gen)} 張生圖 → {len(urls)} 張上圖床")
-    return urls
-
-
 def _parse_colors(colors_spec: str | None, color_map: dict) -> tuple[list[str], dict]:
     """解析 colors 設定 → (selected_colors 的 src key 清單, 更新後的 color_map)。
 
@@ -337,13 +293,25 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
                 f"（{'✓' if sku_count <= 100 else '⚠ 超過 100！'}）"
                 f" 底色：{sorted({base_color_of(color_map, k) for k in selected_colors})}")
 
-    # 路線：gpt = 生品牌電商圖上圖床當商品圖；1688（預設）= 直接用 1688 原圖
+    # 商品圖：預設 1688 原圖；有 GPT 那組就逐格蓋上（沒生出來的格子沿用 1688）。
+    # 要不要生、沿用哪一組，由 run_batch_two_tier 依按鈕決定後放進 entry（見 _image_plan）。
+    from scraper.image_templates import generate_set, load_set, merge_images
+    gpt_set = None
+    if entry.get("_gen_template"):
+        gpt_set = generate_set(product_data, item_dir, code, shop, entry["_gen_template"])
+        if gpt_set.get("failed"):
+            logger.warning(f"[{code}] ⚠️ GPT 第 {gpt_set['failed']} 張沒生成功，那幾格沿用 1688 原圖")
+    elif entry.get("_gpt_set_dir"):
+        gpt_set = load_set(Path(entry["_gpt_set_dir"]))
+        if gpt_set is None:
+            logger.warning(f"[{code}] ⚠️ 上一版用的 GPT 圖找不到了（{entry['_gpt_set_dir']}），這版改用 1688 原圖")
     image_urls = []
-    if str(entry.get("route", "1688")).lower() == "gpt":
-        image_urls = _gpt_images_for(
-            product_data, code, str(entry.get("category", "")), item_dir,
-            ai_content.get("product_short_name") or product_data.get("title", ""),
-            shop=shop, img_template=img_template)
+    if gpt_set:
+        from scraper.shopee_excel import _to_jpg_url
+        skip = set(entry.get("image_skip") or [])
+        base = [_to_jpg_url(u) for i, u in enumerate(product_data.get("main_images", []))
+                if i not in skip]
+        image_urls = merge_images(gpt_set, base)
 
     return {
         "product_data": product_data,
@@ -385,7 +353,10 @@ def _prepare_product(entry: dict, json_dir: Path, shop: str = "lady",
                   "sku_count": sku_count,
                   "n_base_colors": n_base, "n_options": len(selected_colors),
                   "n_sizes": n_sizes, "color_flag": color_flag,
-                  "route": entry.get("route", "1688"), "gpt_images": len(image_urls),
+                  "route": entry.get("route", "1688"),
+                  "gpt_images": len([s for s in (gpt_set or {}).get("slots", []) if s.get("url")]),
+                  "gpt_set": (gpt_set or {}).get("dir"),
+                  "gpt_template": (gpt_set or {}).get("template"),
                   "title": ai_content.get("title", "")},
     }
 
@@ -403,11 +374,11 @@ def _make_video_for(product: dict, video_n: int = 9) -> str | None:
         if not collect_images(item_dir):
             logger.info(f"[{code}] 本機無圖，下載 1688 圖片供影片使用…")
             asyncio.run(download_product_images_from_json(product["product_data"], item_dir / "images"))
-        # ✨ GPT 路線：影片用生的品牌電商圖（generated/gpt_*.png）
-        gen_dir = item_dir / "images" / "generated"
-        gpt_imgs = sorted(gen_dir.glob("gpt_*.png")) if gen_dir.exists() else []
+        # ✨ GPT 路線：影片用這版上架檔用的那組 GPT 圖
+        from scraper.image_templates import load_set, set_files
+        gpt_imgs = set_files(load_set(Path(meta["gpt_set"]))) if meta.get("gpt_set") else []
         curated = None
-        if product.get("config", {}).get("image_urls") and gpt_imgs:
+        if gpt_imgs:
             curated = gpt_imgs[:video_n]
         # 1688 路線：排除有簡體字的主圖（config image_skip）：挑乾淨主圖(+SKU)前 n 張
         skip = set(product.get("config", {}).get("image_skip", []))
@@ -432,7 +403,8 @@ def _make_video_for(product: dict, video_n: int = 9) -> str | None:
         return None
 
 
-def assemble_upload_assets(code: str, item_id: str, batch_dir: Path | None = None) -> Path | None:
+def assemble_upload_assets(code: str, item_id: str, batch_dir: Path | None = None,
+                           gpt_set: str | None = None) -> Path | None:
     """把「要手動補到蝦皮」的素材（影片 + 尺寸表）按編號歸到一個好找的資料夾。
 
     產出 {這批的資料夾}/素材/{編號}/：
@@ -458,6 +430,13 @@ def assemble_upload_assets(code: str, item_id: str, batch_dir: Path | None = Non
     if size_chart.exists():
         shutil.copy2(size_chart, dest / f"{code}_尺寸表.png")
         copied.append("尺寸表")
+    if gpt_set:
+        from scraper.image_templates import load_set, set_files
+        files = set_files(load_set(Path(gpt_set)))
+        for f in files:
+            shutil.copy2(f, dest / f"{code}_GPT_{f.name}")
+        if files:
+            copied.append(f"GPT 圖 {len(files)} 張")
 
     if copied:
         logger.info(f"[{code}] 上架素材已歸位 {dest}（{'/'.join(copied)}）")
@@ -515,28 +494,100 @@ def _append_batch_note(batch_dir: Path, *, 版本: str, 模板: str, 範疇: str
         fh.write("".join(lines))
 
 
+
+
+# ── 每一版上架檔「用了什麼」：manifest 記錄 → 分步重生照著沿用 ─────────────────
+#
+# Edwin 2026-09-19 定的分步執行：重生文案／重生圖片／重建 1-1 **只換一樣、其餘沿用上一版**。
+# 「上一版用了什麼」唯一的來源是那版的 manifest.json（品號對照、GPT 圖那組、文案模板），
+# 所以每產一版就把這三樣完整記下來；不另開狀態檔（會跟現實脫節）。
+
+MODES = {
+    "start": "🚀 開始（缺什麼補什麼）",
+    "copy": "✏️ 重生文案（標題＋詳情）",
+    "images": "🖼️ 重生圖片（GPT）",
+    "staging": "🆕 重建 1-1",
+    "staging_excel": "🆕 重建 1-1＋新版上架檔",
+}
+
+
+class OptionMismatch(Exception):
+    """上架檔的選項與 1-1 的品號對不上 → 擋下（蝦皮有、1-1 沒有的選項＝獲利表整片黑）。"""
+
+    def __init__(self, diffs: dict[str, dict[str, list[str]]], hint: str):
+        self.diffs, self.hint = diffs, hint
+        super().__init__(option_mismatch_message(diffs, hint))
+
+
+def option_mismatch_message(diffs: dict[str, dict[str, list[str]]], hint: str) -> str:
+    lines = ["這幾支的選項跟 1-1 的品號對不上：", ""]
+    for code, d in diffs.items():
+        lines.append(f"■ {code}")
+        for k in ("多了", "少了", "改號"):
+            if d.get(k):
+                shown = d[k][:6] + ([f"…共 {len(d[k])} 個"] if len(d[k]) > 6 else [])
+                lines.append(f"　{k}：{'、'.join(shown)}")
+    lines += ["", hint]
+    return "\n".join(lines)
+
+
+def variant_keys(variants: dict) -> set[tuple[str, str]]:
+    """上架檔每個選項的 key（＝option_sku_map 的 key）：(1688 第一軸原文, 尺碼)。"""
+    sizes = [s.get("size", "") for s in variants.get("規格2_尺碼") or []] or [""]
+    return {(c.get("src_1688", ""), sz) for c in variants.get("規格1_顏色") or [] for sz in sizes}
+
+
+def _label(k: tuple[str, str]) -> str:
+    return f"{k[0]}／{k[1]}" if k[1] else k[0]
+
+
+def compare_option_maps(want: dict, have: dict) -> dict[str, list[str]]:
+    """want＝這次的 {key: 品號}、have＝上一版的。回 {"多了","少了","改號"}（都空＝一致）。"""
+    extra = [_label(k) for k in want if k not in have]
+    lost = [_label(k) for k in have if k not in want]
+    moved = [f"{_label(k)} {have[k]}→{want[k]}" for k in want
+             if k in have and want[k] and have[k] and want[k] != have[k]]
+    return {"多了": extra, "少了": lost, "改號": moved}
+
+
+def _map_to_list(m: dict) -> list[list[str]]:
+    return [[k[0], k[1], v] for k, v in sorted((m or {}).items())]
+
+
+def _list_to_map(rows) -> dict[tuple[str, str], str]:
+    return {(r[0], r[1]): r[2] for r in rows or [] if len(r) >= 3}
+
+
 def _write_manifest(batch_dir: Path, shop: str, prepared: list[dict], failures: list[dict],
                     excel_path: Path, staging_result: dict | None,
-                    version: str = "", template: str = "") -> Path:
-    """這一批做了什麼，寫成一份 manifest.json 留在批次夾裡。
+                    version: str = "", template: str = "", mode: str = "start",
+                    staged: bool = False) -> Path:
+    """這一版做了什麼，寫成一份 manifest.json 留在版本夾裡。
 
-    為什麼要：事後問「HNV7 哪天上的、對應哪個 1688 連結、配到哪些品號」，翻這份就有答案，
-    不必從 1-1 反推或憑記憶。**編號 ↔ item_id ↔ 品號** 三者的對照只有這裡完整記著。
+    為什麼要：事後問「HNV7 哪天上的、對應哪個 1688 連結、配到哪些品號」，翻這份就有答案。
+    **編號 ↔ item_id ↔ 品號** 三者的對照只有這裡完整記著；分步重生也靠它沿用上一版。
     """
     items = []
     for p in prepared:
         m = p.get("_meta", {})
+        osm = (p.get("config") or {}).get("option_sku_map", {})
         items.append({
             "code": m.get("code"),
             "item_id": m.get("item_id"),
             "title": m.get("title"),
             "sku_count": m.get("sku_count"),
-            "skus": sorted((p.get("config") or {}).get("option_sku_map", {}).values()),
+            "skus": sorted(osm.values()),
+            "option_sku_map": _map_to_list(osm),
+            "staged": bool(staged and osm),
+            "gpt_set": m.get("gpt_set"),
+            "gpt_template": m.get("gpt_template"),
+            "sop": m.get("sop"),
             "video": str(m.get("video")) if m.get("video") else None,
         })
     doc = {
         "shop": shop,
         "版本": version,
+        "動作": MODES.get(mode, mode),
         "文案模板": template,
         "產出時間": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "上架檔": Path(excel_path).name,
@@ -553,6 +604,121 @@ def _write_manifest(batch_dir: Path, shop: str, prepared: list[dict], failures: 
     return out
 
 
+def latest_records(shop: str, batch_root: Path | None = None) -> dict[tuple[str, str], dict]:
+    """(編號, item_id) → 這支商品**最近一版上架檔**的紀錄（掃 batch/{shop}/*/文案_v*/manifest.json）。"""
+    base = Path(batch_root or BATCH_DIR) / shop
+    found = []
+    for mf in base.glob("*/文案_v*/manifest.json") if base.exists() else []:
+        try:
+            n = int(mf.parent.name.rsplit("_v", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        found.append((mf.parent.parent.name, n, mf))
+    out: dict[tuple[str, str], dict] = {}
+    for day, n, mf in sorted(found):
+        try:
+            doc = json.loads(mf.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        excel = mf.parent / str(doc.get("上架檔") or "上架檔.xlsx")
+        for it in doc.get("商品", []):
+            key = (str(it.get("code")), str(it.get("item_id")))
+            osm = _list_to_map(it.get("option_sku_map"))
+            skus = [c for c in it.get("skus") or [] if c]
+            out[key] = {
+                "day": day, "version": mf.parent.name, "version_dir": str(mf.parent),
+                "excel": str(excel), "option_map": osm, "skus": skus,
+                # 2026-09-19 以前的 manifest 只記品號清單、沒記「哪個選項配哪個號」→ legacy，
+                # 用到時從 1-1 唯讀重配一次、再核對品號清單一致（_legacy_maps）
+                "legacy": not osm and bool(skus),
+                # 舊 manifest 沒有 staged 欄：有品號又不是試跑檔，就當作有建檔
+                "staged": bool(it.get("staged", bool(osm or skus) and "試跑" not in excel.name)),
+                "gpt_set": it.get("gpt_set"), "sop": it.get("sop"),
+            }
+    return out
+
+
+def missing_prereqs(shop: str, products: list[dict], mode: str,
+                    records: dict | None = None) -> dict[str, list[str]]:
+    """分步重生的防呆：勾選的每一支是不是「整套齊全」（Edwin 2026-09-19）。
+
+    齊全＝抓過 1688 ＋ 有上一版上架檔 ＋ 那一版有建 1-1（有品號）（＋要沿用文案的動作：文案還在）。
+    沒按過 🚀 開始的商品一律擋——否則會出現「蝦皮有這一版、1-1 沒有品號」的對不上。
+    回 {編號: [缺什麼…]}；空＝可以跑。
+    """
+    recs = latest_records(shop) if records is None else records
+    out: dict[str, list[str]] = {}
+    for p in products:
+        code, item = str(p.get("code")), str(p.get("item_id"))
+        why = []
+        if not (Path(RAW_DIR) / f"{item}.json").exists():
+            why.append("沒抓過 1688")
+        rec = recs.get((code, item))
+        if not rec:
+            why.append("還沒產過上架檔")
+        else:
+            if not rec["staged"] or not (rec["option_map"] or rec.get("skus")):
+                why.append("上一版沒建 1-1（沒有品號）")
+            if not Path(rec["excel"]).exists():
+                why.append(f"上一版上架檔不見了（{rec['version']}）")
+            if mode in ("images", "staging", "staging_excel"):
+                if not ai_cache_path(p, _template_tag(rec.get("sop"))).exists():
+                    why.append("找不到上一版的文案（名單的品名／款式改過？先按重生文案）")
+        if why:
+            out[code] = why
+    return out
+
+
+def _legacy_maps(shop: str, prepared: list[dict], recs: list[dict | None]) -> dict[str, dict]:
+    """舊版 manifest（只有品號清單）→ 從 1-1 唯讀重配選項↔品號，並核對跟那版的品號清單一模一樣。
+
+    回 {編號: 差異}（空＝都對得上，且已把對照補進各支的 rec["option_map"]）。
+    """
+    idx = [i for i, r in enumerate(recs) if r and r.get("legacy")]
+    if not idx:
+        return {}
+    from scraper.master_staging import option_sku_maps, plan_blocks
+    logger.info(f"{len(idx)} 支是舊版紀錄（沒記選項↔品號對照）→ 從 1-1 唯讀重配一次核對")
+    _, _, skus = plan_blocks(shop, [prepared[i] for i in idx])
+    maps = option_sku_maps(skus)
+    diffs = {}
+    for j, i in enumerate(idx):
+        m = maps.get(j, {})
+        want, have = set(m.values()), set(recs[i]["skus"])
+        if want != have:
+            diffs[prepared[i]["_meta"]["code"]] = {
+                "多了": sorted(want - have), "少了": sorted(have - want), "改號": []}
+        else:
+            recs[i]["option_map"] = m
+    return diffs
+
+
+def _image_plan(entry: dict, mode: str, rec: dict | None, img_template: str | None) -> dict:
+    """這支這一版的圖從哪來 → 放進 entry 給 _prepare_product 用。"""
+    from scraper.image_templates import latest_set
+    e = dict(entry)
+    prior = (rec or {}).get("gpt_set")
+    if mode == "images":
+        if not img_template:
+            raise ValueError("重生圖片要先在「圖片模板」選一份")
+        e["_gen_template"] = img_template
+    elif mode == "start":
+        if prior:
+            e["_gpt_set_dir"] = prior                      # 上一版用 GPT 圖 → 沿用
+        elif str(e.get("route", "1688")).lower() == "gpt":
+            have = latest_set(Path(RAW_DIR) / str(e["item_id"]))
+            if have:
+                e["_gpt_set_dir"] = have["dir"]            # 生過就不重生（缺什麼補什麼）
+            elif img_template:
+                e["_gen_template"] = img_template
+            else:
+                raise ValueError(f"{e.get('code')} 勾了 ✨GPT，但「圖片模板」沒有可選的")
+    else:                                                  # copy / staging*：圖沿用上一版
+        if prior:
+            e["_gpt_set_dir"] = prior
+    return e
+
+
 def run_batch_two_tier(
     manifest_path: Path | None = None,
     json_dir: Path = RAW_DIR,
@@ -566,17 +732,22 @@ def run_batch_two_tier(
     staging_force: bool = False,
     sop_override: list[str] | None = None,
     img_template: str | None = None,
+    mode: str = "start",
 ) -> dict:
     """逐商品處理（文案+變體，選配影片）→ 合併蝦皮二階 Excel。
 
-    輸入二擇一：manifest_path（JSON 檔）或 products（清單，如 ai_list_reader 的輸出）。
-    shop 決定：模板檔（各賣場自己下載的那份，hash 不同不可混用）、文案 SOP、
-    選項政策、物流頻道、輸出檔名（scraper/shops.py）。
-    make_staging=True（正式新品）：Excel 之外，另把商品寫進該賣場 1-1 的
-    「_待貼新品」暫存分頁（master_staging），供人補編號後貼進商品表/SKU表。
+    mode（Edwin 2026-09-19 分步執行，**只換一樣、其餘沿用上一版**）：
+      start          🚀 開始：缺什麼補什麼；make_staging=True 時配品號、寫 1-1、寫核對表
+      copy           ✏️ 重生文案：只重寫標題＋詳情；圖、品號沿用上一版 → 新一版上架檔
+      images         🖼️ 重生圖片：用 img_template 重生 GPT 圖；文案、品號沿用 → 新一版上架檔
+      staging        🆕 重建 1-1：重寫 _待貼新品＋核對表，**不產上架檔**；品號跟上一版不同就擋
+      staging_excel  🆕 重建 1-1＋新版上架檔（選項變了、兩邊要一起換時）
+    copy／images／staging* 的前提＝勾選的商品都按過 🚀 開始（missing_prereqs）。
     """
     from scraper.shops import get_shop
 
+    if mode not in MODES:
+        raise ValueError(f"不認得的動作：{mode}")
     sp = get_shop(shop)
     if products is not None:
         entries = products
@@ -590,150 +761,219 @@ def run_batch_two_tier(
     if not entries:
         logger.warning("沒有商品可處理")
         return {"total": 0, "success": 0, "failed": 0, "excel_path": None, "failures": []}
-    logger.info(f"賣場：{shop}（模板 {tpl.name}）")
+    logger.info(f"賣場：{shop}（模板 {tpl.name}）｜動作：{MODES[mode]}")
+
+    stepwise = mode != "start"
+    records = latest_records(shop)
+    if stepwise:
+        miss = missing_prereqs(shop, entries, mode, records)
+        if miss:
+            raise ValueError("這幾支還沒整套做過，先按「🚀 開始」：\n"
+                             + "\n".join(f"　{c}：{'、'.join(w)}" for c, w in miss.items()))
+    builds_staging = (mode == "start" and make_staging) or mode in ("staging", "staging_excel")
+    makes_excel = mode != "staging"
 
     # 現貨沒填安全存量 → 整批不做（試跑不擋：那份檔本來就不能上架）
-    if make_staging:
+    if builds_staging:
         from scraper.ai_list_reader import missing_safety_stock, missing_stock_message
         miss = missing_safety_stock(entries)
         if miss:
             raise ValueError(missing_stock_message(miss))
 
-    # 這一批的資料夾：batch/{shop}/{YYYYMMDD}/，底下每跑一次開一個 文案_vN（舊版永不覆蓋）
+    # 這一批的資料夾：batch/{shop}/{YYYYMMDD}/，底下每產一版上架檔開一個 文案_vN（舊版永不覆蓋）
     batch_dir = Path(BATCH_DIR) / shop / datetime.now().strftime("%Y%m%d")
     batch_dir.mkdir(parents=True, exist_ok=True)
-    ver_dir, ver_no = _next_version_dir(batch_dir, "文案")
-    tpl_name = _template_tag(sop_override) or "預設"
-    logger.info(f"這批：{batch_dir.name} / 文案_v{ver_no}（模板 {tpl_name}）")
-    if ver_no > 1:
-        logger.warning(f"⚠️ 這是第 {ver_no} 版。傳之前先去蝦皮「待上架區」把上一版那批刪掉，"
-                       f"否則會多一筆重複的（蝦皮不會依商品貨號覆蓋）")
 
     # 同一個 1688 網址被名單多列共用（會被拆成多個蝦皮商品）→ 影響重量的可信度
     _offer_uses = Counter(str(e.get("item_id")) for e in entries)
 
-    prepared, failures, with_assets = [], [], []
+    prepared, failures, recs_used = [], [], []
     for entry in entries:
         code = entry.get("code", entry.get("item_id"))
+        rec = records.get((str(code), str(entry.get("item_id"))))
         logger.info(f"{'='*50}\n處理 {code} (item_id: {entry.get('item_id')})")
+        e = _image_plan(entry, mode, rec, img_template)     # 設定錯誤（沒選模板）整批擋，不算單支失敗
         try:
-            p = _prepare_product(entry, json_dir, shop=shop,
+            if mode == "copy":
+                e["reuse_content"] = False
+                sop = sop_override
+            elif mode in ("images", "staging", "staging_excel"):
+                e["reuse_content"] = True                  # 文案用上一版那份（同一個文案模板）
+                sop = rec.get("sop")
+            else:
+                sop = sop_override
+            p = _prepare_product(e, json_dir, shop=shop,
                                  shared_offer=_offer_uses[str(entry.get("item_id"))] > 1,
-                                 sop_override=sop_override, img_template=img_template)
+                                 sop_override=sop)
             if p is None:
                 failures.append({"code": code, "error": "缺 JSON 或文案失敗"})
-            else:
-                if make_video:
-                    p["_meta"]["video"] = _make_video_for(p, video_n)
-                with_assets.append((p["_meta"]["code"], p["_meta"]["item_id"]))
-                prepared.append(p)
-        except Exception as e:
-            logger.error(f"[{code}] 例外：{e}")
-            failures.append({"code": code, "error": str(e)})
-
-    # 素材（影片／尺寸表／GPT 生圖）走**自己的版本線**：圖不滿意重生時，文案可能是好的，
-    # 不該被迫跟著重跑；所以 文案_vN 與 素材_vN 各自編號。
-    # ⚠️ 先探有沒有東西可搬再開資料夾——上一版每支都先 mkdir，結果留下 28 個空夾。
-    asset_ver, asset_no = None, 0
-    used_gpt = False
-    for code, item_id in with_assets:
-        src = Path(RAW_DIR) / item_id
-        gen = src / "images" / "generated"
-        gpt = list(gen.glob("gpt_*.png")) if gen.exists() else []
-        used_gpt = used_gpt or bool(gpt)
-        has = ((src / "video" / f"{code}.mp4").exists()
-               or (gen / f"size_chart_{code}.png").exists()
-               or bool(gpt))
-        if not has:
-            continue
-        if asset_ver is None:
-            asset_ver, asset_no = _next_version_dir(batch_dir, "素材")
-        assemble_upload_assets(code, item_id, asset_ver)
-    if asset_ver is not None:
-        _append_batch_note(
-            batch_dir,
-            版本=f"素材_v{asset_no}",
-            模板=("GPT 生圖" if used_gpt else "1688 原圖合成"),
-            範疇=f"{len(list(asset_ver.glob('*')))} 支商品的影片／尺寸表",
-            產出=[f"素材_v{asset_no}/{{編號}}/"],
-            說明="蝦皮大量上架 Excel 沒有影片欄，影片要在後台手動補")
+                continue
+            p["_meta"]["sop"] = sop
+            if make_video and mode in ("start", "images"):
+                p["_meta"]["video"] = _make_video_for(p, video_n)
+            prepared.append(p)
+            recs_used.append(rec)
+        except Exception as ex:  # noqa: BLE001
+            logger.error(f"[{code}] 例外：{ex}")
+            failures.append({"code": code, "error": str(ex)})
 
     if not prepared:
         logger.warning("沒有成功處理的商品，不產生 Excel")
         return {"total": len(entries), "success": 0, "failed": len(failures),
                 "excel_path": None, "failures": failures}
 
-    if output_path is None:
-        # 每批一夾 → 舊批次的上架檔不會被蓋掉。沒建檔＝沒配品號，檔名直接標「試跑」——
-        # 這種檔上架後獲利表會對不到成本與銷量，而且不會有任何錯誤訊息，只能靠檔名擋住人手。
-        output_path = ver_dir / ("上架檔.xlsx" if make_staging else "上架檔_試跑.xlsx")
-    # ⚠️ 順序：**先配號再產 Excel**。Excel 的 O 商品選項貨號要填 SKU 品號，
-    #    而品號是建檔那一步配的（讀 1-1、append-only）。舊版是 Excel 先產、建檔後跑
-    #    → O 欄只能填 `HNV7_美規`，而獲利表是拿「蝦皮選項貨號 ＝ SKU 品號」去 join
-    #    進貨成本與銷量的 → 這批商品的生意在獲利表裡會是黑的。
+    # ── 品號：Excel 的 O 商品選項貨號與 1-1 必須是同一份號碼 ──
     staging_plan = None
-    if make_staging:
+    if builds_staging:
         from scraper.master_staging import option_sku_maps, plan_blocks
         logger.info("先讀 1-1 配 SKU 品號（不寫入），讓 Excel 與待貼分頁用同一份號碼")
         staging_plan = plan_blocks(shop, prepared)
         maps = option_sku_maps(staging_plan[2])
+        diffs = {}
         for i, p_ in enumerate(prepared):
             p_.setdefault("config", {})["option_sku_map"] = maps.get(i, {})
-        n = sum(len(v) for v in maps.values())
-        logger.info(f"配到 {n} 個 SKU 品號")
+            rec = recs_used[i]
+            if mode == "staging" and rec and rec.get("option_map"):
+                d = compare_option_maps(maps.get(i, {}), rec["option_map"])
+                if any(d.values()):
+                    diffs[p_["_meta"]["code"]] = d
+            elif mode == "staging" and rec and rec.get("legacy"):
+                want, have = set(maps.get(i, {}).values()), set(rec["skus"])
+                if want != have:
+                    diffs[p_["_meta"]["code"]] = {"多了": sorted(want - have),
+                                                  "少了": sorted(have - want), "改號": []}
+        if diffs:
+            raise OptionMismatch(diffs, "上架檔不動的話，1-1 就要跟它一模一樣。"
+                                        "選項確實變了（例如重抓 1688 後廠商增減顏色）→ "
+                                        "改用「重建 1-1＋新版上架檔」讓兩邊一起換。")
+        logger.info(f"配到 {sum(len(v) for v in maps.values())} 個 SKU 品號")
+    elif stepwise:
+        diffs = _legacy_maps(shop, prepared, recs_used)
+        for p_, rec in zip(prepared, recs_used):
+            if p_["_meta"]["code"] in diffs:
+                continue
+            have = rec["option_map"]
+            want = {k: have.get(k, "") for k in variant_keys(p_["variants"])}
+            d = compare_option_maps(want, have)
+            d["改號"] = []
+            if d["多了"] or d["少了"]:
+                diffs[p_["_meta"]["code"]] = d
+            p_.setdefault("config", {})["option_sku_map"] = have
+        if diffs:
+            raise OptionMismatch(diffs, "這版上架檔的選項跟 1-1 不一樣（多半是重抓 1688 後廠商增減了規格）。"
+                                        "先按「🆕 重建 1-1」讓 1-1 跟著換，再產上架檔。")
 
-    generate_batch_two_tier_excel(prepared, Path(output_path), tpl)
+    # ── 上架檔（重建 1-1 那一顆不產）──
+    output_path_used, ver_label = None, ""
+    if makes_excel:
+        ver_dir, ver_no = _next_version_dir(batch_dir, "文案")
+        ver_label = f"文案_v{ver_no}"
+        if ver_no > 1:
+            logger.warning(f"⚠️ 這是第 {ver_no} 版。傳之前先去蝦皮「待上架區」把上一版那批刪掉，"
+                           f"否則會多一筆重複的（蝦皮不會依商品貨號覆蓋）")
+        staged_ok = builds_staging or stepwise            # 分步重生沿用上一版已建好的品號
+        output_path_used = Path(output_path) if output_path else (
+            ver_dir / ("上架檔.xlsx" if staged_ok else "上架檔_試跑.xlsx"))
+        generate_batch_two_tier_excel(prepared, output_path_used, tpl)
+    else:
+        ver_dir = None
 
     staging_result = None
-    if make_staging:
+    if builds_staging:
         from scraper.master_staging import write_staging
         # 失敗不吞：Excel 已產好，但正式新品少了待貼分頁＝訂貨鏈路斷頭，要大聲讓人知道
         staging_result = write_staging(shop, prepared, force=staging_force)
         logger.info(f"待貼分頁：{staging_result['written']} 商品 / "
                     f"{staging_result['sku_rows']} SKU 列 → 1-1「{staging_result['tab']}」")
 
-    _write_manifest(ver_dir, shop, prepared, failures, output_path, staging_result,
-                    version=f"文案_v{ver_no}", template=tpl_name)
-    _append_batch_note(
-        batch_dir,
-        版本=f"文案_v{ver_no}",
-        模板=(f"文案模板「{tpl_name}」" if tpl_name != "預設" else "該賣場預設的文案規範"),
-        範疇=f"{len(prepared)} 支商品"
-             + (f"（失敗 {len(failures)} 支）" if failures else "")
-             + "｜" + ("有建檔：配了 SKU 品號、寫了 1-1 待貼新品" if make_staging
-                       else "⚠️ 沒建檔＝試跑，這版的上架檔不可上傳"),
-        產出=[Path(output_path).name, "manifest.json"],
-        說明=("上架前先去蝦皮待上架區刪掉上一版，否則會多一筆重複的" if ver_no > 1 else ""))
+    # 素材（影片／尺寸表／GPT 圖）走自己的版本線：素材_vN
+    asset_ver, asset_no = None, 0
+    for p_ in prepared:
+        m = p_["_meta"]
+        src = Path(RAW_DIR) / m["item_id"]
+        has = ((src / "video" / f"{m['code']}.mp4").exists()
+               or (src / "images" / "generated" / f"size_chart_{m['code']}.png").exists()
+               or bool(m.get("gpt_set")))
+        if not has or not makes_excel:
+            continue
+        if asset_ver is None:
+            asset_ver, asset_no = _next_version_dir(batch_dir, "素材")
+        assemble_upload_assets(m["code"], m["item_id"], asset_ver, gpt_set=m.get("gpt_set"))
+    if asset_ver is not None:
+        used = sorted({p_["_meta"].get("gpt_template") for p_ in prepared if p_["_meta"].get("gpt_template")})
+        _append_batch_note(
+            batch_dir, 版本=f"素材_v{asset_no}",
+            模板=(f"GPT 圖（模板 {'、'.join(used)}）" if used else "1688 原圖合成"),
+            範疇=f"{len(prepared)} 支商品的影片／尺寸表／GPT 圖",
+            產出=[f"素材_v{asset_no}/"],
+            說明="蝦皮大量上架 Excel 沒有影片欄，影片要在後台手動補")
 
-    # 上架核對表（Edwin 2026-09-17 定版）：試跑不寫；失敗不擋（上架檔已產好），但要喊出來
+    tpl_name = _template_tag(sop_override) or "預設"
+    if makes_excel:
+        _write_manifest(ver_dir, shop, prepared, failures, output_path_used, staging_result,
+                        version=ver_label, template=tpl_name, mode=mode,
+                        staged=builds_staging or stepwise)
+        _append_batch_note(
+            batch_dir,
+            版本=ver_label,
+            模板=f"{MODES[mode]}｜文案模板「{tpl_name}」" + (
+                f"｜圖片模板「{img_template}」" if mode == "images" else ""),
+            範疇=f"{len(prepared)} 支商品"
+                 + (f"（失敗 {len(failures)} 支）" if failures else "")
+                 + "｜" + ("配了 SKU 品號、寫了 1-1 待貼新品" if builds_staging
+                           else "品號沿用上一版（1-1 不動）" if stepwise
+                           else "⚠️ 沒建檔＝試跑，這版的上架檔不可上傳"),
+            產出=[output_path_used.name, "manifest.json"],
+            說明="上架前先去蝦皮待上架區刪掉上一版，否則會多一筆重複的")
+    else:
+        _append_batch_note(
+            batch_dir, 版本="重建 1-1", 模板=MODES[mode],
+            範疇=f"{len(prepared)} 支商品：重寫 1-1 待貼新品＋核對表，上架檔不動",
+            產出=[f"1-1「{(staging_result or {}).get('tab', '_待貼新品')}」"])
+
+    # 上架核對表＝核對名單，只在建 1-1 時寫（Edwin 2026-09-19）；失敗不擋但要喊出來
     check_result = None
-    if make_staging:
+    if builds_staging:
         try:
             from scraper.listing_check import sync_check_sheet
-            check_result = sync_check_sheet(shop, Path(output_path), prepared, f"文案_v{ver_no}")
+            if makes_excel:
+                check_result = sync_check_sheet(shop, output_path_used, prepared, ver_label)
+            else:
+                # 上架檔沒動 → 各支照「上一版上架檔」寫（員工要對的是真正傳上去那份）
+                groups: dict[str, list[int]] = {}
+                for i, rec in enumerate(recs_used):
+                    groups.setdefault(rec["excel"], []).append(i)
+                added = updated = 0
+                for xlsx, idx in groups.items():
+                    r = sync_check_sheet(shop, Path(xlsx), [prepared[i] for i in idx],
+                                         recs_used[idx[0]]["version"])
+                    added += r.get("added", 0)
+                    updated += r.get("updated", 0)
+                    check_result = {**r, "added": added, "updated": updated}
         except Exception as e:  # noqa: BLE001
-            logger.error(f"⚠️ 上架核對表沒寫進去（{e}）——上架檔已產好，員工核對表要手動補或重跑")
+            logger.error(f"⚠️ 上架核對表沒寫進去（{e}）——員工核對表要手動補或重跑")
             check_result = {"error": str(e)}
 
     summary = {
+        "mode": mode,
         "check_sheet": check_result,
         "total": len(entries),
         "success": len(prepared),
         "failed": len(failures),
-        "excel_path": Path(output_path),
+        "excel_path": output_path_used,
         "failures": failures,
         "products": [p["_meta"] for p in prepared],
         "staging": staging_result,
         "batch_dir": batch_dir,
         "version_dir": ver_dir,
-        "version": f"文案_v{ver_no}",
+        "version": ver_label,
     }
-    logger.info(f"{'='*50}\n批次完成：{summary['success']}/{summary['total']} 成功"
-                f"，Excel：{output_path}")
+    logger.info(f"{'='*50}\n完成（{MODES[mode]}）：{summary['success']}/{summary['total']} 成功"
+                + (f"，Excel：{output_path_used}" if output_path_used else "，上架檔不動"))
     for m in summary["products"]:
         vtag = " | 🎬" if m.get("video") else ""
-        logger.info(f"  ✓ {m['code']}: {m['sku_count']} SKU{vtag} | {m['title'][:40]}")
-    if failures:
-        for f in failures:
-            logger.warning(f"  ✗ {f['code']}: {f['error']}")
+        gtag = f" | ✨GPT {m.get('gpt_images')} 張" if m.get("gpt_set") else ""
+        logger.info(f"  ✓ {m['code']}: {m['sku_count']} SKU{vtag}{gtag} | {m['title'][:40]}")
+    for f in failures:
+        logger.warning(f"  ✗ {f['code']}: {f['error']}")
     return summary
