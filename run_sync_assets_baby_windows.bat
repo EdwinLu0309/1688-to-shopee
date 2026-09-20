@@ -1,5 +1,6 @@
 @echo off
 chcp 65001 >nul
+set PYTHONUTF8=1
 rem 【Baby】一鍵同步商品資產包（Windows 雙擊）
 rem 先在 Baby 主表「蝦皮處理狀態」勾好「要產」欄，再雙擊我。跑完會標✓、資產包寫進雲端。
 rem ★ 首次使用：把下面 set 那行的路徑改成你 Google Drive 掛的 Baby 商品資產夾（仿 Nail 的

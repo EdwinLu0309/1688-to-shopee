@@ -1,5 +1,6 @@
 @echo off
 chcp 65001 >nul
+set PYTHONUTF8=1
 rem 一鍵同步商品資產包（Windows 雙擊）
 rem 先在主表「商品表」勾好「要產」欄，再雙擊我。跑完主表會標✓、資產包寫進雲端。
 cd /d "%~dp0"

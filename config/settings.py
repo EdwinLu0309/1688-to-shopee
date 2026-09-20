@@ -85,9 +85,16 @@ ORDER_MASTER_TAB = "1_訂貨主檔"
 ORDER_SUMMARY_TAB = "2_每日訂購彙總"
 ORDER_DETAIL_TAB = "3_訂單明細"
 # 借 inventory-sync 的 SA（需被分享為此表編輯者；SA 無 Drive 容量不能自建檔）
-ORDER_SHEET_SA_JSON = os.environ.get(
-    "ORDER_SHEET_SA_JSON",
-    str(Path.home() / ".config" / "gcloud" / "inventory-sync-493112-6047c28ad2b1.json"),
+# 金鑰位置因機器而異：Mac 放 ~/.config/gcloud、公司 Windows 機放 OneDrive\文件。
+# 兩處都掃（env > Mac 標準位 > Windows 位），找不到才退回 Mac 標準位讓呼叫端報路徑。
+# ⚠️ 以前只有 master_reader 自己有 OneDrive fallback，sheet_fetcher／listing_check 沒有
+#    → 同一台機器「資產包跑得動、更新名單卻讀不到」，且錯誤訊息指向不存在的 Mac 路徑。
+_SA_CANDIDATES = [
+    Path.home() / ".config" / "gcloud" / "inventory-sync-493112-6047c28ad2b1.json",
+    Path.home() / "OneDrive" / "文件" / "inventory-sync-493112-6047c28ad2b1.json",
+]
+ORDER_SHEET_SA_JSON = os.environ.get("ORDER_SHEET_SA_JSON") or str(
+    next((p for p in _SA_CANDIDATES if p.exists()), _SA_CANDIDATES[0])
 )
 
 # 【Nail】進貨金額核對表（金流核對）。分頁 1688_DB 存 1688 訂單報表原始資料，

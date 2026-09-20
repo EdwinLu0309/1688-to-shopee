@@ -491,6 +491,8 @@ Lady/Baby 還沒建 → `.env` 設 `CHECK_SHEET_ID_{SHOP}`，沒設就在 log �
 ## 桌面 GUI（gui.py，一條龍、免打指令）
 給非工程使用者的「按幾顆按鈕就上架」全包 App（tkinter，Win/Mac 雙平台）。
 啟動：Mac 雙擊 `run_mac.command`、Windows 雙擊 `run_windows.bat`（皆優先用 `.venv`）。
+📄 **要在公司 Windows 機上跑 → 先讀 `docs/公司Windows執行環境.md`**（SA 金鑰位置、1688 cookie
+在那台要手動登、Smart App Control 擋 Playwright、cp950 的雷、驗收三檢查點）。
 流程：⬇️ 更新名單 → 勾選商品 → 🚀 一鍵完成（抓取→產出）→ 📁 素材。字體整體放大（可讀性）。
 ⚠️ **「⬇️ 更新名單」是必要動作，沒按就按不動「🚀 一鍵完成」**（Edwin 2026-09-14 要求做成硬性擋住）：
 程式跑的是 `input/{shop}_ai_list.csv`——線上名單的**本機抄本**，不更新就是拿舊抄本去跑，
@@ -499,28 +501,32 @@ Lady/Baby 還沒建 → `.env` 設 `CHECK_SHEET_ID_{SHOP}`，沒設就在 log �
 「🔒 請先按『⬇️ 更新名單』」並轉灰，點下去跳說明。**切賣場、手動「選檔…」都會重新上鎖**
 （換一家＝換一份名單；手挑的 CSV 可能是很舊的抄本）。
 ⚠️ 刻意**不用「超過 N 小時才提醒」**：那會留下「剛好沒過期但線上剛改過」的縫，而這個縫
-正是這條規則要防的情境。分步執行的「🔍 只抓取／📦 只產出」不上鎖——那是壞掉時的補救路徑。
+正是這條規則要防的情境。分步執行那排（🔄／✏️／🖼️／🆕）不上鎖——那是壞掉／不滿意時的補救路徑。
 ⚠️⚠️ **「🆕 建檔」預設開，取消勾＝試跑**（2026-09-14 Edwin 改；原本預設不勾是錯的設計）：
 正式與預購都住 1-1、都要有 SKU 品號，所以「不建檔的產出」不是正常路徑。不建檔時 Excel 的
 `O 商品選項貨號` 只能退回「HNV7_美規」這種字串，而獲利表是拿「蝦皮選項貨號＝SKU 品號」
 去 join 成本與銷量 → **這批商品上架後在獲利表裡整片是黑的，且沒有任何錯誤訊息**。
 現行兩道防線：取消勾選會跳確認框講清楚後果；產出的檔名改成 `上架檔_試跑.xlsx`。
 CLI 同步：`batch2 --staging` 預設 True，要試跑得明寫 `--no-staging`。
-主按鈕是 **🚀 一鍵完成**（`_run_all_worker`：scrape_many 抓 → run_batch_two_tier 產，一次到底）；
-下面「分步執行」保留 🔍 只抓取 / 📦 只產出 給需要重跑單一步驟時用。各步驟：
-0. **⬇️ 更新名單** → `sheet_fetcher.fetch_ai_list`（帶登入 cookie 抓私有 Sheet；Windows 首次
-   先按「🔑 Google 登入」，之後免再登；macOS 免登入自動收割）→ 覆蓋 `input/lady_ai_list.csv`
-   → 解析成**逐商品勾選清單**（顯示
-   編號/推斷分類/名稱）。Windows 首次先「🔑 Google 登入」；macOS 免登入自動收割。
+主按鈕是 **🚀 開始（缺什麼補什麼）**（`_run_all_worker`：scrape_many 抓 → run_batch_two_tier 產，一次到底）；
+下面「分步執行」＝ 🔄 重抓 1688 / ✏️ 重生文案 / 🖼️ 重生圖片 / 🆕 重建 1-1 / 📁 這批的資料夾
+（2026-09-19 改版，**只換一樣、其餘沿用上一版**；舊的 🔍 只抓取 / 📦 只產出 已不存在）。各步驟：
+0. **⬇️ 更新名單** → `sheet_fetcher.fetch_ai_list`（走 **Service Account**（`inventory-sync`）讀私有
+   Sheet，Win/Mac 都不必登入；原「🔑 Google 登入」鈕與 Chrome cookie 收割已於 #S134 退休）
+   → 覆蓋 `input/{shop}_ai_list.csv` → 解析成**逐商品勾選清單**（顯示編號/推斷分類/名稱）。
+   ⚠️ 讀不到＝SA 金鑰不在（見「公司 Windows 執行環境」）或該表沒分享給 SA，不是登入問題。
 1. **（勾選）** → 先勾 1-2 筆試跑，確認再「全選」整批（`_selected()`；抓取/產出都只做勾選的）。
-2. **1688 登入**：GUI 不再有登入鈕（2026-09-19 拿掉）。cookie-hub 每小時從 Chrome「訂貨-」設定檔
-   收進標準庫，GUI 只顯示狀態；過期就到 Chrome 該設定檔登入 1688。
+2. **1688 登入**：GUI 不再有登入鈕（2026-09-19 拿掉），只顯示狀態。
+   **Mac**：cookie-hub 每小時從 Chrome「訂貨-」設定檔收進標準庫；過期就到該設定檔登入 1688。
+   ⚠️ **Windows 沒有收割器**（Chrome App-Bound 加密讀不到）→ 過期要改去 cookie-hub 警衛室
+   （或 1688-order 主視窗的 🔑 登入）手動登一次，寫進標準庫後本 GUI 才讀得到。
+   詳見 `docs/公司Windows執行環境.md`。
 3. **🔍 抓取商品** → 勾選商品的 item_id → `playwright_scraper.scrape_many`
    （Playwright+cookie+stealth，共用一個瀏覽器逐頁抓）→ 存 `output/{item_id}.json`。
    抓到 0 主圖 = cookie 過期/被擋 → 彈窗提示重登。
 4. **▶ 產出 Excel** → `batch_pipeline2.run_batch_two_tier(products=勾選的)`（= `batch2`，Claude
    文案+變體+影片 → 合併蝦皮二階 Excel）。缺 JSON / 無分類的編號會先彈窗提醒。
-5. **📁 開素材夾** → 開 `output/上架素材/`（影片+尺寸表，蝦皮 Excel 無影片欄，手動補）。
+5. **📁 這批的資料夾** → 開該批產出夾（影片+尺寸表，蝦皮 Excel 無影片欄，手動補）。
 
 執行緒模型同 launcher：worker thread 跑 `asyncio.new_event_loop()`，`root.after(0,…)` 回主緒更新 UI。
 深色模式配色沿用 launcher（`tk_setPalette` + 每 widget 明確 bg/fg，避免 macOS 撞色隱形）。
